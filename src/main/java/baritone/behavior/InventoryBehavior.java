@@ -19,11 +19,13 @@ package baritone.behavior;
 
 import baritone.Baritone;
 import baritone.api.event.events.TickEvent;
+import baritone.api.utils.Helper;
 import baritone.utils.ToolSet;
 import net.minecraft.block.Block;
 import net.minecraft.block.state.IBlockState;
 import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.init.Blocks;
+import net.minecraft.init.Items;
 import net.minecraft.inventory.ClickType;
 import net.minecraft.item.*;
 import net.minecraft.util.EnumFacing;
@@ -55,9 +57,30 @@ public final class InventoryBehavior extends Behavior {
         if (firstValidThrowaway() >= 9) { // aka there are none on the hotbar, but there are some in main inventory
             swapWithHotBar(firstValidThrowaway(), 8);
         }
+
+        int sword = swordSlot();
+        if (sword >= 9) {
+            swapWithHotBar(sword, 0);
+        }
+
         int pick = bestToolAgainst(Blocks.STONE, ItemPickaxe.class);
         if (pick >= 9) {
-            swapWithHotBar(pick, 0);
+            swapWithHotBar(pick, 1);
+        }
+
+        int spade = bestToolAgainst(Blocks.DIRT, ItemSpade.class);
+        if (spade >= 9) {
+            swapWithHotBar(spade, 2);
+        }
+
+        int axe = bestToolAgainst(Blocks.LOG, ItemAxe.class);
+        if (axe >= 9) {
+            swapWithHotBar(axe, 3);
+        }
+
+        int food = foodSlot();
+        if (food >= 9) {
+            swapWithHotBar(food, 4);
         }
     }
 
@@ -90,7 +113,12 @@ public final class InventoryBehavior extends Behavior {
     }
 
     private void swapWithHotBar(int inInventory, int inHotbar) {
-        ctx.playerController().windowClick(ctx.player().inventoryContainer.windowId, inInventory < 9 ? inInventory + 36 : inInventory, inHotbar, ClickType.SWAP, ctx.player());
+        //ctx.playerController().windowClick(ctx.player().inventoryContainer.windowId, inInventory < 9 ? inInventory + 36 : inInventory, inHotbar, ClickType.SWAP, ctx.player());
+
+        ctx.playerController().windowClick(ctx.player().inventoryContainer.windowId, inInventory, 0, ClickType.PICKUP, ctx.player());
+        ctx.playerController().windowClick(ctx.player().inventoryContainer.windowId, inHotbar + 36, 0, ClickType.PICKUP, ctx.player());
+        ctx.playerController().windowClick(ctx.player().inventoryContainer.windowId, inInventory, 0, ClickType.PICKUP, ctx.player());
+        Helper.mc.playerController.updateController();
     }
 
     private int firstValidThrowaway() { // TODO offhand idk
@@ -124,6 +152,43 @@ public final class InventoryBehavior extends Behavior {
             }
         }
         return bestInd;
+    }
+
+    private int swordSlot() {
+        NonNullList<ItemStack> invy = ctx.player().inventory.mainInventory;
+        for (int i = 0; i < invy.size(); i++) {
+            ItemStack stack = invy.get(i);
+            if (stack.isEmpty()) {
+                continue;
+            }
+            if (stack.getItem() instanceof ItemSword) {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private int foodSlot() {
+        NonNullList<ItemStack> invy = ctx.player().inventory.mainInventory;
+        int goldenCarrotSlot = -1;
+        int foodSlot = -1;
+        for (int i = 0; i < invy.size(); i++) {
+            ItemStack stack = invy.get(i);
+            if (stack.isEmpty()) {
+                continue;
+            }
+            if (stack.getItem() instanceof ItemAppleGold) {
+                return i;
+            }
+            if (Item.getIdFromItem(stack.getItem()) == Item.getIdFromItem(Items.GOLDEN_CARROT)) {
+                goldenCarrotSlot = i;
+            } else if (stack.getItem() instanceof ItemFood) {
+                foodSlot = i;
+            }
+        }
+
+        return goldenCarrotSlot != -1 ? goldenCarrotSlot : foodSlot;
     }
 
     public boolean hasGenericThrowaway() {

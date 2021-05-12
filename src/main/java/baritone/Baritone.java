@@ -25,14 +25,11 @@ import baritone.api.utils.Helper;
 import baritone.api.utils.IPlayerContext;
 import baritone.behavior.*;
 import baritone.cache.WorldProvider;
-import baritone.command.manager.CommandManager;
 import baritone.event.GameEventHandler;
 import baritone.process.*;
 import baritone.selection.SelectionManager;
-import baritone.utils.BlockStateInterface;
-import baritone.utils.GuiClick;
-import baritone.utils.InputOverrideHandler;
-import baritone.utils.PathingControlManager;
+import baritone.utils.*;
+import baritone.command.manager.CommandManager;
 import baritone.utils.player.PrimaryPlayerContext;
 import net.minecraft.client.Minecraft;
 
@@ -71,6 +68,7 @@ public class Baritone implements IBaritone {
     private MemoryBehavior memoryBehavior;
     private InventoryBehavior inventoryBehavior;
     private InputOverrideHandler inputOverrideHandler;
+    private NetherHighwayBuilderBehavior netherHighwayBuilderBehavior;
 
     private FollowProcess followProcess;
     private MineProcess mineProcess;
@@ -103,6 +101,7 @@ public class Baritone implements IBaritone {
             memoryBehavior = new MemoryBehavior(this);
             inventoryBehavior = new InventoryBehavior(this);
             inputOverrideHandler = new InputOverrideHandler(this);
+            netherHighwayBuilderBehavior = new NetherHighwayBuilderBehavior(this);
         }
 
         this.pathingControlManager = new PathingControlManager(this);
@@ -172,6 +171,10 @@ public class Baritone implements IBaritone {
     @Override
     public LookBehavior getLookBehavior() {
         return this.lookBehavior;
+    }
+
+    public NetherHighwayBuilderBehavior getNetherHighwayBuilderBehavior() {
+        return this.netherHighwayBuilderBehavior;
     }
 
     public ExploreProcess getExploreProcess() {

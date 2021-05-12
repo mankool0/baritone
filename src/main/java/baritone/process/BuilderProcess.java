@@ -25,10 +25,7 @@ import baritone.api.pathing.goals.GoalGetToBlock;
 import baritone.api.process.IBuilderProcess;
 import baritone.api.process.PathingCommand;
 import baritone.api.process.PathingCommandType;
-import baritone.api.schematic.FillSchematic;
-import baritone.api.schematic.SubstituteSchematic;
-import baritone.api.schematic.ISchematic;
-import baritone.api.schematic.IStaticSchematic;
+import baritone.api.schematic.*;
 import baritone.api.schematic.format.ISchematicFormat;
 import baritone.api.utils.BetterBlockPos;
 import baritone.api.utils.RayTraceUtils;
@@ -43,13 +40,17 @@ import baritone.utils.BlockStateInterface;
 import baritone.utils.NotificationHelper;
 import baritone.utils.PathingCommandContext;
 import baritone.utils.schematic.MapArtSchematic;
-import baritone.utils.schematic.SelectionSchematic;
 import baritone.utils.schematic.SchematicSystem;
+import baritone.utils.schematic.SelectionSchematic;
 import baritone.utils.schematic.schematica.SchematicaHelper;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.block.BlockAir;
 import net.minecraft.block.BlockLiquid;
+import net.minecraft.block.BlockObsidian;
 import net.minecraft.block.state.IBlockState;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.item.EntityBoat;
+import net.minecraft.entity.monster.EntityEnderman;
 import net.minecraft.init.Blocks;
 import net.minecraft.item.ItemBlock;
 import net.minecraft.item.ItemStack;
@@ -57,9 +58,11 @@ import net.minecraft.util.EnumFacing;
 import net.minecraft.util.Tuple;
 import net.minecraft.util.math.*;
 
+import javax.annotation.Nullable;
 import java.io.File;
 import java.io.FileInputStream;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 import static baritone.api.pathing.movement.ActionCosts.COST_INF;
@@ -77,6 +80,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private int layer;
     private int numRepeats;
     private List<IBlockState> approxPlaceable;
+    private List<BetterBlockPos> toBreakEntity = new ArrayList<>();
 
     public BuilderProcess(Baritone baritone) {
         super(baritone);
@@ -209,6 +213,18 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private Optional<Tuple<BetterBlockPos, Rotation>> toBreakNearPlayer(BuilderCalculationContext bcc) {
         BetterBlockPos center = ctx.playerFeet();
         BetterBlockPos pathStart = baritone.getPathingBehavior().pathStart();
+
+
+        for (BetterBlockPos pos : toBreakEntity) {
+            IBlockState curr = bcc.bsi.get0(pos);
+            if (curr.getBlock() != Blocks.AIR && !(curr.getBlock() instanceof BlockLiquid) && !valid(curr, Blocks.AIR.getDefaultState(), false)) {
+                Optional<Rotation> rot = RotationUtils.reachable(ctx.player(), pos, ctx.playerController().getBlockReachDistance());
+                if (rot.isPresent()) {
+                    return Optional.of(new Tuple<>(pos, rot.get()));
+                }
+            }
+        }
+
         for (int dx = -5; dx <= 5; dx++) {
             for (int dy = Baritone.settings().breakFromAbove.value ? -1 : 0; dy <= 5; dy++) {
                 for (int dz = -5; dz <= 5; dz++) {
@@ -447,7 +463,10 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             if (!Baritone.settings().buildRepeatSneaky.value) {
                 schematic.reset();
             }
-            logDirect("Repeating build in vector " + repeat + ", new origin is " + origin);
+
+            if (Baritone.settings().buildRepeatLog.value) {
+                logDirect("Repeating build in vector " + repeat + ", new origin is " + origin);
+            }
             return onTick(calcFailed, isSafeToCancel, recursions + 1);
         }
         if (Baritone.settings().distanceTrim.value) {
@@ -594,8 +613,25 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                         if (valid(bcc.bsi.get0(blockX, blockY, blockZ), schematic.desiredState(x, y, z, current, this.approxPlaceable), false)) {
                             observedCompleted.add(BetterBlockPos.longHash(blockX, blockY, blockZ));
                         } else {
-                            incorrectPositions.add(new BetterBlockPos(blockX, blockY, blockZ));
-                            observedCompleted.remove(BetterBlockPos.longHash(blockX, blockY, blockZ));
+                            WhiteBlackSchematic ourSchem = null;
+                            if (schematic instanceof CompositeSchematic) {
+                                if (((CompositeSchematic) schematic).getSchematic(x, y, z, current).schematic instanceof WhiteBlackSchematic) {
+                                    ourSchem = (WhiteBlackSchematic) ((CompositeSchematic) schematic).getSchematic(x, y, z, current).schematic;
+                                }
+                            }
+                            else if (schematic instanceof WhiteBlackSchematic) {
+                                ourSchem = (WhiteBlackSchematic) schematic;
+                            }
+                            IBlockState tempState = ctx.world().getBlockState(new BlockPos(blockX, blockY + 1, blockZ));
+                            if (ourSchem != null && ourSchem.isValidIfUnder() &&
+                                    tempState.isFullBlock()) {
+                                observedCompleted.add(BetterBlockPos.longHash(blockX, blockY, blockZ));
+                            }
+                            else {
+                                incorrectPositions.add(new BetterBlockPos(blockX, blockY, blockZ));
+                                observedCompleted.remove(BetterBlockPos.longHash(blockX, blockY, blockZ));
+                            }
+
                             if (incorrectPositions.size() > Baritone.settings().incorrectSize.value) {
                                 return;
                             }
@@ -617,6 +653,18 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         }
     }
 
+    public boolean checkNoEntityCollision(AxisAlignedBB bb, @Nullable Entity entityIgnore) {
+        List<Entity> list = ctx.world().getEntitiesWithinAABBExcludingEntity((Entity)null, bb);
+
+        for (Entity entity4 : list) {
+            if (!entity4.isDead && entity4.preventEntitySpawning && entity4 != entityIgnore) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private Goal assemble(BuilderCalculationContext bcc, List<IBlockState> approxPlaceable) {
         return assemble(bcc, approxPlaceable, false);
     }
@@ -627,10 +675,49 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         List<BetterBlockPos> sourceLiquids = new ArrayList<>();
         List<BetterBlockPos> flowingLiquids = new ArrayList<>();
         Map<IBlockState, Integer> missing = new HashMap<>();
+        AtomicBoolean liquidDetected = new AtomicBoolean(false);
+        AtomicBoolean entityDetected = new AtomicBoolean(false);
+        AtomicBoolean boatDetected = new AtomicBoolean(false);
         incorrectPositions.forEach(pos -> {
             IBlockState state = bcc.bsi.get0(pos);
             if (state.getBlock() instanceof BlockAir) {
-                if (approxPlaceable.contains(bcc.getSchematic(pos.x, pos.y, pos.z, state))) {
+                // Mine out blocks below if entity in the way
+                toBreakEntity.clear();
+                if (!checkNoEntityCollision(new AxisAlignedBB(pos), mc.player)) {
+                    entityDetected.set(true);
+                    int xSize = 1;
+                    int zSize = 1;
+                    int ySize = 2;
+                    boolean mineObby = false;
+                    List<Entity> entityList = ctx.world().getEntitiesWithinAABBExcludingEntity((Entity)null, new AxisAlignedBB(pos));
+                    for (Entity entity : entityList) {
+                        if (entity instanceof EntityEnderman) {
+                            ySize = 3;
+                        }
+                        else if (entity instanceof EntityBoat) {
+                            //xSize = 2;
+                            //ySize = 2;
+                            //mineObby = true;
+                            // can't do boats lol
+                            boatDetected.set(true);
+                        }
+                    }
+                    for (int x = -xSize; x <= xSize; x++) {
+                        for (int z = -zSize; z <= zSize; z++) {
+                            for (int y = -ySize; y <= 0; y++) {
+                                IBlockState lowerState = bcc.bsi.get0(pos.add(x, y, z));
+                                if (lowerState.getBlock() instanceof BlockObsidian && !mineObby) {
+                                    continue;
+                                }
+                                if (!(lowerState.getBlock() instanceof BlockAir) && !(lowerState.getBlock() instanceof BlockLiquid)) {
+                                    breakable.add(new BetterBlockPos(pos.add(x, y, z)));
+                                    toBreakEntity.add(new BetterBlockPos(pos.add(x, y, z)));
+                                }
+                            }
+                        }
+                    }
+                }
+                else if (approxPlaceable.contains(bcc.getSchematic(pos.x, pos.y, pos.z, state))) {
                     placeable.add(pos);
                 } else {
                     IBlockState desired = bcc.getSchematic(pos.x, pos.y, pos.z, state);
@@ -644,6 +731,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                         // if it's a source block then we want to replace it with a throwaway
                         sourceLiquids.add(pos);
                     } else {
+                        if (Baritone.settings().placeOnFlowingLiquid.value) {
+                            sourceLiquids.add(pos);
+                        }
                         flowingLiquids.add(pos);
                     }
                 } else {
@@ -651,7 +741,23 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                 }
             }
         });
+
+        if (boatDetected.get()) {
+            return null;
+        }
+
+        if (!breakable.isEmpty()) {
+            placeable.clear();
+        }
+
         List<Goal> toBreak = new ArrayList<>();
+        if (entityDetected.get()) {
+            toBreakEntity.forEach(pos -> toBreak.add(breakGoal(pos, bcc)));
+            if (!toBreak.isEmpty()) {
+                return new GoalComposite(toBreak.toArray(new Goal[0]));
+            }
+        }
+
         breakable.forEach(pos -> toBreak.add(breakGoal(pos, bcc)));
         List<Goal> toPlace = new ArrayList<>();
         placeable.forEach(pos -> {
@@ -880,6 +986,16 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
 
         private IBlockState getSchematic(int x, int y, int z, IBlockState current) {
             if (schematic.inSchematic(x - originX, y - originY, z - originZ, current)) {
+
+                // Case of special schematic
+                if (schematic instanceof CompositeSchematic) {
+                    ISchematic ourSchem = ((CompositeSchematic)schematic).getSchematic(x - originX, y - originY, z - originZ, current).schematic;
+                    if (ourSchem instanceof WhiteBlackSchematic && ((WhiteBlackSchematic) ourSchem).isValidIfUnder() &&
+                            ctx.world().getBlockState(new BlockPos(x, y + 1, z)).isFullBlock()) {
+                        return current;
+                    }
+                }
+
                 return schematic.desiredState(x - originX, y - originY, z - originZ, current, BuilderProcess.this.approxPlaceable);
             } else {
                 return null;

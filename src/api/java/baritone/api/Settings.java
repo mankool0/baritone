@@ -870,6 +870,16 @@ public final class Settings {
     public final Setting<Boolean> buildRepeatSneaky = new Setting<>(true);
 
     /**
+     * If this is true, when buildRepeat occurs the new information will be logged to chat
+     */
+    public final Setting<Boolean> buildRepeatLog = new Setting<>(false);
+
+    /**
+     * If this is true then BuilderProcess will try to place blocks over flowing liquids
+     */
+    public final Setting<Boolean> placeOnFlowingLiquid = new Setting<>(true);
+
+    /**
      * Allow standing above a block while mining it, in BuilderProcess
      * <p>
      * Experimental
@@ -1187,6 +1197,66 @@ public final class Settings {
      * Desktop notification on mine fail
      */
     public final Setting<Boolean> notificationOnMineFail = new Setting<>(true);
+
+    /**
+     * In ticks the minimum duration of fire resistance to have before going into lava
+     */
+    public final Setting<Integer> highwayFireRestMinDuration = new Setting<>(1200);
+
+    /**
+     * Pickaxe threshold for acquiring more pickaxes
+     */
+    public final Setting<Integer> highwayPicksThreshold = new Setting<>(1);
+
+    /**
+     * Pickaxes to keep in inventory while digging
+     */
+    public final Setting<Integer> highwayPicksToHaveDigging = new Setting<>(5);
+
+    /**
+     * Pickaxes to keep in inventory while paving
+     */
+    public final Setting<Integer> highwayPicksToHavePaving = new Setting<>(2);
+
+    /**
+     * Gapple threshold for acquiring more gapples
+     */
+    public final Setting<Integer> highwayGapplesThreshold = new Setting<>(8);
+
+    /**
+     * Minimum amount of gapples to stop looting
+     */
+    public final Setting<Integer> highwayGapplesToHave = new Setting<>(48);
+
+    /**
+     * Obsidian threshold for acquiring more obsidian
+     */
+    public final Setting<Integer> highwayObsidianThreshold = new Setting<>(32);
+
+    /**
+     * Pickaxes shulkers to have in inventory during looting
+     */
+    public final Setting<Integer> highwayPickShulksToHave = new Setting<>(1);
+
+    /**
+     * Ender chest shulkers to have in inventory during looting
+     */
+    public final Setting<Integer> highwayEnderChestShulksToHave = new Setting<>(1);
+
+    /**
+     * Ender chests to loot for obsidian farming
+     */
+    public final Setting<Integer> highwayEnderChestsToLoot = new Setting<>(64);
+
+    /**
+     * Ender chests to keep in inventory and not mine
+     */
+    public final Setting<Integer> highwayEnderChestsToKeep = new Setting<>(8);
+
+    /**
+     * Max search distance for obsidian after mining ender chests
+     */
+    public final Setting<Double> highwayObsidianMaxSearchDist = new Setting<>(6D);
 
     /**
      * A map of lowercase setting field names to their respective setting
