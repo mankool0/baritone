@@ -487,36 +487,27 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 }
 
                 // TODO: Change shulker threshold from 0 to a customizable value
-                if (getShulkerCountInventory(ShulkerType.EnderChest) == 0 || getShulkerCountInventory(picksToUse) == 0) {
-                    if (repeatCheck) {
-                        if (!enderChestHasPickShulks && getShulkerCountInventory(picksToUse) == 0) {
-                            Helper.HELPER.logDirect("Out of picks, refill ender chest and inventory and restart.");
-                            paused = true;
-                            return;
-                        }
-
-                        if (!enderChestHasEnderShulks && getShulkerCountInventory(ShulkerType.EnderChest) == 0) {
-                            Helper.HELPER.logDirect("Out of ender chests, refill ender chest and inventory and restart.");
-                            paused = true;
-                            return;
-                        }
-
-                        Helper.HELPER.logDirect("Shulker count is under threshold, checking ender chest");
-                        currentState = State.LootEnderChestPlaceLocPrep;
-                        return;
-                    } else {
-                        Helper.HELPER.logDirect("Shulker count is under threshold. Player may still be loading. Waiting 120 ticks");
-                        timer = 0;
-                        repeatCheck = true;
-                    }
-                }
-
                 if (getItemCountInventory(Item.getIdFromItem(Item.getItemFromBlock(Blocks.OBSIDIAN))) <= Baritone.settings().highwayObsidianThreshold.value) {
                     if (getShulkerCountInventory(ShulkerType.EnderChest) == 0) {
-                        Helper.HELPER.logDirect("No more ender chests, pausing");
-                        baritone.getPathingBehavior().cancelEverything();
-                        paused = true;
+                        if (repeatCheck) {
+                            if (!enderChestHasEnderShulks) {
+                                Helper.HELPER.logDirect("Out of ender chests, refill ender chest and inventory and restart.");
+                                baritone.getPathingBehavior().cancelEverything();
+                                paused = true;
+                                return;
+                            }
+                            Helper.HELPER.logDirect("Shulker count is under threshold, checking ender chest");
+                            currentState = State.LootEnderChestPlaceLocPrep;
+                        } else {
+                            Helper.HELPER.logDirect("Shulker count is under threshold. Player may still be loading. Waiting 120 ticks");
+                            timer = 0;
+                            repeatCheck = true;
+                        }
                         return;
+                        //Helper.HELPER.logDirect("No more ender chests, pausing");
+                        //baritone.getPathingBehavior().cancelEverything();
+                        //paused = true;
+                        //return;
                     }
                     currentState = State.EchestMiningPlaceLocPrep;
                     baritone.getPathingBehavior().cancelEverything();
@@ -526,10 +517,25 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
                 if (getPickCountInventory() <= Baritone.settings().highwayPicksThreshold.value) {
                     if (getShulkerCountInventory(picksToUse) == 0) {
-                        Helper.HELPER.logDirect("No more pickaxes, pausing");
-                        baritone.getPathingBehavior().cancelEverything();
-                        paused = true;
+                        if (repeatCheck) {
+                            if (!enderChestHasPickShulks) {
+                                Helper.HELPER.logDirect("Out of picks, refill ender chest and inventory and restart.");
+                                baritone.getPathingBehavior().cancelEverything();
+                                paused = true;
+                                return;
+                            }
+                            Helper.HELPER.logDirect("Shulker count is under threshold, checking ender chest");
+                            currentState = State.LootEnderChestPlaceLocPrep;
+                        } else {
+                            Helper.HELPER.logDirect("Shulker count is under threshold. Player may still be loading. Waiting 120 ticks");
+                            timer = 0;
+                            repeatCheck = true;
+                        }
                         return;
+                        //Helper.HELPER.logDirect("No more pickaxes, pausing");
+                        //baritone.getPathingBehavior().cancelEverything();
+                        //paused = true;
+                        //return;
                     }
                     currentState = State.PickaxeShulkerPlaceLocPrep;
                     baritone.getPathingBehavior().cancelEverything();
@@ -1558,7 +1564,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 baritone.getPathingBehavior().cancelEverything();
                 Baritone.settings().buildRepeat.value = new Vec3i(0, 0, 0);
                 if (Helper.mc.world.getBlockState(placeLoc.down()).getBlock() instanceof BlockAir) {
-                    baritone.getBuilderProcess().build("supportBlock", new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, false), placeLoc);
+                    baritone.getBuilderProcess().build("supportBlock", new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, false), placeLoc.down());
                     return;
                 }
 
@@ -1638,10 +1644,10 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                         enderChestHasPickShulks = false;
                     }
 
-                    if (getItemCountInventory(Item.getIdFromItem(Items.AIR)) == 0) {
-                        Helper.HELPER.logDirect("No space for pickaxe shulkers. Rolling with what we have.");
-                        currentState = State.LootingLootEnderChestEnderChests;
-                    }
+                    //if (getItemCountInventory(Item.getIdFromItem(Items.AIR)) == 0) {
+                    //    Helper.HELPER.logDirect("No space for pickaxe shulkers. Rolling with what we have.");
+                    //    currentState = State.LootingLootEnderChestEnderChests;
+                    //}
 
                     timer = 0;
                 } else {
@@ -1673,11 +1679,11 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                         ctx.player().closeScreen();
                     }
 
-                    if (getItemCountInventory(Item.getIdFromItem(Items.AIR)) == 0) {
-                        Helper.HELPER.logDirect("No space for ender chest shulkers. Rolling with what we have.");
-                        currentState = State.LootingLootEnderChestGapples;
-                        ctx.player().closeScreen();
-                    }
+                    //if (getItemCountInventory(Item.getIdFromItem(Items.AIR)) == 0) {
+                    //    Helper.HELPER.logDirect("No space for ender chest shulkers. Rolling with what we have.");
+                    //    currentState = State.LootingLootEnderChestGapples;
+                    //    ctx.player().closeScreen();
+                    //}
 
                     timer = 0;
                 } else {
@@ -3260,7 +3266,22 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                         }
                 }
                 if (doLoot) {
-                    ctx.playerController().windowClick(curContainer.windowId, i, 0, ClickType.QUICK_MOVE, Helper.mc.player);
+                    if (getItemSlot(Item.getIdFromItem(Items.AIR)) == -1) {
+                        // For some reason we have no air slots so we have to throw out some netherrack
+                        int netherRackSlot = getItemSlot(Item.getIdFromItem(Item.getItemFromBlock(Blocks.NETHERRACK)));
+                        if (netherRackSlot == 8) {
+                            netherRackSlot = getItemSlotNoHotbar(Item.getIdFromItem(Item.getItemFromBlock(Blocks.NETHERRACK)));
+                        }
+                        if (netherRackSlot == -1) {
+                            return 0;
+                        }
+                        ctx.playerController().windowClick(curContainer.windowId, i, 0, ClickType.PICKUP, ctx.player());
+                        ctx.playerController().windowClick(curContainer.windowId, netherRackSlot < 9 ? netherRackSlot + 54 : netherRackSlot + 18, 0, ClickType.PICKUP, ctx.player()); // Have to convert slot id to single chest slot id
+                        ctx.playerController().windowClick(curContainer.windowId, -999, 0, ClickType.PICKUP, ctx.player());
+                    } else {
+                        // There's an air slot so we can just do a quick move
+                        ctx.playerController().windowClick(curContainer.windowId, i, 0, ClickType.QUICK_MOVE, mc.player);
+                    }
                     Helper.mc.playerController.updateController();
                     return 1;
                 }
