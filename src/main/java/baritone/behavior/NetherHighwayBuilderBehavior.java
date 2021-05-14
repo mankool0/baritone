@@ -295,18 +295,17 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 eChestEmptyShulkOriginVector = new Vec3d(startX, 0, startZ - 1);
             }
 
-
-            if (pave)
+            if (pave) {
                 obsidSchemBot = new FillSchematic(1, 1, 4, Blocks.OBSIDIAN.getDefaultState());
-                //obsidSchemBot = new WhiteBlackSchematic(1, 1, 4, Collections.singletonList(Blocks.OBSIDIAN.getDefaultState()), Blocks.OBSIDIAN.getDefaultState(), true, false);
-            else {
+                liqCheckSchem = new FillSchematic(1, 3, 6, Blocks.AIR.getDefaultState());
+                liqOriginVector = liqOriginVector.add(0, 0, 1);
+            } else {
                 obsidSchemBot = new WhiteBlackSchematic(1, 1, 4, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.OBSIDIAN.getDefaultState()), Blocks.AIR.getDefaultState(), true, false); // Allow only air and obisidian
                 supportNetherRack = new WhiteBlackSchematic(1, 1, 2, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true); // Allow everything other than air and lava
+                liqCheckSchem = new FillSchematic(1, 5, 8, Blocks.AIR.getDefaultState());
             }
                 
             topAir = new FillSchematic(1, 3, 4, Blocks.AIR.getDefaultState());
-
-            liqCheckSchem = new FillSchematic(1, 5, 8, Blocks.AIR.getDefaultState());
 
             if (!pave) {
                 fullSchem.put(noLavaBotSides, 0, 0, 1);
@@ -337,15 +336,17 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 eChestEmptyShulkOriginVector = new Vec3d(startX - 1, 0, startZ);
             }
 
-            if (pave)
+            if (pave) {
                 obsidSchemBot = new FillSchematic(4, 1, 1, Blocks.OBSIDIAN.getDefaultState());
-            else {
+                liqCheckSchem = new FillSchematic(6, 3, 1, Blocks.AIR.getDefaultState());
+                liqOriginVector = liqOriginVector.add(1, 0, 0);
+            } else {
                 obsidSchemBot = new WhiteBlackSchematic(4, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.OBSIDIAN.getDefaultState()), Blocks.AIR.getDefaultState(), true, false); // Allow only air and obisidian
                 supportNetherRack = new WhiteBlackSchematic(2, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true); // Allow everything other than air and lava
+                liqCheckSchem = new FillSchematic(8, 5, 1, Blocks.AIR.getDefaultState());
             }
 
             topAir = new FillSchematic(4, 3, 1, Blocks.AIR.getDefaultState());
-            liqCheckSchem = new FillSchematic(8, 5, 1, Blocks.AIR.getDefaultState());
 
             if (!pave) {
                 fullSchem.put(noLavaBotSides, 1, 0, 0);
@@ -677,6 +678,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     PotionEffect fireRest = ctx.player().getActivePotionEffect(MobEffects.FIRE_RESISTANCE);
                     if (fireRest == null || fireRest.getDuration() < Baritone.settings().highwayFireRestMinDuration.value || ctx.player().getFoodStats().getFoodLevel() <= 16) {
                         Helper.HELPER.logDirect("Eating a gapple.");
+                        sourceBlocks.clear(); // Should fix occasional crash after eating gapples
                         currentState = State.LiquidRemovalGapplePrep;
                         baritone.getInputOverrideHandler().clearAllKeys();
                         baritone.getPathingBehavior().cancelEverything();
@@ -745,7 +747,20 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 }
 
                 sourceBlocks.clear();
-                findSourceLiquid(liquidPos.getX(), liquidPos.getY(), liquidPos.getZ(), new ArrayList<>(), sourceBlocks);
+                ArrayList<BlockPos> flowingBlocks = new ArrayList<>();
+                findSourceLiquid(liquidPos.getX(), liquidPos.getY(), liquidPos.getZ(), new ArrayList<>(), sourceBlocks, flowingBlocks);
+                sourceBlocks.removeIf(blockPos -> (blockPos.getY() > 123)); // Remove all source blocks above Y 123 as it might be unreachable
+
+                // If sourceBlocks is empty we cleared it in the remove, want to fill in flowing lava at top bedrock level
+                if (sourceBlocks.isEmpty()) {
+                    for (BlockPos flowingPos : flowingBlocks) {
+                        if (flowingPos.getY() == 123) {
+                            //Helper.HELPER.logDirect("Lava source Y position too high, ignoring and adding " + flowingPos + " to list");
+                            sourceBlocks.add(flowingPos);
+                        }
+                    }
+                }
+
                 //int sizeBeforeRemove = sourceBlocks.size();
                 //sourceBlocks.removeIf(this::isLiquidCoveredAllSides); // Remove all liquids that are surrounded by blocks
                 //if (sizeBeforeRemove >= 1 && sourceBlocks.size() == 0) {
@@ -764,7 +779,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
                 placeLoc = getClosestPoint(new Vec3d(backPathOriginVector.x, backPathOriginVector.y, backPathOriginVector.z), new Vec3d(highwayDirection.x, highwayDirection.y, highwayDirection.z), curPos, LocationType.ShulkerEchestInteraction);
                 if (!sourceBlocks.isEmpty()) {// && )
-                    if (sourceBlocks.get(0).getY() - 3 >= 121) {
+                    //TODO: Might not need this
+                    if (sourceBlocks.get(0).getY() >= 124) {
                         placeLoc = new BlockPos(placeLoc.getX(), 121, placeLoc.getZ());
                     }
                     else if (sourceBlocks.get(0).getY() - 3 > 119) {
@@ -778,6 +794,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 } else {
                     currentState = State.LiquidRemovalPrepWait;
                 }
+
                 timer = 0;
                 break;
             }
@@ -879,6 +896,10 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             }
 
             case LiquidRemovalPathing: {
+                if (timer < 10) {
+                    return;
+                }
+
                 if (!sourceBlocks.isEmpty() && getIssueType(sourceBlocks.get(0)) == HighwayState.Blocks) {
                     baritone.getInputOverrideHandler().clearAllKeys();
                     currentState = State.LiquidRemovalPrep;
@@ -921,8 +942,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 Optional<Rotation> lavaReachable = Optional.empty();
 
                 // From MovementHelper.attemptToPlaceABlock
-                for (int i = 0; i < 5; i++) {
-                    BlockPos against1 = sourceBlocks.get(0).offset(HORIZONTALS_BUT_ALSO_DOWN_____SO_EVERY_DIRECTION_EXCEPT_UP[i]);
+                for (EnumFacing side : EnumFacing.values()) {//(int i = 0; i < 5; i++) {
+                    BlockPos against1 = sourceBlocks.get(0).offset(side); //sourceBlocks.get(0).offset(HORIZONTALS_BUT_ALSO_DOWN_____SO_EVERY_DIRECTION_EXCEPT_UP[i]);
                     if (MovementHelper.canPlaceAgainst(ctx, against1)) {
                         double faceX = (sourceBlocks.get(0).getX() + against1.getX() + 1.0D) * 0.5D;
                         double faceY = (sourceBlocks.get(0).getY() + against1.getY() + 0.5D) * 0.5D;
@@ -956,7 +977,6 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                         ctx.player().inventory.currentItem = netherRackSlot;
                         mc.playerController.updateController();
                     }
-
                     baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
                     //currentState = State.LiquidRemovalPrep;
                 } else {
@@ -1001,7 +1021,10 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                         }
                     }
 
-                    ArrayList<Rotation> belowFeetReachableList = new ArrayList<>();
+
+
+
+                    //ArrayList<Rotation> belowFeetReachableList = new ArrayList<>();
                     //Optional<Rotation> belowFeetReachable = Optional.empty();
                     for (BlockPos placeAt : placeAtList) {
                     //if (placeAt != null) {
@@ -1015,14 +1038,38 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                                 Rotation place = RotationUtils.calcRotationFromVec3d(ctx.playerHead(), new Vec3d(faceX, faceY, faceZ), ctx.playerRotations());
                                 RayTraceResult res = RayTraceUtils.rayTraceTowards(ctx.player(), place, ctx.playerController().getBlockReachDistance(), false);
                                 if (res != null && res.typeOfHit == RayTraceResult.Type.BLOCK && res.getBlockPos().equals(against1) && res.getBlockPos().offset(res.sideHit).equals(placeAt)) {
+                                    baritone.getLookBehavior().updateTarget(place, true);
+                                    baritone.getInputOverrideHandler().clearAllKeys();
+                                    int netherRackSlot = putItemHotbar(Item.getIdFromItem(Item.getItemFromBlock(Blocks.NETHERRACK)));
+                                    if (netherRackSlot == -1) {
+                                        Helper.HELPER.logDirect("Error getting netherrack slot");
+                                        currentState = State.Nothing;
+                                        return;
+                                    }
+                                    if (Item.getIdFromItem(ctx.player().inventory.mainInventory.get(netherRackSlot).getItem()) == Item.getIdFromItem(Item.getItemFromBlock(Blocks.NETHERRACK))) {
+                                        ctx.player().inventory.currentItem = netherRackSlot;
+                                        mc.playerController.updateController();
+                                    }
+
+                                    final Vec3d pos = new Vec3d(mc.player.lastTickPosX + (mc.player.posX - mc.player.lastTickPosX) * mc.getRenderPartialTicks(),
+                                            mc.player.lastTickPosY + (mc.player.posY - mc.player.lastTickPosY) * mc.getRenderPartialTicks(),
+                                            mc.player.lastTickPosZ + (mc.player.posZ - mc.player.lastTickPosZ) * mc.getRenderPartialTicks());
+                                    BlockPos orignPos = new BlockPos(pos.x, pos.y+0.5f, pos.z);
+                                    double l_Offset = pos.y - orignPos.getY();
+                                    if (place(placeAt, (float) ctx.playerController().getBlockReachDistance(), true, l_Offset == -0.5f, EnumHand.MAIN_HAND) == PlaceResult.Placed) {
+                                        timer = 0;
+                                        return;
+                                    }
+
                                     //belowFeetReachable = Optional.ofNullable(place);
-                                    belowFeetReachableList.add(place);
-                                    break;
+                                    //belowFeetReachableList.add(place);
+                                    //break;
                                 }
                             }
                         }
                     }
 
+                    /*
                     if (!belowFeetReachableList.isEmpty()) {
                         baritone.getLookBehavior().updateTarget(belowFeetReachableList.get(0), true);
                         baritone.getInputOverrideHandler().clearAllKeys();
@@ -1038,11 +1085,12 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                             mc.playerController.updateController();
                         }
 
+                        //TODO: Change this placing to use place method
                         //Helper.HELPER.logDirect("Placing " + placeAt);
                         baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
                         baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
                         return;
-                    }
+                    }*/
 
                     ArrayList<Rotation> possibleIssueReachableList = new ArrayList<>();
                     for (BlockPos curIssuePos : possibleIssuePosList) {
@@ -1060,9 +1108,17 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                         return;
                     }
 
-                    // Keep moving forward
+                    /*for (int x = -1; x <= 1; x++) {
+                        for (int z = -1; z <= 1; z++) {
+                            BlockPos tempLoc = new BlockPos(ctx.playerFeet().x + x, ctx.playerFeet().y - 1, ctx.playerFeet().z + z);
+                            if (getIssueType(tempLoc) != HighwayState.Blocks) {
+                                return; // No blocks under feet to walk to
+                            }
+                        }
+                    }*/
                     baritone.getLookBehavior().updateTarget(lavaRot, true);
                     baritone.getInputOverrideHandler().clearAllKeys();
+                    baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
                     baritone.getInputOverrideHandler().setInputForceState(Input.MOVE_FORWARD, true);
                 }
 
@@ -2839,41 +2895,44 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         return HighwayState.Blocks; // Not air and not liquids so it's some block
     }
 
-    private void findSourceLiquid(int x, int y, int z, ArrayList<BlockPos> checked, ArrayList<BlockPos> sourceBlocks) {
+    private void findSourceLiquid(int x, int y, int z, ArrayList<BlockPos> checked, ArrayList<BlockPos> sourceBlocks, ArrayList<BlockPos> flowingBlocks) {
         IBlockState curBlockState = ctx.world().getBlockState(new BlockPos(x, y, z));
 
         if (!(curBlockState.getBlock() instanceof BlockLiquid)) {
             return;
         }
 
-        if (curBlockState.getBlock() instanceof BlockLiquid && curBlockState.getValue(BlockLiquid.LEVEL) == 0) {
-            // Found source block
-            sourceBlocks.add(new BlockPos(x, y, z));
+        if (curBlockState.getBlock() instanceof BlockLiquid) {
+            if (curBlockState.getValue(BlockLiquid.LEVEL) == 0) {
+                sourceBlocks.add(new BlockPos(x, y, z));
+            } else {
+                flowingBlocks.add(new BlockPos(x, y, z));
+            }
         }
 
         if (!checked.contains(new BlockPos(x + 1, y, z))) {
             checked.add(new BlockPos(x + 1, y, z));
-            findSourceLiquid(x + 1, y, z, checked, sourceBlocks);
+            findSourceLiquid(x + 1, y, z, checked, sourceBlocks, flowingBlocks);
         }
 
         if (!checked.contains(new BlockPos(x - 1, y, z))) {
             checked.add(new BlockPos(x - 1, y, z));
-            findSourceLiquid(x - 1, y, z, checked, sourceBlocks);
+            findSourceLiquid(x - 1, y, z, checked, sourceBlocks, flowingBlocks);
         }
 
         if (!checked.contains(new BlockPos(x, y, z + 1))) {
             checked.add(new BlockPos(x, y, z + 1));
-            findSourceLiquid(x, y, z + 1, checked, sourceBlocks);
+            findSourceLiquid(x, y, z + 1, checked, sourceBlocks, flowingBlocks);
         }
 
         if (!checked.contains(new BlockPos(x, y, z - 1))) {
             checked.add(new BlockPos(x, y, z - 1));
-            findSourceLiquid(x, y, z - 1, checked, sourceBlocks);
+            findSourceLiquid(x, y, z - 1, checked, sourceBlocks, flowingBlocks);
         }
 
         if (!checked.contains(new BlockPos(x, y + 1, z))) {
             checked.add(new BlockPos(x, y + 1, z));
-            findSourceLiquid(x, y + 1, z, checked, sourceBlocks);
+            findSourceLiquid(x, y + 1, z, checked, sourceBlocks, flowingBlocks);
         }
     }
 
