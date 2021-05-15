@@ -20,8 +20,8 @@ package baritone.behavior;
 import baritone.Baritone;
 import baritone.api.BaritoneAPI;
 import baritone.api.behavior.INetherHighwayBuilderBehavior;
-import baritone.api.event.events.*;
-import baritone.api.event.events.type.EventState;
+import baritone.api.event.events.RenderEvent;
+import baritone.api.event.events.TickEvent;
 import baritone.api.pathing.goals.GoalBlock;
 import baritone.api.schematic.CompositeSchematic;
 import baritone.api.schematic.FillSchematic;
@@ -35,7 +35,6 @@ import baritone.utils.IRenderer;
 import net.minecraft.block.*;
 import net.minecraft.block.state.IBlockState;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.client.gui.inventory.GuiChest;
 import net.minecraft.client.gui.inventory.GuiShulkerBox;
 import net.minecraft.client.multiplayer.PlayerControllerMP;
@@ -44,7 +43,6 @@ import net.minecraft.enchantment.Enchantment;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.item.EntityBoat;
 import net.minecraft.entity.item.EntityItem;
-import net.minecraft.entity.monster.EntityEnderman;
 import net.minecraft.init.Blocks;
 import net.minecraft.init.Enchantments;
 import net.minecraft.init.Items;
@@ -55,7 +53,6 @@ import net.minecraft.inventory.ItemStackHelper;
 import net.minecraft.item.*;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.nbt.NBTTagList;
-import net.minecraft.network.Packet;
 import net.minecraft.network.play.client.CPacketAnimation;
 import net.minecraft.network.play.client.CPacketEntityAction;
 import net.minecraft.network.play.client.CPacketPlayer;
@@ -67,12 +64,13 @@ import net.minecraft.util.EnumHand;
 import net.minecraft.util.NonNullList;
 import net.minecraft.util.math.*;
 import net.minecraft.util.text.TextComponentString;
-import org.lwjgl.util.vector.Vector2f;
 
 import java.awt.*;
 import java.lang.reflect.Field;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -271,7 +269,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         ISchematic obsidSchemBot;
         FillSchematic topAir;
         WhiteBlackSchematic noLavaBotSides = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true);
-        WhiteBlackSchematic supportNetherRack = null;
+        WhiteBlackSchematic supportNetherRack;
         ISchematic sideRail;
         if (pave)
             sideRail = new FillSchematic(1, 1, 1, Blocks.OBSIDIAN.getDefaultState());
@@ -295,19 +293,15 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 eChestEmptyShulkOriginVector = new Vec3d(startX, 0, startZ - 1);
             }
 
+            topAir = new FillSchematic(1, 3, 4, Blocks.AIR.getDefaultState());
             if (pave) {
                 obsidSchemBot = new FillSchematic(1, 1, 4, Blocks.OBSIDIAN.getDefaultState());
                 liqCheckSchem = new FillSchematic(1, 3, 6, Blocks.AIR.getDefaultState());
                 liqOriginVector = liqOriginVector.add(0, 0, 1);
             } else {
-                obsidSchemBot = new WhiteBlackSchematic(1, 1, 4, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.OBSIDIAN.getDefaultState()), Blocks.AIR.getDefaultState(), true, false); // Allow only air and obisidian
+                obsidSchemBot = new WhiteBlackSchematic(1, 1, 4, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.OBSIDIAN.getDefaultState()), Blocks.AIR.getDefaultState(), true, false); // Allow only air and obsidian
                 supportNetherRack = new WhiteBlackSchematic(1, 1, 2, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true); // Allow everything other than air and lava
                 liqCheckSchem = new FillSchematic(1, 5, 8, Blocks.AIR.getDefaultState());
-            }
-                
-            topAir = new FillSchematic(1, 3, 4, Blocks.AIR.getDefaultState());
-
-            if (!pave) {
                 fullSchem.put(noLavaBotSides, 0, 0, 1);
                 fullSchem.put(noLavaBotSides, 0, 0, 4);
                 fullSchem.put(supportNetherRack, 0, 0, 2);
@@ -321,8 +315,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             fullSchem.put(topAir, 0, 2, 1);
         }
         // +Z and -Z
-        else if ((highwayDirection.x == 0 && highwayDirection.z == -1) ||
-                (highwayDirection.x == 0 && highwayDirection.z == 1)) {
+        else if (highwayDirection.x == 0 && (highwayDirection.z == -1 || highwayDirection.z == 1)) {
 
             if (selfSolve) {
                 originVector = new Vec3d(-3, 0, 0);
@@ -336,19 +329,15 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 eChestEmptyShulkOriginVector = new Vec3d(startX - 1, 0, startZ);
             }
 
+            topAir = new FillSchematic(4, 3, 1, Blocks.AIR.getDefaultState());
             if (pave) {
                 obsidSchemBot = new FillSchematic(4, 1, 1, Blocks.OBSIDIAN.getDefaultState());
                 liqCheckSchem = new FillSchematic(6, 3, 1, Blocks.AIR.getDefaultState());
                 liqOriginVector = liqOriginVector.add(1, 0, 0);
             } else {
-                obsidSchemBot = new WhiteBlackSchematic(4, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.OBSIDIAN.getDefaultState()), Blocks.AIR.getDefaultState(), true, false); // Allow only air and obisidian
+                obsidSchemBot = new WhiteBlackSchematic(4, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.OBSIDIAN.getDefaultState()), Blocks.AIR.getDefaultState(), true, false); // Allow only air and obsidian
                 supportNetherRack = new WhiteBlackSchematic(2, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true); // Allow everything other than air and lava
                 liqCheckSchem = new FillSchematic(8, 5, 1, Blocks.AIR.getDefaultState());
-            }
-
-            topAir = new FillSchematic(4, 3, 1, Blocks.AIR.getDefaultState());
-
-            if (!pave) {
                 fullSchem.put(noLavaBotSides, 1, 0, 0);
                 fullSchem.put(noLavaBotSides, 4, 0, 0);
                 fullSchem.put(supportNetherRack, 2, 0, 0);
@@ -360,6 +349,14 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             fullSchem.put(sideRailAir, 0, 3, 0);
             fullSchem.put(sideRailAir, 5, 3, 0);
             fullSchem.put(topAir, 1, 2, 0);
+        }
+        // +X,-Z and -X,+Z
+        else if ((highwayDirection.x == 1 && highwayDirection.z == -1) || (highwayDirection.x == -1 && highwayDirection.z == 1)) {
+
+        }
+        // +X,+Z and -X,-Z
+        else if ((highwayDirection.x == 1 && highwayDirection.z == 1) || (highwayDirection.x == -1 && highwayDirection.z == -1)) {
+
         }
 
         schematic = fullSchem;
@@ -437,13 +434,13 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     return;
                 } else {
                     if (Item.getIdFromItem(mc.player.inventory.getItemStack().getItem()) == Item.getIdFromItem(Item.getItemFromBlock(Blocks.NETHERRACK))) {
-                        // Netherack on our cursor, we can just throw it out
+                        // Netherrack on our cursor, we can just throw it out
                         ctx.playerController().windowClick(ctx.player().inventoryContainer.windowId, -999, 0, ClickType.PICKUP, ctx.player());
                         mc.playerController.updateController();
                         cursorStackNonEmpty = false;
                         return;
                     } else {
-                        // We don't have netherrack on our cursor, might be important so swap with netherack and throw away the netherack
+                        // We don't have netherrack on our cursor, might be important so swap with netherrack and throw away the netherrack
                         int netherRackSlot = getItemSlot(Item.getIdFromItem(Item.getItemFromBlock(Blocks.NETHERRACK)));
                         if (netherRackSlot == 8) {
                             netherRackSlot = getItemSlotNoHotbar(Item.getIdFromItem(Item.getItemFromBlock(Blocks.NETHERRACK)));
@@ -1054,8 +1051,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                                     final Vec3d pos = new Vec3d(mc.player.lastTickPosX + (mc.player.posX - mc.player.lastTickPosX) * mc.getRenderPartialTicks(),
                                             mc.player.lastTickPosY + (mc.player.posY - mc.player.lastTickPosY) * mc.getRenderPartialTicks(),
                                             mc.player.lastTickPosZ + (mc.player.posZ - mc.player.lastTickPosZ) * mc.getRenderPartialTicks());
-                                    BlockPos orignPos = new BlockPos(pos.x, pos.y+0.5f, pos.z);
-                                    double l_Offset = pos.y - orignPos.getY();
+                                    BlockPos originPos = new BlockPos(pos.x, pos.y+0.5f, pos.z);
+                                    double l_Offset = pos.y - originPos.getY();
                                     if (place(placeAt, (float) ctx.playerController().getBlockReachDistance(), true, l_Offset == -0.5f, EnumHand.MAIN_HAND) == PlaceResult.Placed) {
                                         timer = 0;
                                         return;
@@ -1129,7 +1126,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
 
             case PickaxeShulkerPlaceLocPrep: {
-                Vec3d curPos = new Vec3d(ctx.playerFeet().getX() + (7 * -highwayDirection.x), ctx.playerFeet().getY(), ctx.playerFeet().getZ() + (7 * -highwayDirection.z)); // Go back a bit just incase
+                Vec3d curPos = new Vec3d(ctx.playerFeet().getX() + (7 * -highwayDirection.x), ctx.playerFeet().getY(), ctx.playerFeet().getZ() + (7 * -highwayDirection.z)); // Go back a bit just in case
                 Vec3d direction = new Vec3d(highwayDirection.x, highwayDirection.y, highwayDirection.z);
 
                 placeLoc = getClosestPoint(new Vec3d(backPathOriginVector.x, backPathOriginVector.y, backPathOriginVector.z), direction, curPos, LocationType.ShulkerEchestInteraction);
@@ -1311,7 +1308,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
 
             case GappleShulkerPlaceLocPrep: {
-                Vec3d curPos = new Vec3d(ctx.playerFeet().getX() + (7 * -highwayDirection.x), ctx.playerFeet().getY(), ctx.playerFeet().getZ() + (7 * -highwayDirection.z)); // Go back a bit just incase
+                Vec3d curPos = new Vec3d(ctx.playerFeet().getX() + (7 * -highwayDirection.x), ctx.playerFeet().getY(), ctx.playerFeet().getZ() + (7 * -highwayDirection.z)); // Go back a bit just in case
                 Vec3d direction = new Vec3d(highwayDirection.x, highwayDirection.y, highwayDirection.z);
 
                 placeLoc = getClosestPoint(new Vec3d(backPathOriginVector.x, backPathOriginVector.y, backPathOriginVector.z), direction, curPos, LocationType.ShulkerEchestInteraction);
@@ -1538,7 +1535,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
 
             case ShulkerSearchPrep: {
-                Vec3d curPos = new Vec3d(ctx.playerFeet().getX() + (256 * -highwayDirection.x), ctx.playerFeet().getY(), ctx.playerFeet().getZ() + (256 * -highwayDirection.z)); // Go back a bit just incase
+                Vec3d curPos = new Vec3d(ctx.playerFeet().getX() + (256 * -highwayDirection.x), ctx.playerFeet().getY(), ctx.playerFeet().getZ() + (256 * -highwayDirection.z)); // Go back a bit just in case
                 Vec3d direction = new Vec3d(highwayDirection.x, highwayDirection.y, highwayDirection.z);
 
                 placeLoc = getClosestPoint(new Vec3d(backPathOriginVector.x, backPathOriginVector.y, backPathOriginVector.z), direction, curPos, LocationType.ShulkerEchestInteraction);
@@ -1585,7 +1582,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 }
 
                 Helper.HELPER.logDirect("LootEnderChestPlaceLocPrep");
-                Vec3d curPos = new Vec3d(ctx.playerFeet().getX() + (7 * -highwayDirection.x), ctx.playerFeet().getY(), ctx.playerFeet().getZ() + (7 * -highwayDirection.z)); // Go back a bit just incase
+                Vec3d curPos = new Vec3d(ctx.playerFeet().getX() + (7 * -highwayDirection.x), ctx.playerFeet().getY(), ctx.playerFeet().getZ() + (7 * -highwayDirection.z)); // Go back a bit just in case
                 Vec3d direction = new Vec3d(highwayDirection.x, highwayDirection.y, highwayDirection.z);
 
                 placeLoc = getClosestPoint(new Vec3d(eChestEmptyShulkOriginVector.x, eChestEmptyShulkOriginVector.y, eChestEmptyShulkOriginVector.z), direction, curPos, LocationType.SideStorage);
@@ -1760,7 +1757,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
 
             case EchestMiningPlaceLocPrep: {
-                Vec3d curPos = new Vec3d(ctx.playerFeet().getX() + (7 * -highwayDirection.x), ctx.playerFeet().getY(), ctx.playerFeet().getZ() + (7 * -highwayDirection.z)); // Go back a bit just incase
+                Vec3d curPos = new Vec3d(ctx.playerFeet().getX() + (7 * -highwayDirection.x), ctx.playerFeet().getY(), ctx.playerFeet().getZ() + (7 * -highwayDirection.z)); // Go back a bit just in case
                 Vec3d direction = new Vec3d(highwayDirection.x, highwayDirection.y, highwayDirection.z);
 
                 placeLoc = getClosestPoint(new Vec3d(backPathOriginVector.x, backPathOriginVector.y, backPathOriginVector.z), direction, curPos, LocationType.ShulkerEchestInteraction);
@@ -2059,8 +2056,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     final Vec3d pos = new Vec3d(mc.player.lastTickPosX + (mc.player.posX - mc.player.lastTickPosX) * mc.getRenderPartialTicks(),
                             mc.player.lastTickPosY + (mc.player.posY - mc.player.lastTickPosY) * mc.getRenderPartialTicks(),
                             mc.player.lastTickPosZ + (mc.player.posZ - mc.player.lastTickPosZ) * mc.getRenderPartialTicks());
-                    BlockPos orignPos = new BlockPos(pos.x, pos.y+0.5f, pos.z);
-                    double l_Offset = pos.y - orignPos.getY();
+                    BlockPos originPos = new BlockPos(pos.x, pos.y+0.5f, pos.z);
+                    double l_Offset = pos.y - originPos.getY();
                     PlaceResult l_Place = place(placeLoc, 5.0f, false, l_Offset == -0.5f, EnumHand.OFF_HAND);
 
                     if (l_Place != PlaceResult.Placed)
@@ -2205,7 +2202,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 }
 
                 Helper.HELPER.logDirect("EmptyShulkerPlaceLocPrep");
-                Vec3d curPos = new Vec3d(ctx.playerFeet().getX() + (7 * -highwayDirection.x), ctx.playerFeet().getY(), ctx.playerFeet().getZ() + (7 * -highwayDirection.z)); // Go back a bit just incase
+                Vec3d curPos = new Vec3d(ctx.playerFeet().getX() + (7 * -highwayDirection.x), ctx.playerFeet().getY(), ctx.playerFeet().getZ() + (7 * -highwayDirection.z)); // Go back a bit just in case
                 Vec3d direction = new Vec3d(highwayDirection.x, highwayDirection.y, highwayDirection.z);
 
                 placeLoc = getClosestPoint(new Vec3d(eChestEmptyShulkOriginVector.x, eChestEmptyShulkOriginVector.y, eChestEmptyShulkOriginVector.z), direction, curPos, LocationType.SideStorage);
@@ -2334,7 +2331,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 }
 
                 int depth = boatHasPassenger ? 3 : 1;
-                int yOffset = boatHasPassenger ? -4 : -2;
+                //int yOffset = boatHasPassenger ? -4 : -2;
                 //FillSchematic toClear = new FillSchematic(4, depth, 4, Blocks.AIR.getDefaultState());
                 baritone.getBuilderProcess().clearArea(boatLocation.add(2, 1, 2), boatLocation.add(-2, -depth, -2));
 
@@ -3183,8 +3180,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             final Vec3d pos = new Vec3d(mc.player.lastTickPosX + (mc.player.posX - mc.player.lastTickPosX) * mc.getRenderPartialTicks(),
                     mc.player.lastTickPosY + (mc.player.posY - mc.player.lastTickPosY) * mc.getRenderPartialTicks(),
                     mc.player.lastTickPosZ + (mc.player.posZ - mc.player.lastTickPosZ) * mc.getRenderPartialTicks());
-            BlockPos orignPos = new BlockPos(pos.x, pos.y+0.5f, pos.z);
-            double l_Offset = pos.y - orignPos.getY();
+            BlockPos originPos = new BlockPos(pos.x, pos.y+0.5f, pos.z);
+            double l_Offset = pos.y - originPos.getY();
             PlaceResult l_Place = place(shulkerPlaceLoc, 5.0f, false, l_Offset == -0.5f, EnumHand.MAIN_HAND);
         }
 
