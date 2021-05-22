@@ -1259,6 +1259,31 @@ public final class Settings {
     public final Setting<Double> highwayObsidianMaxSearchDist = new Setting<>(6D);
 
     /**
+     * If true will render all of the locations being scanned for liquids while building
+     */
+    public final Setting<Boolean> highwayRenderLiquidScanArea = new Setting<>(false);
+
+    /**
+     * The maximum distance Baritone should go back when looking for a lost shulker
+     */
+    public final Setting<Integer> highwayMaxLostShulkerSearchDist = new Setting<>(256);
+
+    /**
+     * If Baritone is stuck longer than this it'll try to fix
+     */
+    public final Setting<Integer> highwayStuckCheckTicks = new Setting<>(800);
+
+    /**
+     * Distance to check when checking if stuck
+     */
+    public final Setting<Integer> highwayStuckDistance = new Setting<>(5);
+
+    /**
+     * Disconnect from the server if lost some health
+     */
+    public final Setting<Boolean> highwayDcOnHealthLoss = new Setting<>(true);
+
+    /**
      * A map of lowercase setting field names to their respective setting
      */
     public final Map<String, Setting<?>> byLowerName;
