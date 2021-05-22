@@ -297,10 +297,10 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 backPathOriginVector = new Vec3d(0, 0, 0);
                 eChestEmptyShulkOriginVector = new Vec3d(0, 0, -4);
             } else {
-                originVector = new Vec3d(startX, 0, startZ);
-                liqOriginVector = new Vec3d(startX, 0, startZ - 1);
-                backPathOriginVector = new Vec3d(startX, 0, startZ + 3);
-                eChestEmptyShulkOriginVector = new Vec3d(startX, 0, startZ - 1);
+                originVector = new Vec3d(startX, 0, startZ - 3);
+                liqOriginVector = new Vec3d(startX, 0, startZ - 4);
+                backPathOriginVector = new Vec3d(startX, 0, startZ);
+                eChestEmptyShulkOriginVector = new Vec3d(startX, 0, startZ - 4);
             }
 
             topAir = new FillSchematic(1, 3, 4, Blocks.AIR.getDefaultState());
@@ -333,10 +333,10 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 backPathOriginVector = new Vec3d(0, 0, 0);
                 eChestEmptyShulkOriginVector = new Vec3d(-4, 0, 0);
             } else {
-                originVector = new Vec3d(startX, 0, startZ);
-                liqOriginVector = new Vec3d(startX - 1, 0, startZ);
-                backPathOriginVector = new Vec3d(startX + 3, 0, startZ);
-                eChestEmptyShulkOriginVector = new Vec3d(startX - 1, 0, startZ);
+                originVector = new Vec3d(startX - 3, 0, startZ);
+                liqOriginVector = new Vec3d(startX - 4, 0, startZ);
+                backPathOriginVector = new Vec3d(startX, 0, startZ);
+                eChestEmptyShulkOriginVector = new Vec3d(startX - 4, 0, startZ);
             }
 
             topAir = new FillSchematic(4, 3, 1, Blocks.AIR.getDefaultState());
