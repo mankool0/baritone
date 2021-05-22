@@ -25,6 +25,7 @@ import baritone.api.event.events.TickEvent;
 import baritone.api.pathing.goals.Goal;
 import baritone.api.pathing.goals.GoalBlock;
 import baritone.api.pathing.goals.GoalComposite;
+import baritone.api.pathing.goals.GoalGetToBlock;
 import baritone.api.schematic.CompositeSchematic;
 import baritone.api.schematic.FillSchematic;
 import baritone.api.schematic.ISchematic;
@@ -557,7 +558,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         }
 
         // Stuck check
-        if (baritone.getBuilderProcess().isActive() /*&& !baritone.getBuilderProcess().isPaused()*/ && stuckTimer >= settings.highwayStuckCheckTicks.value) {
+        if (/*baritone.getBuilderProcess().isActive() && !baritone.getBuilderProcess().isPaused() &&*/ stuckTimer >= settings.highwayStuckCheckTicks.value) {
             if (mc.currentScreen instanceof GuiChest) {
                 ctx.player().closeScreen(); // Close chest gui so we can actually build
                 stuckTimer = 0;
@@ -601,6 +602,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         // Health loss check
         if (settings.highwayDcOnHealthLoss.value && ctx.player().getHealth() < cachedHealth) {
             TextComponentString dcMsg = new TextComponentString("Lost " + (cachedHealth - ctx.player().getHealth()) + " health. Reconnect");
+            Helper.HELPER.logDirect(dcMsg);
             ctx.player().connection.getNetworkManager().closeChannel(dcMsg);
         }
         cachedHealth = ctx.player().getHealth(); // Get new HP value
@@ -3151,7 +3153,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             if (curStack.getItem() instanceof ItemPickaxe) {
                 foundPickaxe = true;
             } else if (!(curStack.getItem() instanceof ItemAir)) {
-                return false; // Found a non pickaxe and non air item
+                if (!settings.highwayAllowMixedShulks.value || !(curStack.getItem() instanceof ItemBlock) || !(((ItemBlock)curStack.getItem()).getBlock() instanceof BlockEnderChest)) {
+                    return false; // Found a non pickaxe and non air item
+                }
             }
         }
 
@@ -3171,7 +3175,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     return false;
                 }
             } else if (!(curStack.getItem() instanceof ItemAir)) {
-                return false; // Found a non pickaxe and non air item
+                if (!settings.highwayAllowMixedShulks.value || !(curStack.getItem() instanceof ItemBlock) || !(((ItemBlock)curStack.getItem()).getBlock() instanceof BlockEnderChest)) {
+                    return false; // Found a non pickaxe and non air item
+                }
             }
         }
 
@@ -3198,7 +3204,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         boolean foundEnderChest = false;
         for (ItemStack curStack : contents) {
             if (Item.getIdFromItem(curStack.getItem()) != Item.getIdFromItem(Items.AIR) && Item.getIdFromItem(curStack.getItem()) != Item.getIdFromItem(Item.getItemFromBlock(Blocks.ENDER_CHEST))) {
-                return false;
+                if (!settings.highwayAllowMixedShulks.value || !(curStack.getItem() instanceof ItemPickaxe)) {
+                    return false;
+                }
             }
 
             if (Item.getIdFromItem(curStack.getItem()) == Item.getIdFromItem(Item.getItemFromBlock(Blocks.ENDER_CHEST))) {

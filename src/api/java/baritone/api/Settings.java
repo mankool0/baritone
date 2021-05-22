@@ -1284,6 +1284,11 @@ public final class Settings {
     public final Setting<Boolean> highwayDcOnHealthLoss = new Setting<>(true);
 
     /**
+     * If true will treat shulkers with pickaxes and ender chests mixed as valid
+     */
+    public final Setting<Boolean> highwayAllowMixedShulks = new Setting<>(true);
+
+    /**
      * A map of lowercase setting field names to their respective setting
      */
     public final Map<String, Setting<?>> byLowerName;
