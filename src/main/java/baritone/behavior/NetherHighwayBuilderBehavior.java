@@ -586,7 +586,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 Helper.HELPER.logDirect("We haven't moved in " + settings.highwayStuckCheckTicks.value + " ticks. Restarting builder");
                 timer = 0;
                 stuckTimer = 0;
-                currentState = State.Nothing;
+                if (currentState == State.BuildingHighway) {
+                    currentState = State.Nothing;
+                }
                 ctx.player().connection.getNetworkManager().closeChannel(new TextComponentString("Haven't moved in " + settings.highwayStuckCheckTicks.value + " ticks. Reconnect"));
                 //ctx.world().sendQuittingDisconnectingPacket();
                 return;
