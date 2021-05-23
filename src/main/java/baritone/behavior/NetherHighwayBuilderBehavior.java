@@ -25,7 +25,6 @@ import baritone.api.event.events.TickEvent;
 import baritone.api.pathing.goals.Goal;
 import baritone.api.pathing.goals.GoalBlock;
 import baritone.api.pathing.goals.GoalComposite;
-import baritone.api.pathing.goals.GoalGetToBlock;
 import baritone.api.schematic.CompositeSchematic;
 import baritone.api.schematic.FillSchematic;
 import baritone.api.schematic.ISchematic;
@@ -277,14 +276,14 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
         ISchematic obsidSchemBot;
         FillSchematic topAir;
-        WhiteBlackSchematic noLavaBotSides = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true);
+        WhiteBlackSchematic noLavaBotSides = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true, true);
         WhiteBlackSchematic supportNetherRack;
         WhiteBlackSchematic sideRailSupport;
         ISchematic sideRail;
         if (pave)
             sideRail = new FillSchematic(1, 1, 1, Blocks.OBSIDIAN.getDefaultState());
         else
-            sideRail = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.OBSIDIAN.getDefaultState()), Blocks.AIR.getDefaultState(), true, false);
+            sideRail = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.OBSIDIAN.getDefaultState()), Blocks.AIR.getDefaultState(), true, false, false);
 
         FillSchematic sideRailAir = new FillSchematic(1, 2, 1, Blocks.AIR.getDefaultState());
         CompositeSchematic fullSchem = new CompositeSchematic(0, 0,0);
@@ -309,8 +308,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 liqCheckSchem = new FillSchematic(1, 3, 6, Blocks.AIR.getDefaultState());
                 liqOriginVector = liqOriginVector.add(0, 0, 1);
             } else {
-                obsidSchemBot = new WhiteBlackSchematic(1, 1, 4, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.OBSIDIAN.getDefaultState()), Blocks.AIR.getDefaultState(), true, false); // Allow only air and obsidian
-                supportNetherRack = new WhiteBlackSchematic(1, 1, 2, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true); // Allow everything other than air and lava
+                obsidSchemBot = new WhiteBlackSchematic(1, 1, 4, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.OBSIDIAN.getDefaultState()), Blocks.AIR.getDefaultState(), true, false, false); // Allow only air and obsidian
+                supportNetherRack = new WhiteBlackSchematic(1, 1, 2, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true, true); // Allow everything other than air and lava
                 liqCheckSchem = new FillSchematic(1, 5, 8, Blocks.AIR.getDefaultState());
                 fullSchem.put(noLavaBotSides, 0, 0, 1);
                 fullSchem.put(noLavaBotSides, 0, 0, 4);
@@ -345,8 +344,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 liqCheckSchem = new FillSchematic(6, 3, 1, Blocks.AIR.getDefaultState());
                 liqOriginVector = liqOriginVector.add(1, 0, 0);
             } else {
-                obsidSchemBot = new WhiteBlackSchematic(4, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.OBSIDIAN.getDefaultState()), Blocks.AIR.getDefaultState(), true, false); // Allow only air and obsidian
-                supportNetherRack = new WhiteBlackSchematic(2, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true); // Allow everything other than air and lava
+                obsidSchemBot = new WhiteBlackSchematic(4, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.OBSIDIAN.getDefaultState()), Blocks.AIR.getDefaultState(), true, false, false); // Allow only air and obsidian
+                supportNetherRack = new WhiteBlackSchematic(2, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true, true); // Allow everything other than air and lava
                 liqCheckSchem = new FillSchematic(8, 5, 1, Blocks.AIR.getDefaultState());
                 fullSchem.put(noLavaBotSides, 1, 0, 0);
                 fullSchem.put(noLavaBotSides, 4, 0, 0);
@@ -379,12 +378,12 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 obsidSchemBot = new FillSchematic(7, 1, 1, Blocks.OBSIDIAN.getDefaultState());
                 liqCheckSchem = new FillSchematic(9, 3, 1, Blocks.AIR.getDefaultState());
                 liqOriginVector = liqOriginVector.add(1, 0, 0);
-                sideRailSupport = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState(), Blocks.FIRE.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true);
+                sideRailSupport = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState(), Blocks.FIRE.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true, true);
                 fullSchem.put(sideRailSupport, 0, 1, 0);
                 fullSchem.put(sideRailSupport, 8, 1, 0);
             } else {
-                obsidSchemBot = new WhiteBlackSchematic(7, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.OBSIDIAN.getDefaultState()), Blocks.AIR.getDefaultState(), true, false); // Allow only air and obsidian
-                supportNetherRack = new WhiteBlackSchematic(5, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState(), Blocks.FIRE.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true); // Allow everything other than air and lava
+                obsidSchemBot = new WhiteBlackSchematic(7, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.OBSIDIAN.getDefaultState()), Blocks.AIR.getDefaultState(), true, false, false); // Allow only air and obsidian
+                supportNetherRack = new WhiteBlackSchematic(5, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState(), Blocks.FIRE.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true, true); // Allow everything other than air and lava
                 liqCheckSchem = new FillSchematic(11, 5, 1, Blocks.AIR.getDefaultState());
 
                 // Blocks around 2x2, and right below paved obby, don't want to be lava as someone might fall in
@@ -420,12 +419,12 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 obsidSchemBot = new FillSchematic(1, 1, 7, Blocks.OBSIDIAN.getDefaultState());
                 liqCheckSchem = new FillSchematic(1, 3, 9, Blocks.AIR.getDefaultState());
                 liqOriginVector = liqOriginVector.add(0, 0, 1);
-                sideRailSupport = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState(), Blocks.FIRE.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true);
+                sideRailSupport = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState(), Blocks.FIRE.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true, true);
                 fullSchem.put(sideRailSupport, 0, 1, 0);
                 fullSchem.put(sideRailSupport, 0, 1, 8);
             } else {
-                obsidSchemBot = new WhiteBlackSchematic(1, 1, 7, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.OBSIDIAN.getDefaultState()), Blocks.AIR.getDefaultState(), true, false); // Allow only air and obsidian
-                supportNetherRack = new WhiteBlackSchematic(1, 1, 5, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState(), Blocks.FIRE.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true); // Allow everything other than air and lava
+                obsidSchemBot = new WhiteBlackSchematic(1, 1, 7, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.OBSIDIAN.getDefaultState()), Blocks.AIR.getDefaultState(), true, false, false); // Allow only air and obsidian
+                supportNetherRack = new WhiteBlackSchematic(1, 1, 5, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState(), Blocks.FIRE.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true, true); // Allow everything other than air and lava
                 liqCheckSchem = new FillSchematic(1, 5, 11, Blocks.AIR.getDefaultState());
 
                 // Blocks around 2x2, and right below paved obby, don't want to be lava as someone might fall in
@@ -1772,7 +1771,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 baritone.getPathingBehavior().cancelEverything();
                 settings.buildRepeat.value = new Vec3i(0, 0, 0);
                 if (Helper.mc.world.getBlockState(placeLoc.down()).getBlock() instanceof BlockAir) {
-                    baritone.getBuilderProcess().build("supportBlock", new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, false), placeLoc.down());
+                    baritone.getBuilderProcess().build("supportBlock", new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, false, true), placeLoc.down());
                     return;
                 }
 
@@ -2411,7 +2410,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 baritone.getPathingBehavior().cancelEverything();
                 settings.buildRepeat.value = new Vec3i(0, 0, 0);
                 if (Helper.mc.world.getBlockState(placeLoc.down()).getBlock() instanceof BlockAir) {
-                    baritone.getBuilderProcess().build("supportBlock", new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, false), placeLoc.down());
+                    baritone.getBuilderProcess().build("supportBlock", new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, false, true), placeLoc.down());
                     return;
                 }
 
