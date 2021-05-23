@@ -857,7 +857,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             }
 
             case FloatingFix: {
-                int pickSlot = putItemHotbar(Item.getIdFromItem(Items.DIAMOND_PICKAXE));
+                int pickSlot = putPickaxeHotbar();
                 if (pickSlot == -1) {
                     Helper.HELPER.logDirect("Error getting pick slot");
                     currentState = State.Nothing;
@@ -1128,7 +1128,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
                     //currentState = State.LiquidRemovalPrep;
                 } else {
-                    int pickSlot = putItemHotbar(Item.getIdFromItem(Items.DIAMOND_PICKAXE));
+                    int pickSlot = putPickaxeHotbar();
                     if (pickSlot == -1) {
                         Helper.HELPER.logDirect("Error getting pick slot");
                         currentState = State.Nothing;
@@ -2150,7 +2150,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     return;
                 }
 
-                int pickSlot = putItemHotbar(Item.getIdFromItem(Items.DIAMOND_PICKAXE));
+                int pickSlot = putPickaxeHotbar();
                 if (pickSlot == -1) {
                     Helper.HELPER.logDirect("Error getting pick slot");
                     currentState = State.Nothing;
@@ -2187,7 +2187,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     timer = 0;
                 }
 
-                int pickSlot = putItemHotbar(Item.getIdFromItem(Items.DIAMOND_PICKAXE));
+                int pickSlot = putPickaxeHotbar();
                 if (ctx.player().inventory.currentItem != pickSlot) {
                     currentState = State.FarmingEnderChestPrepEchest;
                     timer = 0;
@@ -2866,6 +2866,30 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         return itemSlot;
     }
 
+    private int putPickaxeHotbar() {
+        int itemSlot = getPickaxeSlot();
+        if (itemSlot >= 9) {
+            baritone.getInventoryBehavior().attemptToPutOnHotbar(itemSlot, usefulSlots::contains);
+            itemSlot = getPickaxeSlot();
+        }
+
+        return itemSlot;
+    }
+
+    private int getPickaxeSlot() {
+        for (int i = 0; i < 36; i++) {
+            ItemStack stack = ctx.player().inventory.mainInventory.get(i);
+            if (stack.getItem() instanceof ItemPickaxe) {
+                if (settings.itemSaver.value && (stack.getItemDamage() + settings.itemSaverThreshold.value) >= stack.getMaxDamage() && stack.getMaxDamage() > 1) {
+                    continue;
+                }
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
     private ArrayList<BlockPos> highwayObsidToPlace() {
         ArrayList<BlockPos> toPlace = new ArrayList<>();
 
@@ -3153,6 +3177,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         boolean foundPickaxe = false;
         for (ItemStack curStack : contents) {
             if (curStack.getItem() instanceof ItemPickaxe) {
+                if (settings.itemSaver.value && (curStack.getItemDamage() + settings.itemSaverThreshold.value) >= curStack.getMaxDamage() && curStack.getMaxDamage() > 1) {
+                    continue;
+                }
                 foundPickaxe = true;
             } else if (!(curStack.getItem() instanceof ItemAir)) {
                 if (!settings.highwayAllowMixedShulks.value || !(curStack.getItem() instanceof ItemBlock) || !(((ItemBlock)curStack.getItem()).getBlock() instanceof BlockEnderChest)) {
@@ -3170,6 +3197,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         boolean foundPickaxe = false;
         for (ItemStack curStack : contents) {
             if (curStack.getItem() instanceof ItemPickaxe) {
+                if (settings.itemSaver.value && (curStack.getItemDamage() + settings.itemSaverThreshold.value) >= curStack.getMaxDamage() && curStack.getMaxDamage() > 1) {
+                    continue;
+                }
                 foundPickaxe = true;
 
                 if (hasEnchant(curStack, Enchantments.SILK_TOUCH)) {
@@ -3314,6 +3344,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         for (int i = 0; i < 36; i++) {
             ItemStack stack = ctx.player().inventory.mainInventory.get(i);
             if (stack.getItem() instanceof ItemPickaxe) {
+                if (settings.itemSaver.value && (stack.getItemDamage() + settings.itemSaverThreshold.value) >= stack.getMaxDamage() && stack.getMaxDamage() > 1) {
+                    continue;
+                }
                 count++;
             }
         }
@@ -3376,27 +3409,53 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         return currentState;
     }
 
+    private int getDepletedPickSlot() {
+        for (int i = 0; i < 36; i++) {
+            ItemStack stack = ctx.player().inventory.mainInventory.get(i);
+            if (stack.getItem() instanceof ItemPickaxe && (stack.getItemDamage() + settings.itemSaverThreshold.value) >= stack.getMaxDamage() && stack.getMaxDamage() > 1) {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
     private int lootPickaxeChestSlot() {
         Container curContainer = mc.player.openContainer;
         for (int i = 0; i < 27; i++) {
             if (curContainer.getSlot(i).getStack().getItem() instanceof ItemPickaxe) {
-                int airSlot = getItemSlot(Item.getIdFromItem(Items.AIR));
-                if (airSlot != -1) {
-                    ctx.playerController().windowClick(curContainer.windowId, i, 0, ClickType.QUICK_MOVE, ctx.player());
-                    mc.playerController.updateController();
-                    return 1;
+                // Don't loot depleted picks if we're using item saver mode
+                if (settings.itemSaver.value && (curContainer.getSlot(i).getStack().getItemDamage() + settings.itemSaverThreshold.value) >= curContainer.getSlot(i).getStack().getMaxDamage() && curContainer.getSlot(i).getStack().getMaxDamage() > 1) {
+                    continue;
                 }
+                int swapSlot = settings.itemSaver.value ? getDepletedPickSlot() : -1;
 
-                int netherRackSlot = getItemSlot(Item.getIdFromItem(Item.getItemFromBlock(Blocks.NETHERRACK)));
-                if (netherRackSlot == 8) {
-                    netherRackSlot = getItemSlotNoHotbar(Item.getIdFromItem(Item.getItemFromBlock(Blocks.NETHERRACK)));
+                // No depleted picks
+                if (swapSlot == -1) {
+                    int airSlot = getItemSlot(Item.getIdFromItem(Items.AIR));
+                    if (airSlot != -1) {
+                        ctx.playerController().windowClick(curContainer.windowId, i, 0, ClickType.QUICK_MOVE, ctx.player());
+                        mc.playerController.updateController();
+                        return 1;
+                    }
+
+                    swapSlot = getItemSlot(Item.getIdFromItem(Item.getItemFromBlock(Blocks.NETHERRACK)));
+                    if (swapSlot == 8) {
+                        swapSlot = getItemSlotNoHotbar(Item.getIdFromItem(Item.getItemFromBlock(Blocks.NETHERRACK)));
+                    }
+                    if (swapSlot == -1) {
+                        // Also didn't find any netherrack
+                        return 0;
+                    }
+                    ctx.playerController().windowClick(curContainer.windowId, i, 0, ClickType.PICKUP, ctx.player());
+                    ctx.playerController().windowClick(curContainer.windowId, swapSlot < 9 ? swapSlot + 54 : swapSlot + 18, 0, ClickType.PICKUP, ctx.player()); // Have to convert slot id to single chest slot id
+                    ctx.playerController().windowClick(curContainer.windowId, -999, 0, ClickType.PICKUP, ctx.player()); // Throw away netherrack
+                } else {
+                    // Swap new pickaxe with depleted
+                    ctx.playerController().windowClick(curContainer.windowId, i, 0, ClickType.PICKUP, ctx.player());
+                    ctx.playerController().windowClick(curContainer.windowId, swapSlot < 9 ? swapSlot + 54 : swapSlot + 18, 0, ClickType.PICKUP, ctx.player()); // Have to convert slot id to single chest slot id
+                    ctx.playerController().windowClick(curContainer.windowId, i, 0, ClickType.PICKUP, ctx.player()); // Put depleted pick in looted slot
                 }
-                if (netherRackSlot == -1) {
-                    return 0;
-                }
-                ctx.playerController().windowClick(curContainer.windowId, i, 0, ClickType.PICKUP, ctx.player());
-                ctx.playerController().windowClick(curContainer.windowId, netherRackSlot < 9 ? netherRackSlot + 54 : netherRackSlot + 18, 0, ClickType.PICKUP, ctx.player()); // Have to convert slot id to single chest slot id
-                ctx.playerController().windowClick(curContainer.windowId, -999, 0, ClickType.PICKUP, ctx.player());
                 mc.playerController.updateController();
                 return 1;
             }
