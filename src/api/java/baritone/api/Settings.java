@@ -1295,6 +1295,11 @@ public final class Settings {
     public final Setting<Boolean> highwayAllowMixedShulks = new Setting<>(true);
 
     /**
+     * If true will try to place a totem into an empty offhand during digging/paving
+     */
+    public final Setting<Boolean> highwayEmptyOffhandTotem = new Setting<>(false);
+
+    /**
      * A map of lowercase setting field names to their respective setting
      */
     public final Map<String, Setting<?>> byLowerName;

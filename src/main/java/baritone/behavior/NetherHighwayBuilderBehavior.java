@@ -500,6 +500,16 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         checkBackTimer++;
         stuckTimer++;
 
+        // Auto totem
+        if (settings.highwayEmptyOffhandTotem.value && currentState == State.BuildingHighway && mc.player.getHeldItemOffhand().getItem() instanceof ItemAir) {
+            int totemSlot = getItemSlot(Item.getIdFromItem(Items.TOTEM_OF_UNDYING));
+            if (totemSlot != -1) {
+                swapOffhand(totemSlot);
+                timer = 0;
+                return;
+            }
+        }
+
         if (!mc.player.inventory.getItemStack().isEmpty() && ctx.player().openContainer == ctx.player().inventoryContainer) {
             if (cursorStackNonEmpty && timer >= 20) {
                 // We have some item on our cursor for 20 ticks, try to place it somewhere
