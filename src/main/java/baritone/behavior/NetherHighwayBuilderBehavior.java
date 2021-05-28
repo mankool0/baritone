@@ -491,7 +491,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
     @Override
     public void onTick(TickEvent event) {
-        if (paused || schematic == null || mc.player == null || mc.player.inventory.isEmpty()) {
+        if (paused || schematic == null || mc.player == null || mc.player.inventory.isEmpty() || event.getType() == TickEvent.Type.OUT) {
             return;
         }
 
@@ -615,6 +615,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             TextComponentString dcMsg = new TextComponentString("Lost " + (cachedHealth - ctx.player().getHealth()) + " health. Reconnect");
             Helper.HELPER.logDirect(dcMsg);
             ctx.player().connection.getNetworkManager().closeChannel(dcMsg);
+            cachedHealth = ctx.player().getHealth();
+            return;
         }
         cachedHealth = ctx.player().getHealth(); // Get new HP value
 
@@ -1086,7 +1088,12 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                         getIssueType(sourceBlocks.get(0).west()) != HighwayState.Blocks &&
                         getIssueType(sourceBlocks.get(0).down()) != HighwayState.Blocks) {
                     // Location to place against are not blocks so lets find the closest surrounding block
-                    BlockPos tempSourcePos = closestAirBlockWithSideBlock(sourceBlocks.get(0), 5, false);
+                    BlockPos tempSourcePos = closestAirBlockWithSideBlock(sourceBlocks.get(0), 5, true);
+                    if (tempSourcePos == null) {
+                        Helper.HELPER.logDirect("Error finding support block during lava removal. Restarting.");
+                        currentState = State.Nothing;
+                        return;
+                    }
                     sourceBlocks.clear();
                     sourceBlocks.add(tempSourcePos);
                     supportNeeded = true;
@@ -2529,6 +2536,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         mc.playerController.windowClick(0, 45, 0, ClickType.PICKUP, mc.player);
         mc.playerController.windowClick(0, slot < 9 ? slot + 36 : slot, 0, ClickType.PICKUP, mc.player);
         mc.playerController.windowClick(0, 45, 0, ClickType.PICKUP, mc.player);
+        mc.playerController.updateController();
     }
 
     private boolean checkForNeighbours(BlockPos blockPos)
