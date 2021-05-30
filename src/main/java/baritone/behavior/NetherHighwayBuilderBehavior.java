@@ -970,7 +970,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
             case LiquidRemovalPathingBack: {
                 PotionEffect fireRest = ctx.player().getActivePotionEffect(MobEffects.FIRE_RESISTANCE);
-                if (fireRest != null && fireRest.getDuration() >= settings.highwayFireRestMinDuration.value /*&& ctx.playerFeet().getY() == placeLoc.getY()*/) {
+                if (fireRest != null && fireRest.getDuration() >= settings.highwayFireRestMinDuration.value && ctx.playerFeet().getY() == placeLoc.getY()) {
                     currentState = State.LiquidRemovalPathing;
                     KeyBinding.setKeyBindState(mc.gameSettings.keyBindUseItem.getKeyCode(), false);
                     baritone.getInputOverrideHandler().clearAllKeys();
