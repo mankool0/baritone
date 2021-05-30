@@ -3261,7 +3261,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 switch (shulkerType) {
                     case AnyPickaxe: {
                         int count = isPickaxeShulker(stack);
-                        if (count < bestSlotCount) {
+                        if (count > 0 && count < bestSlotCount) {
                             bestSlot = i;
                             bestSlotCount = count;
                         }
@@ -3270,7 +3270,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
                     case Gapple: {
                         int count = isGappleShulker(stack);
-                        if (count < bestSlotCount) {
+                        if (count > 0 && count < bestSlotCount) {
                             bestSlot = i;
                             bestSlotCount = count;
                         }
@@ -3279,7 +3279,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
                     case NonSilkPickaxe: {
                         int count = isNonSilkPickShulker(stack);
-                        if (count < bestSlotCount) {
+                        if (count > 0 && count < bestSlotCount) {
                             bestSlot = i;
                             bestSlotCount = count;
                         }
@@ -3288,7 +3288,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
                     case EnderChest: {
                         int count = isEnderChestShulker(stack);
-                        if (count < bestSlotCount) {
+                        if (count > 0 && count < bestSlotCount) {
                             bestSlot = i;
                             bestSlotCount = count;
                         }
