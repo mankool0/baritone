@@ -2774,12 +2774,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 yLevel = emptyShulkEchestY;
                 break;
         }
-        //forHighwayBuild ? highwayLowestY : mainHighwayY;
-        //if (paving && !forHighwayBuild) {
-        //    yLevel++;
-        //}
 
-        //Vec3d directBackup = new Vec3d(direction.x, direction.y, direction.z);
         // Never allow points behind the original starting location
         if (firstStartingPos != null &&
                 ((direction.z == -1 && point.z > firstStartingPos.z) || // NW, N, NE
@@ -2794,47 +2789,6 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         double dotP = lhs.dotProduct(direction);
         Vec3d closest = origin.add(direction.scale(dotP));
         return new BetterBlockPos(Math.round(closest.x), yLevel, Math.round(closest.z));
-        /*
-        boolean diag = direction.x != 0 && direction.z != 0;
-        direction = direction.normalize();
-
-        Vec3d lhs = point.subtract(origin);
-        //Vec3d lhs = new Vec3d(point.getX() - origin.getX(), point.getY() - origin.getY(), point.getZ() - origin.getZ()); //Vector2f.sub(point, origin, null);
-
-        double dotP = lhs.dotProduct(direction);
-        Vec3d scaled = direction.scale(dotP);
-        Vec3d closestPos =  origin.add(scaled); //new Vec3d(origin.getX() + scaled.x, origin.getY() + scaled.y, origin.getZ() + scaled.z);//  Vector2f.add(origin, direction.scale(dotP), null);
-
-        int iClosestPosX = (int) closestPos.x;
-        int iClosestPosZ = (int) closestPos.z;
-
-        if (directBackup.x == 0) {
-            if (iClosestPosX != origin.x) {
-                Helper.HELPER.logDirect("New X pos doesn't match origin: " + iClosestPosX + " Origin: " + origin.x);
-            }
-            iClosestPosX = (int) origin.x;
-        }
-        else if (directBackup.z == 0) {
-            if (iClosestPosZ != origin.z) {
-                Helper.HELPER.logDirect("New Z pos doesn't match origin: " + iClosestPosZ + " Origin: " + origin.z);
-            }
-            iClosestPosZ = (int) origin.z;
-        }
-
-        if (diag) {
-            int absX = Math.abs(iClosestPosX);
-            int absY = Math.abs(iClosestPosZ);
-            if ((absX + Math.abs(origin.x)) == (absY + Math.abs(origin.z))) {
-                return new BetterBlockPos(iClosestPosX, yLevel, iClosestPosZ);
-            } else {
-                Helper.HELPER.logDirect("Was an issue calculating start position. New position will be shifted from requested position");
-                Helper.HELPER.logDirect("Player position: " + ctx.playerFeet());
-                Helper.HELPER.logDirect("New start position: " + new BlockPos((absY + origin.x) * highwayDirection.x, yLevel, (absY + origin.z) * highwayDirection.z));
-                return new BetterBlockPos((absY + origin.x) * highwayDirection.x, yLevel, (absY + origin.z) * highwayDirection.z);
-            }
-        }
-        return new BetterBlockPos(iClosestPosX, yLevel, iClosestPosZ);
-        */
     }
 
     private int getLargestItemSlot(int itemId) {
@@ -3188,49 +3142,49 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         return contents;
     }
 
-    private boolean isPickaxeShulker(ItemStack shulker) {
+    private int isPickaxeShulker(ItemStack shulker) {
         NonNullList<ItemStack> contents = getShulkerContents(shulker);
 
-        boolean foundPickaxe = false;
+        int pickaxeCount = 0;
         for (ItemStack curStack : contents) {
             if (curStack.getItem() instanceof ItemPickaxe) {
                 if (settings.itemSaver.value && (curStack.getItemDamage() + settings.itemSaverThreshold.value) >= curStack.getMaxDamage() && curStack.getMaxDamage() > 1) {
                     continue;
                 }
-                foundPickaxe = true;
+                pickaxeCount++;
             } else if (!(curStack.getItem() instanceof ItemAir)) {
                 if (!settings.highwayAllowMixedShulks.value || !(curStack.getItem() instanceof ItemBlock) || !(((ItemBlock)curStack.getItem()).getBlock() instanceof BlockEnderChest)) {
-                    return false; // Found a non pickaxe and non air item
+                    return 0; // Found a non pickaxe and non air item
                 }
             }
         }
 
-        return foundPickaxe;
+        return pickaxeCount;
     }
 
-    private boolean isNonSilkPickShulker(ItemStack shulker) {
+    private int isNonSilkPickShulker(ItemStack shulker) {
         NonNullList<ItemStack> contents = getShulkerContents(shulker);
 
-        boolean foundPickaxe = false;
+        int pickaxeCount = 0;
         for (ItemStack curStack : contents) {
             if (curStack.getItem() instanceof ItemPickaxe) {
                 if (settings.itemSaver.value && (curStack.getItemDamage() + settings.itemSaverThreshold.value) >= curStack.getMaxDamage() && curStack.getMaxDamage() > 1) {
                     continue;
                 }
-                foundPickaxe = true;
+                pickaxeCount++;
 
                 if (hasEnchant(curStack, Enchantments.SILK_TOUCH)) {
                     // Pickaxe is enchanted with silk touch
-                    return false;
+                    return 0;
                 }
             } else if (!(curStack.getItem() instanceof ItemAir)) {
                 if (!settings.highwayAllowMixedShulks.value || !(curStack.getItem() instanceof ItemBlock) || !(((ItemBlock)curStack.getItem()).getBlock() instanceof BlockEnderChest)) {
-                    return false; // Found a non pickaxe and non air item
+                    return 0; // Found a non pickaxe and non air item
                 }
             }
         }
 
-        return foundPickaxe;
+        return pickaxeCount;
     }
 
     private boolean hasEnchant(ItemStack stack, Enchantment enchantment) {
@@ -3247,38 +3201,38 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         return false;
     }
 
-    private boolean isEnderChestShulker(ItemStack shulker) {
+    private int isEnderChestShulker(ItemStack shulker) {
         NonNullList<ItemStack> contents = getShulkerContents(shulker);
 
-        boolean foundEnderChest = false;
+        int enderChestCount = 0;
         for (ItemStack curStack : contents) {
             if (Item.getIdFromItem(curStack.getItem()) != Item.getIdFromItem(Items.AIR) && Item.getIdFromItem(curStack.getItem()) != Item.getIdFromItem(Item.getItemFromBlock(Blocks.ENDER_CHEST))) {
                 if (!settings.highwayAllowMixedShulks.value || !(curStack.getItem() instanceof ItemPickaxe)) {
-                    return false;
+                    return 0;
                 }
             }
 
             if (Item.getIdFromItem(curStack.getItem()) == Item.getIdFromItem(Item.getItemFromBlock(Blocks.ENDER_CHEST))) {
-                foundEnderChest = true;
+                enderChestCount++;
             }
         }
-        return foundEnderChest;
+        return enderChestCount;
     }
 
-    private boolean isGappleShulker(ItemStack shulker) {
+    private int isGappleShulker(ItemStack shulker) {
         NonNullList<ItemStack> contents = getShulkerContents(shulker);
 
-        boolean foundGapple = false;
+        int gappleCount = 0;
         for (ItemStack curStack : contents) {
             if (Item.getIdFromItem(curStack.getItem()) != Item.getIdFromItem(Items.AIR) && Item.getIdFromItem(curStack.getItem()) != Item.getIdFromItem(Items.GOLDEN_APPLE)) {
-                return false;
+                return 0;
             }
 
             if (Item.getIdFromItem(curStack.getItem()) == Item.getIdFromItem(Items.GOLDEN_APPLE)) {
-                foundGapple = true;
+                gappleCount++;
             }
         }
-        return foundGapple;
+        return gappleCount;
     }
 
     private boolean isEmptyShulker(ItemStack shulker) {
@@ -3296,6 +3250,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     }
 
     private int getShulkerSlot(ShulkerType shulkerType) {
+        int bestSlot = -1;
+        int bestSlotCount = Integer.MAX_VALUE;
         for (int i = 0; i < 36; i++) {
             ItemStack stack = ctx.player().inventory.mainInventory.get(i);
             if (stack.isEmpty() || !(stack.getItem() instanceof ItemBlock)) {
@@ -3303,40 +3259,53 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             }
             if (stack.getItem() instanceof ItemShulkerBox) {
                 switch (shulkerType) {
-                    case AnyPickaxe:
-                        if (isPickaxeShulker(stack)) {
-                            return i;
+                    case AnyPickaxe: {
+                        int count = isPickaxeShulker(stack);
+                        if (count < bestSlotCount) {
+                            bestSlot = i;
+                            bestSlotCount = count;
                         }
                         break;
+                    }
 
-                    case Gapple:
-                        if (isGappleShulker(stack)) {
-                            return i;
+                    case Gapple: {
+                        int count = isGappleShulker(stack);
+                        if (count < bestSlotCount) {
+                            bestSlot = i;
+                            bestSlotCount = count;
                         }
                         break;
+                    }
 
-                    case NonSilkPickaxe:
-                        if (isNonSilkPickShulker(stack)) {
-                            return i;
+                    case NonSilkPickaxe: {
+                        int count = isNonSilkPickShulker(stack);
+                        if (count < bestSlotCount) {
+                            bestSlot = i;
+                            bestSlotCount = count;
                         }
                         break;
+                    }
 
-                    case EnderChest:
-                        if (isEnderChestShulker(stack)) {
-                            return i;
+                    case EnderChest: {
+                        int count = isEnderChestShulker(stack);
+                        if (count < bestSlotCount) {
+                            bestSlot = i;
+                            bestSlotCount = count;
                         }
                         break;
+                    }
 
-                    case Empty:
+                    case Empty: {
                         if (isEmptyShulker(stack)) {
                             return i;
                         }
                         break;
+                    }
                 }
             }
         }
 
-        return -1;
+        return bestSlot;
     }
 
     private int getItemCountInventory(int itemId) {
@@ -3557,7 +3526,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 boolean doLoot = false;
                 switch (shulkerType) {
                     case EnderChest:
-                        if (isEnderChestShulker(stack)) {
+                        if (isEnderChestShulker(stack) > 0) {
                             doLoot = true;
                         }
                         break;
@@ -3569,19 +3538,19 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                         break;
 
                     case NonSilkPickaxe:
-                        if (isNonSilkPickShulker(stack)) {
+                        if (isNonSilkPickShulker(stack) > 0) {
                             doLoot = true;
                         }
                         break;
 
                     case Gapple:
-                        if (isGappleShulker(stack)) {
+                        if (isGappleShulker(stack) > 0) {
                             doLoot = true;
                         }
                         break;
 
                     case AnyPickaxe:
-                        if (isPickaxeShulker(stack)) {
+                        if (isPickaxeShulker(stack) > 0) {
                             doLoot = true;
                         }
                 }
@@ -3621,13 +3590,13 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             if (stack.getItem() instanceof ItemShulkerBox) {
                 switch (shulkerType) {
                     case AnyPickaxe:
-                        if (isPickaxeShulker(stack)) {
+                        if (isPickaxeShulker(stack) > 0) {
                             count++;
                         }
                         break;
 
                     case Gapple:
-                        if (isGappleShulker(stack)) {
+                        if (isGappleShulker(stack) > 0) {
                             count++;
                         }
                         break;
@@ -3639,13 +3608,13 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                         break;
 
                     case NonSilkPickaxe:
-                        if (isNonSilkPickShulker(stack)) {
+                        if (isNonSilkPickShulker(stack) > 0) {
                             count++;
                         }
                         break;
 
                     case EnderChest:
-                        if (isEnderChestShulker(stack)) {
+                        if (isEnderChestShulker(stack) > 0) {
                             count++;
                         }
                         break;
