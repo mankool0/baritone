@@ -611,7 +611,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         }
 
         // Health loss check
-        if (settings.highwayDcOnHealthLoss.value && ctx.player().getHealth() < cachedHealth) {
+        if (settings.highwayDcOnHealthLoss.value && ctx.player().getHealth() < cachedHealth &&
+                currentState != State.LiquidRemovalGapplePrep && currentState != State.LiquidRemovalGapplePreEat && currentState != State.LiquidRemovalGappleEat) {
             TextComponentString dcMsg = new TextComponentString("Lost " + (cachedHealth - ctx.player().getHealth()) + " health. Reconnect");
             Helper.HELPER.logDirect(dcMsg);
             ctx.player().connection.getNetworkManager().closeChannel(dcMsg);
@@ -978,6 +979,11 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     return;
                 }
 
+                IBlockState tempState = ctx.world().getBlockState(ctx.playerFeet());
+                if (tempState.getBlock() instanceof BlockLiquid) {
+                    Helper.HELPER.logDirect("We are stuck in lava, going directly to gapple eating.");
+                    currentState = State.LiquidRemovalGapplePrep;
+                }
                 if (baritone.getCustomGoalProcess().isActive()) {
                     return; // Wait to get there
                 }
