@@ -638,7 +638,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 if (walkBackTimer > 120 && baritone.getPathingControlManager().mostRecentCommand().isPresent()) {
                     walkBackTimer = 0;
                     boolean issueDetected = false;
-                    Goal ourGoal = baritone.getPathingBehavior().getGoal();
+                    Goal ourGoal = baritone.getPathingControlManager().mostRecentCommand().get().goal;
                     if (ourGoal instanceof GoalComposite) {
                         Goal[] goals = ((GoalComposite) ourGoal).goals();
                         for (Goal goal : goals) {
