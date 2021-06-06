@@ -1754,6 +1754,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             case LootEnderChestPlaceLocPrep: {
                 if (getItemCountInventory(Item.getIdFromItem(Item.getItemFromBlock(Blocks.ENDER_CHEST))) == 0) {
                     Helper.HELPER.logDirect("No ender chests, pausing");
+                    baritone.getPathingBehavior().cancelEverything();
                     paused = true;
                     return;
                 }
