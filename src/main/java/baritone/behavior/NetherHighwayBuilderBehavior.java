@@ -92,9 +92,6 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     private Vec3d eChestEmptyShulkOriginVector = new Vec3d(0, 0, 0);
     private Vec3d highwayDirection = new Vec3d(1, 0, -1);
     private boolean paving = false;
-    private final int highwayLowestY = 118;
-    private final int mainHighwayY = 119;
-    private final int emptyShulkEchestY = 121;
     public enum LocationType {
         HighwayBuild,
         ShulkerEchestInteraction,
@@ -938,15 +935,6 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 }
 
                 placeLoc = getClosestPoint(new Vec3d(backPathOriginVector.x, backPathOriginVector.y, backPathOriginVector.z), new Vec3d(highwayDirection.x, highwayDirection.y, highwayDirection.z), curPos, LocationType.ShulkerEchestInteraction);
-                if (!sourceBlocks.isEmpty()) {// && )
-                    //TODO: Might not need this
-                    if (sourceBlocks.get(0).getY() >= 124) {
-                        placeLoc = new BlockPos(placeLoc.getX(), 121, placeLoc.getZ());
-                    }
-                    else if (sourceBlocks.get(0).getY() - 3 > 119) {
-                        placeLoc = new BlockPos(placeLoc.getX(), sourceBlocks.get(0).getY() - 3, placeLoc.getZ());
-                    }
-                }
                 // Get closest point
                 if (!sourceBlocks.isEmpty()) {
                     baritone.getPathingBehavior().cancelEverything();
@@ -1268,7 +1256,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                         Optional<Rotation> curIssuePosReachable = RotationUtils.reachable(ctx.player(), curIssuePos, ctx.playerController().getBlockReachDistance());
                         IBlockState state = ctx.world().getBlockState(curIssuePos);
                         Block block = state.getBlock();
-                        if (block != Blocks.BEDROCK && !(block instanceof BlockLiquid) && !(block instanceof BlockAir) && curIssuePosReachable.isPresent() && curIssuePos.getY() >= 119) {
+                        if (block != Blocks.BEDROCK && !(block instanceof BlockLiquid) && !(block instanceof BlockAir) && curIssuePosReachable.isPresent() && curIssuePos.getY() >= settings.highwayMainY.value) {
                             possibleIssueReachableList.add(curIssuePosReachable.get());
                         }
                     }
@@ -2772,13 +2760,13 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         int yLevel = 120;
         switch (locType) {
             case HighwayBuild:
-                yLevel = highwayLowestY;
+                yLevel = settings.highwayLowestY.value;
                 break;
             case ShulkerEchestInteraction:
-                yLevel = paving ? mainHighwayY + 1 : mainHighwayY;
+                yLevel = paving ? settings.highwayMainY.value + 1 : settings.highwayMainY.value;
                 break;
             case SideStorage:
-                yLevel = emptyShulkEchestY;
+                yLevel = settings.highwayEmptyShulkEchestY.value;
                 break;
         }
 

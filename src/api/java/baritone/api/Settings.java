@@ -1300,6 +1300,21 @@ public final class Settings {
     public final Setting<Boolean> highwayEmptyOffhandTotem = new Setting<>(false);
 
     /**
+     * Base Y level of the highway schematic
+     */
+    public final Setting<Integer> highwayLowestY = new Setting<>(118);
+
+    /**
+     * Main Y level of the highway, where obsidian is placed
+     */
+    public final Setting<Integer> highwayMainY = new Setting<>(119);
+
+    /**
+     * Support Y level, where empty shulkers and echests for looting get placed
+     */
+    public final Setting<Integer> highwayEmptyShulkEchestY = new Setting<>(121);
+
+    /**
      * A map of lowercase setting field names to their respective setting
      */
     public final Map<String, Setting<?>> byLowerName;
