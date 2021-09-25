@@ -17,8 +17,7 @@
 
 package baritone.api;
 
-import baritone.api.behavior.ILookBehavior;
-import baritone.api.behavior.IPathingBehavior;
+import baritone.api.behavior.*;
 import baritone.api.cache.IWorldProvider;
 import baritone.api.command.manager.ICommandManager;
 import baritone.api.event.listener.IEventBus;
@@ -75,6 +74,12 @@ public interface IBaritone {
      * @see IFarmProcess
      */
     IFarmProcess getFarmProcess();
+
+    /**
+     * @return The {@link IMapBuilderBehavior} instance
+     * @see IMapBuilderBehavior
+     */
+    IMapBuilderBehavior getMapBuilderBehavior();
 
     /**
      * @return The {@link ICustomGoalProcess} instance

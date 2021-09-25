@@ -16,7 +16,7 @@
  */
 
 group 'baritone'
-version '1.2.15'
+version = getGitCommit()
 
 buildscript {
     repositories {
@@ -143,6 +143,33 @@ task proguard(type: ProguardTask) {
 }
 
 task createDist(type: CreateDistTask, dependsOn: proguard)
+
+def getGitCommit() {
+    def projectDirFile = new File("$projectDir")
+    def dotGit = new File(projectDirFile, ".git")
+    if (!dotGit.isDirectory()) return 'non-git build'
+
+    def cmd = 'git describe --always --tags --dirty=+'
+    def proc = cmd.execute(null, projectDirFile)
+    proc.waitForOrKill(10 * 1000)
+
+    def gitCommit = proc.text.trim().substring(1) // remove the 'v' prefix
+    assert !gitCommit.isEmpty()
+
+    def srCmd = 'git symbolic-ref --short HEAD' // find branch name
+    def srProc = srCmd.execute(null, projectDirFile)
+    srProc.waitForOrKill(10 * 1000)
+    if (srProc.exitValue() == 0) {
+        // Only add the information if the git command was
+        // successful. There may be no symbolic reference for HEAD if
+        // e.g. in detached mode.
+        def symbolicReference = srProc.text.trim()
+        assert !symbolicReference.isEmpty()
+        gitCommit += "-$symbolicReference"
+    }
+
+    gitCommit
+}
 
 build.finalizedBy(createDist)
 
