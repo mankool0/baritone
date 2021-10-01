@@ -17,8 +17,10 @@
 
 package baritone.api;
 
+import baritone.api.utils.NotificationHelper;
 import baritone.api.utils.SettingsUtil;
 import baritone.api.utils.TypeUtils;
+import baritone.api.utils.gui.BaritoneToast;
 import net.minecraft.block.Block;
 import net.minecraft.client.Minecraft;
 import net.minecraft.init.Blocks;
@@ -33,6 +35,7 @@ import java.lang.reflect.Type;
 import java.util.List;
 import java.util.*;
 import java.util.function.Consumer;
+import java.util.function.BiConsumer;
 
 /**
  * Baritone's settings. Settings apply to all Baritone instances.
@@ -597,6 +600,12 @@ public final class Settings {
     public final Setting<Boolean> renderGoal = new Setting<>(true);
 
     /**
+     * Render the goal as a sick animated thingy instead of just a box
+     * (also controls animation of GoalXZ if {@link #renderGoalXZBeacon} is enabled)
+     */
+    public final Setting<Boolean> renderGoalAnimated = new Setting<>(true);
+
+    /**
      * Render selection boxes
      */
     public final Setting<Boolean> renderSelectionBoxes = new Setting<>(true);
@@ -731,6 +740,11 @@ public final class Settings {
     public final Setting<Integer> itemSaverThreshold = new Setting<>(10);
 
     /**
+     * Durability to leave on the tool when using itemSaver
+     */
+    public final Setting<Integer> itemSaverThreshold = new Setting<>(10);
+
+    /**
      * Always prefer silk touch tools over regular tools. This will not sacrifice speed, but it will always prefer silk
      * touch tools over other tools of the same speed. This includes always choosing ANY silk touch tool over your hand.
      */
@@ -790,7 +804,7 @@ public final class Settings {
     public final Setting<Integer> allowOnlyExposedOresDistance = new Setting<>(1);
 
     /**
-     * When GetToBlock doesn't know any locations for the desired block, explore randomly instead of giving up.
+     * When GetToBlock or non-legit Mine doesn't know any locations for the desired block, explore randomly instead of giving up.
      */
     public final Setting<Boolean> exploreForBlocks = new Setting<>(true);
 
@@ -841,6 +855,11 @@ public final class Settings {
      * true = build from top to bottom
      */
     public final Setting<Boolean> layerOrder = new Setting<>(false);
+
+    /**
+     * How high should the individual layers be?
+     */
+    public final Setting<Integer> layerHeight = new Setting<>(1);
 
     /**
      * Start building the schematic at a specific layer.
@@ -993,6 +1012,7 @@ public final class Settings {
      * Disallow MineBehavior from using X-Ray to see where the ores are. Turn this option on to force it to mine "legit"
      * where it will only mine an ore once it can actually see it, so it won't do or know anything that a normal player
      * couldn't. If you don't want it to look like you're X-Raying, turn this on
+     * This will always explore, regardless of exploreForBlocks
      */
     public final Setting<Boolean> legitMine = new Setting<>(false);
 
@@ -1078,6 +1098,20 @@ public final class Settings {
      * {@link Setting#value};
      */
     public final Setting<Consumer<ITextComponent>> logger = new Setting<>(Minecraft.getMinecraft().ingameGUI.getChatGUI()::printChatMessage);
+
+    /**
+     * The function that is called when Baritone will send a desktop notification. This function can be added to
+     * via {@link Consumer#andThen(Consumer)} or it can completely be overriden via setting
+     * {@link Setting#value};
+     */
+    public final Setting<BiConsumer<String, Boolean>> notifier = new Setting<>(NotificationHelper::notify);
+
+    /**
+     * The function that is called when Baritone will show a toast. This function can be added to
+     * via {@link Consumer#andThen(Consumer)} or it can completely be overriden via setting
+     * {@link Setting#value};
+     */
+    public final Setting<BiConsumer<ITextComponent, ITextComponent>> toaster = new Setting<>(BaritoneToast::addOrUpdate);
 
     /**
      * The size of the box that is rendered when the current goal is a GoalYLevel
