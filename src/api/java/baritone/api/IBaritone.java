@@ -77,6 +77,12 @@ public interface IBaritone {
     IFarmProcess getFarmProcess();
 
     /**
+     * @return The {@link ICustomExploreProcess} instance
+     * @see ICustomExploreProcess
+     */
+    ICustomExploreProcess getCustomExploreProcess();
+
+    /**
      * @return The {@link ICustomGoalProcess} instance
      * @see ICustomGoalProcess
      */
