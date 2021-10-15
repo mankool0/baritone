@@ -15,8 +15,10 @@
  * along with Baritone.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package baritone.api.process;
+package baritone.api.behavior;
 
-public interface ICustomExploreProcess extends IBaritoneProcess {
+public interface ICustomExploreBehavior extends IBehavior {
     void explore(int pointsDist, int startX, int startZ, int endX, int endZ);
+
+    void stop();
 }

@@ -71,6 +71,7 @@ public class Baritone implements IBaritone {
     private MemoryBehavior memoryBehavior;
     private InventoryBehavior inventoryBehavior;
     private InputOverrideHandler inputOverrideHandler;
+    private CustomExploreBehavior customExploreBehavior;
 
     private FollowProcess followProcess;
     private MineProcess mineProcess;
@@ -80,7 +81,6 @@ public class Baritone implements IBaritone {
     private ExploreProcess exploreProcess;
     private BackfillProcess backfillProcess;
     private FarmProcess farmProcess;
-    private CustomExploreProcess customExploreProcess;
 
     private PathingControlManager pathingControlManager;
     private SelectionManager selectionManager;
@@ -104,6 +104,7 @@ public class Baritone implements IBaritone {
             memoryBehavior = new MemoryBehavior(this);
             inventoryBehavior = new InventoryBehavior(this);
             inputOverrideHandler = new InputOverrideHandler(this);
+            customExploreBehavior = new CustomExploreBehavior(this);
         }
 
         this.pathingControlManager = new PathingControlManager(this);
@@ -116,7 +117,6 @@ public class Baritone implements IBaritone {
             this.pathingControlManager.registerProcess(exploreProcess = new ExploreProcess(this));
             this.pathingControlManager.registerProcess(backfillProcess = new BackfillProcess(this));
             this.pathingControlManager.registerProcess(farmProcess = new FarmProcess(this));
-            this.pathingControlManager.registerProcess(customExploreProcess = new CustomExploreProcess(this));
         }
 
         this.worldProvider = new WorldProvider();
@@ -176,6 +176,11 @@ public class Baritone implements IBaritone {
         return this.lookBehavior;
     }
 
+    @Override
+    public CustomExploreBehavior getCustomExploreBehavior() {
+        return this.customExploreBehavior;
+    }
+
     public ExploreProcess getExploreProcess() {
         return this.exploreProcess;
     }
@@ -187,10 +192,6 @@ public class Baritone implements IBaritone {
 
     public FarmProcess getFarmProcess() {
         return this.farmProcess;
-    }
-
-    public CustomExploreProcess getCustomExploreProcess() {
-        return this.customExploreProcess;
     }
 
     @Override

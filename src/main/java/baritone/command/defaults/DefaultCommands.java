@@ -66,14 +66,18 @@ public final class DefaultCommands {
                 new WaypointsCommand(baritone),
                 new CommandAlias(baritone, "sethome", "Sets your home waypoint", "waypoints save home"),
                 new CommandAlias(baritone, "home", "Path to your home waypoint", "waypoints goto home"),
-                new SelCommand(baritone),
-                new CustomExploreCommand(baritone)
+                new SelCommand(baritone)
         ));
         ExecutionControlCommands prc = new ExecutionControlCommands(baritone);
         commands.add(prc.pauseCommand);
         commands.add(prc.resumeCommand);
         commands.add(prc.pausedCommand);
         commands.add(prc.cancelCommand);
+
+        CustomExploreCommands cec = new CustomExploreCommands(baritone);
+        commands.add(cec.customExploreStart);
+        commands.add(cec.customExploreStop);
+
         return Collections.unmodifiableList(commands);
     }
 }

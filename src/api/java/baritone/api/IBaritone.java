@@ -17,6 +17,7 @@
 
 package baritone.api;
 
+import baritone.api.behavior.ICustomExploreBehavior;
 import baritone.api.behavior.ILookBehavior;
 import baritone.api.behavior.IPathingBehavior;
 import baritone.api.cache.IWorldProvider;
@@ -47,6 +48,12 @@ public interface IBaritone {
     ILookBehavior getLookBehavior();
 
     /**
+     * @return The {@link ICustomExploreBehavior} instance
+     * @see ICustomExploreBehavior
+     */
+    ICustomExploreBehavior getCustomExploreBehavior();
+
+    /**
      * @return The {@link IFollowProcess} instance
      * @see IFollowProcess
      */
@@ -75,12 +82,6 @@ public interface IBaritone {
      * @see IFarmProcess
      */
     IFarmProcess getFarmProcess();
-
-    /**
-     * @return The {@link ICustomExploreProcess} instance
-     * @see ICustomExploreProcess
-     */
-    ICustomExploreProcess getCustomExploreProcess();
 
     /**
      * @return The {@link ICustomGoalProcess} instance
