@@ -73,6 +73,11 @@ public final class DefaultCommands {
         commands.add(prc.resumeCommand);
         commands.add(prc.pausedCommand);
         commands.add(prc.cancelCommand);
+
+        MapBuilderCommand mbc = new MapBuilderCommand(baritone);
+        commands.add(mbc.startCommand);
+        commands.add(mbc.stopCommand);
+
         return Collections.unmodifiableList(commands);
     }
 }

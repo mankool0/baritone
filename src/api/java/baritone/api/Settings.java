@@ -889,6 +889,11 @@ public final class Settings {
     public final Setting<Boolean> buildRepeatSneaky = new Setting<>(true);
 
     /**
+     * If this is true, when buildRepeat occurs the new information will be logged to chat
+     */
+    public final Setting<Boolean> buildRepeatLog = new Setting<>(false);
+
+    /**
      * Allow standing above a block while mining it, in BuilderProcess
      * <p>
      * Experimental

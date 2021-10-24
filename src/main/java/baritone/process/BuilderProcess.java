@@ -26,9 +26,9 @@ import baritone.api.process.IBuilderProcess;
 import baritone.api.process.PathingCommand;
 import baritone.api.process.PathingCommandType;
 import baritone.api.schematic.FillSchematic;
-import baritone.api.schematic.SubstituteSchematic;
 import baritone.api.schematic.ISchematic;
 import baritone.api.schematic.IStaticSchematic;
+import baritone.api.schematic.SubstituteSchematic;
 import baritone.api.schematic.format.ISchematicFormat;
 import baritone.api.utils.BetterBlockPos;
 import baritone.api.utils.RayTraceUtils;
@@ -42,8 +42,8 @@ import baritone.utils.BaritoneProcessHelper;
 import baritone.utils.BlockStateInterface;
 import baritone.utils.PathingCommandContext;
 import baritone.utils.schematic.MapArtSchematic;
-import baritone.utils.schematic.SelectionSchematic;
 import baritone.utils.schematic.SchematicSystem;
+import baritone.utils.schematic.SelectionSchematic;
 import baritone.utils.schematic.schematica.SchematicaHelper;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.block.BlockAir;
@@ -446,7 +446,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             if (!Baritone.settings().buildRepeatSneaky.value) {
                 schematic.reset();
             }
-            logDirect("Repeating build in vector " + repeat + ", new origin is " + origin);
+            if (Baritone.settings().buildRepeatLog.value) {
+                logDirect("Repeating build in vector " + repeat + ", new origin is " + origin);
+            }
             return onTick(calcFailed, isSafeToCancel, recursions + 1);
         }
         if (Baritone.settings().distanceTrim.value) {
@@ -519,9 +521,13 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                     layer++;
                     return onTick(calcFailed, isSafeToCancel, recursions + 1);
                 }
-                logDirect("Unable to do it. Pausing. resume to resume, cancel to cancel");
-                paused = true;
-                return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+                fullRecalc(bcc);
+                goal = assemble(bcc, approxPlaceable);
+                if (goal == null) {
+                    logDirect("Unable to do it. Pausing. resume to resume, cancel to cancel");
+                    paused = true;
+                    return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+                }
             }
         }
         return new PathingCommandContext(goal, PathingCommandType.FORCE_REVALIDATE_GOAL_AND_PATH, bcc);
@@ -616,11 +622,16 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         }
     }
 
+    public HashSet<BetterBlockPos> getIncorrectPositions() {
+        return incorrectPositions;
+    }
+
     private Goal assemble(BuilderCalculationContext bcc, List<IBlockState> approxPlaceable) {
         return assemble(bcc, approxPlaceable, false);
     }
 
     private Goal assemble(BuilderCalculationContext bcc, List<IBlockState> approxPlaceable, boolean logMissing) {
+        int debugvar = 0;
         List<BetterBlockPos> placeable = new ArrayList<>();
         List<BetterBlockPos> breakable = new ArrayList<>();
         List<BetterBlockPos> sourceLiquids = new ArrayList<>();
@@ -669,6 +680,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                 logDirect(missing.entrySet().stream()
                         .map(e -> String.format("%sx %s", e.getValue(), e.getKey()))
                         .collect(Collectors.joining("\n")));
+                debugvar++;
+                logDebug("debugvar = " + debugvar);
             }
             if (logMissing && !flowingLiquids.isEmpty()) {
                 logDirect("Unreplaceable liquids at at least:");
