@@ -70,10 +70,8 @@ import net.minecraft.util.text.TextComponentString;
 
 import java.awt.*;
 import java.lang.reflect.Field;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -134,8 +132,10 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     //private final double maxSearchDistance = 6;
     private final List<IBlockState> approxPlaceable = new ArrayList<IBlockState>() {};
 
-    private final Lock renderLock = new ReentrantLock();
-    private final ArrayList<BlockPos> renderBlocks = new ArrayList<>();
+    private final Lock renderLockLiquid = new ReentrantLock();
+    private final Lock renderLockBuilding = new ReentrantLock();
+    private final ArrayList<BlockPos> renderBlocksLiquid = new ArrayList<>();
+    private final HashMap<BlockPos, Color> renderBlocksBuilding = new HashMap<>();
     private final ArrayList<Rotation> floatingFixReachables = new ArrayList<>();
 
     private boolean instantMineActivated = false;
@@ -271,6 +271,16 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             picksToHave = settings.highwayPicksToHavePaving.value;
         }
 
+        int highwayWidth = settings.highwayWidth.value;
+        int highwayHeight = settings.highwayHeight.value;
+        int supportWidth = settings.highwaySupportWidth.value;
+        int supportOffset = settings.highwaySupportOffset.value;
+        boolean highwayRail = settings.highwayRail.value;
+        boolean diag = Math.abs(highwayDirection.x) == Math.abs(highwayDirection.z) && Math.abs(highwayDirection.z) == 1;
+        int highwayWidthOffset = -((Math.round(highwayWidth / 2.0f)) + 1);
+        int highwayWidthLiqOffset = -(Math.round(highwayWidth / 2.0f)) - 1;
+        int highwayWidthLiqOffsetRail = -(Math.round(highwayWidth / 2.0f)) - 2;
+
         ISchematic obsidSchemBot;
         FillSchematic topAir;
         WhiteBlackSchematic noLavaBotSides = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true, true);
@@ -285,170 +295,139 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         FillSchematic sideRailAir = new FillSchematic(1, 2, 1, Blocks.AIR.getDefaultState());
         CompositeSchematic fullSchem = new CompositeSchematic(0, 0,0);
 
-        // +X and -X
-        if (highwayDirection.z == 0 && (highwayDirection.x == -1 || highwayDirection.x == 1)) {
+        // +X, -X, +X +Z, -X -Z
+        if ((highwayDirection.z == 0 && (highwayDirection.x == -1 || highwayDirection.x == 1)) ||
+                (highwayDirection.x == 1 && highwayDirection.z == 1) || (highwayDirection.x == -1 && highwayDirection.z == -1)) {
             if (selfSolve) {
-                originVector = new Vec3d(0, 0, -3);
-                liqOriginVector = new Vec3d(0, 0, -4);
+                originVector = new Vec3d(0, 0, highwayWidthOffset);
+                if (highwayRail) {
+                    liqOriginVector = new Vec3d(0, 0, highwayWidthLiqOffsetRail);
+                } else {
+                    liqOriginVector = new Vec3d(0, 0, highwayWidthLiqOffset);
+                }
                 backPathOriginVector = new Vec3d(0, 0, 0);
-                eChestEmptyShulkOriginVector = new Vec3d(0, 0, -4);
+                eChestEmptyShulkOriginVector = new Vec3d(0, 0, highwayWidthLiqOffsetRail);
             } else {
-                originVector = new Vec3d(startX, 0, startZ - 3);
-                liqOriginVector = new Vec3d(startX, 0, startZ - 4);
+                originVector = new Vec3d(startX, 0, startZ - highwayWidthOffset);
+                if (highwayRail) {
+                    liqOriginVector = new Vec3d(startX, 0, startZ - highwayWidthLiqOffsetRail);
+                } else {
+                    liqOriginVector = new Vec3d(startX, 0, startZ - highwayWidthLiqOffset);
+                }
                 backPathOriginVector = new Vec3d(startX, 0, startZ);
-                eChestEmptyShulkOriginVector = new Vec3d(startX, 0, startZ - 4);
+                eChestEmptyShulkOriginVector = new Vec3d(startX, 0, startZ - highwayWidthLiqOffsetRail);
             }
 
-            topAir = new FillSchematic(1, 3, 4, Blocks.AIR.getDefaultState());
+            topAir = new FillSchematic(1, highwayHeight - 1, highwayWidth, Blocks.AIR.getDefaultState());
             if (pave) {
-                obsidSchemBot = new FillSchematic(1, 1, 4, Blocks.OBSIDIAN.getDefaultState());
-                liqCheckSchem = new FillSchematic(1, 3, 6, Blocks.AIR.getDefaultState());
+                obsidSchemBot = new FillSchematic(1, 1, highwayWidth, Blocks.OBSIDIAN.getDefaultState());
                 liqOriginVector = liqOriginVector.add(0, 0, 1);
+                if (highwayRail) {
+                    liqCheckSchem = new FillSchematic(1, highwayHeight - 1, highwayWidth + 2, Blocks.AIR.getDefaultState());
+                } else {
+                    liqCheckSchem = new FillSchematic(1, highwayHeight - 1, highwayWidth, Blocks.AIR.getDefaultState());
+                }
+
+                if (diag && highwayRail) {
+                    sideRailSupport = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState(), Blocks.FIRE.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true, true);
+                    fullSchem.put(sideRailSupport, 0, 1, 0);
+                    fullSchem.put(sideRailSupport, 0, 1, highwayWidth + 1);
+                }
             } else {
-                obsidSchemBot = new WhiteBlackSchematic(1, 1, 4, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.OBSIDIAN.getDefaultState()), Blocks.AIR.getDefaultState(), true, false, false); // Allow only air and obsidian
-                supportNetherRack = new WhiteBlackSchematic(1, 1, 2, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true, true); // Allow everything other than air and lava
-                liqCheckSchem = new FillSchematic(1, 5, 8, Blocks.AIR.getDefaultState());
-                fullSchem.put(noLavaBotSides, 0, 0, 1);
-                fullSchem.put(noLavaBotSides, 0, 0, 4);
-                fullSchem.put(supportNetherRack, 0, 0, 2);
+                obsidSchemBot = new WhiteBlackSchematic(1, 1, highwayWidth, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.OBSIDIAN.getDefaultState()), Blocks.AIR.getDefaultState(), true, false, false); // Allow only air and obsidian
+                supportNetherRack = new WhiteBlackSchematic(1, 1, supportWidth, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true, true); // Allow everything other than air and lava
+                if (highwayRail) {
+                    liqCheckSchem = new FillSchematic(1, highwayHeight + 1, highwayWidth + 4, Blocks.AIR.getDefaultState());
+                } else {
+                    liqCheckSchem = new FillSchematic(1, highwayHeight + 1, highwayWidth + 2, Blocks.AIR.getDefaultState());
+                }
+                if (supportWidth + 2 <= highwayWidth) {
+                    fullSchem.put(noLavaBotSides, 0, 0, 1);
+                    fullSchem.put(noLavaBotSides, 0, 0, highwayWidth);
+                }
+                fullSchem.put(supportNetherRack, 0, 0, supportOffset);
             }
 
             fullSchem.put(obsidSchemBot, 0, 1, 1);
-            fullSchem.put(sideRail, 0, 2, 0);
-            fullSchem.put(sideRail, 0, 2, 5);
-            fullSchem.put(sideRailAir, 0, 3, 0);
-            fullSchem.put(sideRailAir, 0, 3, 5);
+            if (highwayRail) {
+                fullSchem.put(sideRail, 0, 2, 0);
+                fullSchem.put(sideRail, 0, 2, highwayWidth + 1);
+                fullSchem.put(sideRailAir, 0, 3, 0);
+                fullSchem.put(sideRailAir, 0, 3, highwayWidth + 1);
+            }
             fullSchem.put(topAir, 0, 2, 1);
         }
-        // +Z and -Z
-        else if (highwayDirection.x == 0 && (highwayDirection.z == -1 || highwayDirection.z == 1)) {
-
+        // +Z, -Z, +X -Z, -X +Z
+        else if ((highwayDirection.x == 0 && (highwayDirection.z == -1 || highwayDirection.z == 1)) ||
+                (highwayDirection.x == 1 && highwayDirection.z == -1) || (highwayDirection.x == -1 && highwayDirection.z == 1)) {
             if (selfSolve) {
-                originVector = new Vec3d(-3, 0, 0);
-                liqOriginVector = new Vec3d(-4, 0, 0);
+                originVector = new Vec3d(highwayWidthOffset, 0, 0);
+                if (highwayRail) {
+                    liqOriginVector = new Vec3d(highwayWidthLiqOffsetRail, 0, 0);
+                } else {
+                    liqOriginVector = new Vec3d(highwayWidthLiqOffset, 0, 0);
+                }
                 backPathOriginVector = new Vec3d(0, 0, 0);
-                eChestEmptyShulkOriginVector = new Vec3d(-4, 0, 0);
+                eChestEmptyShulkOriginVector = new Vec3d(highwayWidthLiqOffsetRail, 0, 0);
             } else {
-                originVector = new Vec3d(startX - 3, 0, startZ);
-                liqOriginVector = new Vec3d(startX - 4, 0, startZ);
+                originVector = new Vec3d(startX - highwayWidthOffset, 0, startZ);
+                if (highwayRail) {
+                    liqOriginVector = new Vec3d(startX - highwayWidthLiqOffsetRail, 0, startZ);
+                } else {
+                    liqOriginVector = new Vec3d(startX - highwayWidthLiqOffset, 0, startZ);
+                }
                 backPathOriginVector = new Vec3d(startX, 0, startZ);
-                eChestEmptyShulkOriginVector = new Vec3d(startX - 4, 0, startZ);
+                eChestEmptyShulkOriginVector = new Vec3d(startX - highwayWidthLiqOffsetRail, 0, startZ);
             }
 
-            topAir = new FillSchematic(4, 3, 1, Blocks.AIR.getDefaultState());
+            topAir = new FillSchematic(highwayWidth, highwayHeight - 1, 1, Blocks.AIR.getDefaultState());
             if (pave) {
-                obsidSchemBot = new FillSchematic(4, 1, 1, Blocks.OBSIDIAN.getDefaultState());
-                liqCheckSchem = new FillSchematic(6, 3, 1, Blocks.AIR.getDefaultState());
+                obsidSchemBot = new FillSchematic(highwayWidth, 1, 1, Blocks.OBSIDIAN.getDefaultState());
                 liqOriginVector = liqOriginVector.add(1, 0, 0);
+                if (highwayRail) {
+                    liqCheckSchem = new FillSchematic(highwayWidth + 2, highwayHeight - 1, 1, Blocks.AIR.getDefaultState());
+                } else {
+                    liqCheckSchem = new FillSchematic(highwayWidth, highwayHeight - 1, 1, Blocks.AIR.getDefaultState());
+                }
+
+                if (diag && highwayRail) {
+                    sideRailSupport = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState(), Blocks.FIRE.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true, true);
+                    fullSchem.put(sideRailSupport, 0, 1, 0);
+                    fullSchem.put(sideRailSupport, highwayWidth + 1, 1, 0);
+                }
             } else {
-                obsidSchemBot = new WhiteBlackSchematic(4, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.OBSIDIAN.getDefaultState()), Blocks.AIR.getDefaultState(), true, false, false); // Allow only air and obsidian
-                supportNetherRack = new WhiteBlackSchematic(2, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true, true); // Allow everything other than air and lava
-                liqCheckSchem = new FillSchematic(8, 5, 1, Blocks.AIR.getDefaultState());
-                fullSchem.put(noLavaBotSides, 1, 0, 0);
-                fullSchem.put(noLavaBotSides, 4, 0, 0);
-                fullSchem.put(supportNetherRack, 2, 0, 0);
+                obsidSchemBot = new WhiteBlackSchematic(highwayWidth, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.OBSIDIAN.getDefaultState()), Blocks.AIR.getDefaultState(), true, false, false); // Allow only air and obsidian
+                supportNetherRack = new WhiteBlackSchematic(supportWidth, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true, true); // Allow everything other than air and lava
+                if (highwayRail) {
+                    liqCheckSchem = new FillSchematic(highwayWidth + 4, highwayHeight + 1, 1, Blocks.AIR.getDefaultState());
+                } else {
+                    liqCheckSchem = new FillSchematic(highwayWidth + 2, highwayHeight + 1, 1, Blocks.AIR.getDefaultState());
+                }
+                if (supportWidth + 2 <= highwayWidth) {
+                    fullSchem.put(noLavaBotSides, 1, 0, 0);
+                    fullSchem.put(noLavaBotSides, highwayWidth, 0, 0);
+                }
+
+                fullSchem.put(supportNetherRack, supportOffset, 0, 0);
             }
 
             fullSchem.put(obsidSchemBot, 1, 1, 0);
-            fullSchem.put(sideRail, 0, 2, 0);
-            fullSchem.put(sideRail, 5, 2, 0);
-            fullSchem.put(sideRailAir, 0, 3, 0);
-            fullSchem.put(sideRailAir, 5, 3, 0);
+            if (highwayRail) {
+                fullSchem.put(sideRail, 0, 2, 0);
+                fullSchem.put(sideRail, highwayWidth + 1, 2, 0);
+                fullSchem.put(sideRailAir, 0, 3, 0);
+                fullSchem.put(sideRailAir, highwayWidth + 1, 3, 0);
+            }
+
             fullSchem.put(topAir, 1, 2, 0);
-        }
-        // +X,-Z and -X,+Z
-        else if ((highwayDirection.x == 1 && highwayDirection.z == -1) || (highwayDirection.x == -1 && highwayDirection.z == 1)) {
-            if (selfSolve) {
-                originVector = new Vec3d(-5, 0, 0);
-                liqOriginVector = new Vec3d(-6, 0, 0);
-                backPathOriginVector = new Vec3d(0, 0, 0);
-                eChestEmptyShulkOriginVector = new Vec3d(-6, 0, 0);
-            } else {
-                originVector = new Vec3d(startX - 5, 0, startZ);
-                liqOriginVector = new Vec3d(startX - 6, 0, startZ);
-                backPathOriginVector = new Vec3d(startX, 0, startZ);
-                eChestEmptyShulkOriginVector = new Vec3d(startX - 6, 0, startZ);
-            }
-
-            topAir = new FillSchematic(7, 3, 1, Blocks.AIR.getDefaultState());
-            if (pave) {
-                obsidSchemBot = new FillSchematic(7, 1, 1, Blocks.OBSIDIAN.getDefaultState());
-                liqCheckSchem = new FillSchematic(9, 3, 1, Blocks.AIR.getDefaultState());
-                liqOriginVector = liqOriginVector.add(1, 0, 0);
-                sideRailSupport = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState(), Blocks.FIRE.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true, true);
-                fullSchem.put(sideRailSupport, 0, 1, 0);
-                fullSchem.put(sideRailSupport, 8, 1, 0);
-            } else {
-                obsidSchemBot = new WhiteBlackSchematic(7, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.OBSIDIAN.getDefaultState()), Blocks.AIR.getDefaultState(), true, false, false); // Allow only air and obsidian
-                supportNetherRack = new WhiteBlackSchematic(5, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState(), Blocks.FIRE.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true, true); // Allow everything other than air and lava
-                liqCheckSchem = new FillSchematic(11, 5, 1, Blocks.AIR.getDefaultState());
-
-                // Blocks around 2x2, and right below paved obby, don't want to be lava as someone might fall in
-                fullSchem.put(noLavaBotSides, 1, 0, 0);
-                fullSchem.put(noLavaBotSides, 7, 0, 0);
-
-                fullSchem.put(supportNetherRack, 2, 0, 0); // to walk on if digging through open nether, want a 2x2 path
-            }
-
-            fullSchem.put(obsidSchemBot, 1, 1, 0);
-            fullSchem.put(sideRail, 0, 2, 0);
-            fullSchem.put(sideRail, 8, 2, 0);
-            fullSchem.put(sideRailAir, 0, 3, 0);
-            fullSchem.put(sideRailAir, 8, 3, 0);
-            fullSchem.put(topAir, 1, 2, 0);
-        }
-        // +X,+Z and -X,-Z
-        else if ((highwayDirection.x == 1 && highwayDirection.z == 1) || (highwayDirection.x == -1 && highwayDirection.z == -1)) {
-            if (selfSolve) {
-                originVector = new Vec3d(0, 0, -4);
-                liqOriginVector = new Vec3d(0, 0, -5);
-                backPathOriginVector = new Vec3d(0, 0, 0);
-                eChestEmptyShulkOriginVector = new Vec3d(0, 0, -5);
-            } else {
-                originVector = new Vec3d(startX, 0, startZ - 4);
-                liqOriginVector = new Vec3d(startX, 0, startZ - 5);
-                backPathOriginVector = new Vec3d(startX, 0, startZ);
-                eChestEmptyShulkOriginVector = new Vec3d(startX, 0, startZ - 5);
-            }
-
-            topAir = new FillSchematic(1, 3, 7, Blocks.AIR.getDefaultState());
-            if (pave) {
-                obsidSchemBot = new FillSchematic(1, 1, 7, Blocks.OBSIDIAN.getDefaultState());
-                liqCheckSchem = new FillSchematic(1, 3, 9, Blocks.AIR.getDefaultState());
-                liqOriginVector = liqOriginVector.add(0, 0, 1);
-                sideRailSupport = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState(), Blocks.FIRE.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true, true);
-                fullSchem.put(sideRailSupport, 0, 1, 0);
-                fullSchem.put(sideRailSupport, 0, 1, 8);
-            } else {
-                obsidSchemBot = new WhiteBlackSchematic(1, 1, 7, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.OBSIDIAN.getDefaultState()), Blocks.AIR.getDefaultState(), true, false, false); // Allow only air and obsidian
-                supportNetherRack = new WhiteBlackSchematic(1, 1, 5, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState(), Blocks.FIRE.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true, true); // Allow everything other than air and lava
-                liqCheckSchem = new FillSchematic(1, 5, 11, Blocks.AIR.getDefaultState());
-
-                // Blocks around 2x2, and right below paved obby, don't want to be lava as someone might fall in
-                fullSchem.put(noLavaBotSides, 0, 0, 1);
-                fullSchem.put(noLavaBotSides, 0, 0, 7);
-
-                fullSchem.put(supportNetherRack, 0, 0, 2); // to walk on if digging through open nether, want a 2x2 path
-            }
-
-            fullSchem.put(obsidSchemBot, 0, 1, 1);
-            fullSchem.put(sideRail, 0, 2, 0);
-            fullSchem.put(sideRail, 0, 2, 8);
-            fullSchem.put(sideRailAir, 0, 3, 0);
-            fullSchem.put(sideRailAir, 0, 3, 8);
-            fullSchem.put(topAir, 0, 2, 1);
         }
 
         schematic = fullSchem;
 
-        //if (selfSolve) {
-            Vec3d origin = new Vec3d(originVector.x, originVector.y, originVector.z);
-            Vec3d direction = new Vec3d(highwayDirection.x, highwayDirection.y, highwayDirection.z);
-            Vec3d curPos = new Vec3d(ctx.playerFeet().getX(), ctx.playerFeet().getY(), ctx.playerFeet().getZ());
-            originBuild = getClosestPoint(origin, direction, curPos, LocationType.HighwayBuild);
-        //} else {
-        //    originBuild = new BetterBlockPos(startX, highwayLowestY, startZ);
-        //}
+        Vec3d origin = new Vec3d(originVector.x, originVector.y, originVector.z);
+        Vec3d direction = new Vec3d(highwayDirection.x, highwayDirection.y, highwayDirection.z);
+        Vec3d curPos = new Vec3d(ctx.playerFeet().getX(), ctx.playerFeet().getY(), ctx.playerFeet().getZ());
+        originBuild = getClosestPoint(origin, direction, curPos, LocationType.HighwayBuild);
 
         firstStartingPos = new BetterBlockPos(originBuild);
 
@@ -617,6 +596,18 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             return;
         }
         cachedHealth = ctx.player().getHealth(); // Get new HP value
+
+        // Handle distance to keep from end of highway
+        if (settings.highwayEndDistance.value != -1) {
+            try {
+                Field pressed = KeyBinding.class.getDeclaredField("pressed");
+                pressed.setAccessible(true);
+                if (getHighwayLengthFront() >= settings.highwayEndDistance.value && currentState == State.BuildingHighway)
+                    pressed.set(mc.gameSettings.keyBindForward, true);
+                else
+                    pressed.set(mc.gameSettings.keyBindForward, false);
+            } catch (Exception ignored) {}
+        }
 
         switch (currentState) {
             case Nothing: {
@@ -1157,10 +1148,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     for (int x = -1; x <= 1; x++) {
                         for (int z = -1; z <= 1; z++) {
                             BlockPos tempLoc = new BlockPos(ctx.playerFeet().x + x, ctx.playerFeet().y, ctx.playerFeet().z + z);
-                                possibleIssuePosList.add(tempLoc);
-                                possibleIssuePosList.add(tempLoc.up());
-                                possibleIssuePosList.add(tempLoc.up().up());
-                                possibleIssuePosList.add(tempLoc.up().up().up());
+                            for (int i = 0; i < settings.highwayHeight.value; i++) {
+                                possibleIssuePosList.add(tempLoc.up(i));
+                            }
                         }
                     }
                     if (!liquidPathingCanMine) {
@@ -2904,10 +2894,63 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         return toPlace;
     }
 
+    private int getHighwayLengthFront() {
+        // TODO: Clean this up
+        Vec3d direction = new Vec3d(highwayDirection.x, highwayDirection.y, highwayDirection.z);
+        Vec3d curPosNotOffset = new Vec3d(ctx.playerFeet().getX(), ctx.playerFeet().getY(), ctx.playerFeet().getZ());
+        // Fix player feet location for diags so we don't check too far ahead
+        // +X,+Z and -X,-Z
+        if (((highwayDirection.x == 1 && highwayDirection.z == 1) || (highwayDirection.x == -1 && highwayDirection.z == -1))) {
+            curPosNotOffset = new Vec3d(curPosNotOffset.x, curPosNotOffset.y, curPosNotOffset.x - 4);
+        } else if ((highwayDirection.x == 1 && highwayDirection.z == -1) || (highwayDirection.x == -1 && highwayDirection.z == 1)) {
+            curPosNotOffset = new Vec3d(-curPosNotOffset.z - 5, curPosNotOffset.y, curPosNotOffset.z);
+        }
+
+        Vec3d curPosPlayer = new Vec3d(curPosNotOffset.x, curPosNotOffset.y, curPosNotOffset.z);
+        BlockPos startCheckPos = getClosestPoint(new Vec3d(originVector.x, originVector.y, originVector.z), direction, curPosPlayer, LocationType.HighwayBuild);
+
+
+        for (int i = 0; i < 10; i++) {
+            BlockPos curPos = startCheckPos.add(i * (int)highwayDirection.x, 0, i * (int)highwayDirection.z);
+            for (int y = 0; y < schematic.heightY(); y++) {
+                for (int z = 0; z < schematic.lengthZ(); z++) {
+                    for (int x = 0; x < schematic.widthX(); x++) {
+                        int blockX = x + curPos.getX();
+                        int blockY = y + curPos.getY();
+                        int blockZ = z + curPos.getZ();
+                        IBlockState current = ctx.world().getBlockState(new BlockPos(blockX, blockY, blockZ));
+
+                        if (!schematic.inSchematic(x, y, z, current)) {
+                            continue;
+                        }
+                        if (baritone.bsi.worldContainsLoadedChunk(blockX, blockZ)) { // check if its in render distance, not if its in cache
+                            // we can directly observe this block, it is in render distance
+
+                            ISchematic ourSchem = schematic.getSchematic(x, y, z, current).schematic;
+                            if (ourSchem instanceof WhiteBlackSchematic && ((WhiteBlackSchematic) ourSchem).isValidIfUnder() &&
+                                    ctx.world().getBlockState(new BlockPos(blockX, blockY + 1, blockZ)).isFullBlock()) {
+                                continue;
+                            }
+
+                            if (!schematic.desiredState(x, y, z, current, this.approxPlaceable).equals(current)) {
+                                return i;
+                            }
+
+                        }
+
+                    }
+                }
+            }
+        }
+
+        return 0;
+    }
+
+
     private HighwayState isHighwayCorrect(BlockPos startPos, BlockPos startPosLiq, int distanceToCheck, boolean renderLiquidScan) {
         // startPos needs to be in center of highway
-        //renderLock.lock();
-        //renderBlocks.clear();
+        renderLockBuilding.lock();
+        renderBlocksBuilding.clear();
         boolean foundBlocks = false;
         for (int i = 1; i < distanceToCheck; i++) {
             BlockPos curPos = startPos.add(i * (int)highwayDirection.x, 0, i * (int)highwayDirection.z);
@@ -2922,8 +2965,18 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                         if (!schematic.inSchematic(x, y, z, current)) {
                             continue;
                         }
-                        //if (i == 1)
-                            //renderBlocks.add(new BlockPos(blockX, blockY, blockZ));
+                        if (i == 1) {
+                            IBlockState desiredState = schematic.desiredState(x, y, z, current, this.approxPlaceable);
+                            if (desiredState.getBlock().equals(Blocks.AIR)) {
+                                renderBlocksBuilding.put(new BlockPos(blockX, blockY, blockZ), Color.CYAN);
+                            } else if (desiredState.getBlock().equals(Blocks.NETHERRACK)) {
+                                renderBlocksBuilding.put(new BlockPos(blockX, blockY, blockZ), Color.RED);
+                            } else if (desiredState.getBlock().equals(Blocks.OBSIDIAN)) {
+                                renderBlocksBuilding.put(new BlockPos(blockX, blockY, blockZ), Color.BLACK);
+                            } else {
+                                renderBlocksBuilding.put(new BlockPos(blockX, blockY, blockZ), Color.GREEN);
+                            }
+                        }
                         if (baritone.bsi.worldContainsLoadedChunk(blockX, blockZ)) { // check if its in render distance, not if its in cache
                             // we can directly observe this block, it is in render distance
 
@@ -2948,7 +3001,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
                                 // Never should be liquids
                                 if (current.getBlock() instanceof BlockLiquid) {
-                                    //renderLock.unlock();
+                                    renderLockBuilding.unlock();
                                     return HighwayState.Liquids;
                                 } else {
                                     foundBlocks = true;
@@ -2966,7 +3019,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 }
             }
         }
-        //renderLock.unlock();
+        renderLockBuilding.unlock();
 
         if (findFirstLiquidGround(startPosLiq, distanceToCheck, renderLiquidScan) != null) {
             return HighwayState.Liquids;
@@ -2984,36 +3037,59 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         if (player == null) {
             return;
         }
-        renderLock.lock();
-        //PathRenderer.drawManySelectionBoxes(mc.getRenderViewEntity(), renderBlocks, Color.CYAN);
-        IRenderer.startLines(Color.RED, 2, settings.renderSelectionBoxesIgnoreDepth.value);
 
-        //BlockPos blockpos = movingObjectPositionIn.getBlockPos();
-        BlockStateInterface bsi = new BlockStateInterface(BaritoneAPI.getProvider().getPrimaryBaritone().getPlayerContext()); // TODO this assumes same dimension between primary baritone and render view? is this safe?
+        if (settings.highwayRenderLiquidScanArea.value) {
+            renderLockLiquid.lock();
+            //PathRenderer.drawManySelectionBoxes(mc.getRenderViewEntity(), renderBlocks, Color.CYAN);
+            IRenderer.startLines(Color.BLUE, 2, settings.renderSelectionBoxesIgnoreDepth.value);
 
-        renderBlocks.forEach(pos -> {
-            IBlockState state = bsi.get0(pos);
-            AxisAlignedBB toDraw;
+            //BlockPos blockpos = movingObjectPositionIn.getBlockPos();
+            BlockStateInterface bsi = new BlockStateInterface(BaritoneAPI.getProvider().getPrimaryBaritone().getPlayerContext()); // TODO this assumes same dimension between primary baritone and render view? is this safe?
 
-            if (state.getBlock().equals(Blocks.AIR)) {
-                toDraw = Blocks.DIRT.getDefaultState().getSelectedBoundingBox(player.world, pos);
-            } else {
-                toDraw = state.getSelectedBoundingBox(player.world, pos);
-            }
+            renderBlocksLiquid.forEach(pos -> {
+                IBlockState state = bsi.get0(pos);
+                AxisAlignedBB toDraw;
 
-            IRenderer.drawAABB(toDraw, .002D);
-        });
+                if (state.getBlock().equals(Blocks.AIR)) {
+                    toDraw = Blocks.DIRT.getDefaultState().getSelectedBoundingBox(player.world, pos);
+                } else {
+                    toDraw = state.getSelectedBoundingBox(player.world, pos);
+                }
 
-        IRenderer.endLines(settings.renderSelectionBoxesIgnoreDepth.value);
+                IRenderer.drawAABB(toDraw, .002D);
+            });
 
+            IRenderer.endLines(settings.renderSelectionBoxesIgnoreDepth.value);
 
-        renderLock.unlock();
+            renderLockLiquid.unlock();
+        }
+
+        if (settings.highwayRenderBuildingArea.value) {
+            renderLockBuilding.lock();
+            BlockStateInterface bsi = new BlockStateInterface(BaritoneAPI.getProvider().getPrimaryBaritone().getPlayerContext());
+            renderBlocksBuilding.forEach((pos, color) -> {
+                IRenderer.startLines(color, 2, settings.renderSelectionBoxesIgnoreDepth.value);
+
+                IBlockState state = bsi.get0(pos);
+                AxisAlignedBB toDraw;
+
+                if (state.getBlock().equals(Blocks.AIR)) {
+                    toDraw = Blocks.DIRT.getDefaultState().getSelectedBoundingBox(player.world, pos);
+                } else {
+                    toDraw = state.getSelectedBoundingBox(player.world, pos);
+                }
+
+                IRenderer.drawAABB(toDraw, .002D);
+
+                IRenderer.endLines(settings.renderSelectionBoxesIgnoreDepth.value);
+            });
+        }
     }
 
     private BlockPos findFirstLiquidGround(BlockPos startPos, int distanceToCheck, boolean renderCheckedBlocks) {
         if (renderCheckedBlocks) {
-            renderLock.lock();
-            renderBlocks.clear();
+            renderLockLiquid.lock();
+            renderBlocksLiquid.clear();
         }
         //Liquid Checking all around
         for (int i = 1; i < distanceToCheck; i++) {
@@ -3029,14 +3105,15 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                             continue;
                         }
                         if (renderCheckedBlocks) {
-                            //if (i == 1)
-                            renderBlocks.add(new BlockPos(blockX, blockY, blockZ));
+                            if (i == 1 && !renderBlocksBuilding.containsKey(new BlockPos(blockX, blockY, blockZ))) {
+                                renderBlocksLiquid.add(new BlockPos(blockX, blockY, blockZ));
+                            }
                         }
                         if (baritone.bsi.worldContainsLoadedChunk(blockX, blockZ)) { // check if its in render distance, not if its in cache
                             // Never should be liquids
                             if (current.getBlock() instanceof BlockLiquid) {
                                 if (renderCheckedBlocks) {
-                                    renderLock.unlock();
+                                    renderLockLiquid.unlock();
                                 }
                                 return new BlockPos(blockX, blockY, blockZ);
                             }
@@ -3047,7 +3124,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             }
         }
         if (renderCheckedBlocks) {
-            renderLock.unlock();
+            renderLockLiquid.unlock();
         }
         return null;
     }
