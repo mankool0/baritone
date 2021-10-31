@@ -151,6 +151,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             Blocks.YELLOW_SHULKER_BOX, Blocks.LIME_SHULKER_BOX, Blocks.PINK_SHULKER_BOX, Blocks.GRAY_SHULKER_BOX, Blocks.SILVER_SHULKER_BOX, Blocks.CYAN_SHULKER_BOX, Blocks.PURPLE_SHULKER_BOX,
             Blocks.BLUE_SHULKER_BOX, Blocks.BROWN_SHULKER_BOX, Blocks.GREEN_SHULKER_BOX, Blocks.RED_SHULKER_BOX, Blocks.BLACK_SHULKER_BOX);
 
+    private final List<IBlockState> blackListBlocks = Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState(), Blocks.FIRE.getDefaultState(), Blocks.BROWN_MUSHROOM.getDefaultState(), Blocks.RED_MUSHROOM.getDefaultState());
+
+
     private BlockPos boatLocation = null;
     private boolean boatHasPassenger = false;
 
@@ -335,7 +338,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 }
             } else {
                 obsidSchemBot = new WhiteBlackSchematic(1, 1, highwayWidth, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.OBSIDIAN.getDefaultState()), Blocks.AIR.getDefaultState(), true, false, false); // Allow only air and obsidian
-                supportNetherRack = new WhiteBlackSchematic(1, 1, supportWidth, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true, true); // Allow everything other than air and lava
+                supportNetherRack = new WhiteBlackSchematic(1, 1, supportWidth, blackListBlocks, Blocks.NETHERRACK.getDefaultState(), false, true, true); // Allow everything other than air and lava
                 if (highwayRail) {
                     liqCheckSchem = new FillSchematic(1, highwayHeight + 1, highwayWidth + 4, Blocks.AIR.getDefaultState());
                 } else {
@@ -397,7 +400,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 }
             } else {
                 obsidSchemBot = new WhiteBlackSchematic(highwayWidth, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.OBSIDIAN.getDefaultState()), Blocks.AIR.getDefaultState(), true, false, false); // Allow only air and obsidian
-                supportNetherRack = new WhiteBlackSchematic(supportWidth, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, true, true); // Allow everything other than air and lava
+                supportNetherRack = new WhiteBlackSchematic(supportWidth, 1, 1, blackListBlocks, Blocks.NETHERRACK.getDefaultState(), false, true, true); // Allow everything other than air and lava
                 if (highwayRail) {
                     liqCheckSchem = new FillSchematic(highwayWidth + 4, highwayHeight + 1, 1, Blocks.AIR.getDefaultState());
                 } else {
@@ -600,7 +603,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         // Handle distance to keep from end of highway
         if (settings.highwayEndDistance.value != -1) {
             try {
-                Field pressed = KeyBinding.class.getDeclaredField("pressed");
+                Field pressed = KeyBinding.class.getDeclaredField("field_74513_e");
                 pressed.setAccessible(true);
                 if (getHighwayLengthFront() >= settings.highwayEndDistance.value && currentState == State.BuildingHighway)
                     pressed.set(mc.gameSettings.keyBindForward, true);
@@ -1773,7 +1776,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 baritone.getPathingBehavior().cancelEverything();
                 settings.buildRepeat.value = new Vec3i(0, 0, 0);
                 if (Helper.mc.world.getBlockState(placeLoc.down()).getBlock() instanceof BlockAir) {
-                    baritone.getBuilderProcess().build("supportBlock", new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, false, true), placeLoc.down());
+                    baritone.getBuilderProcess().build("supportBlock", new WhiteBlackSchematic(1, 1, 1, blackListBlocks, Blocks.NETHERRACK.getDefaultState(), false, false, true), placeLoc.down());
                     return;
                 }
 
@@ -2412,7 +2415,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 baritone.getPathingBehavior().cancelEverything();
                 settings.buildRepeat.value = new Vec3i(0, 0, 0);
                 if (Helper.mc.world.getBlockState(placeLoc.down()).getBlock() instanceof BlockAir) {
-                    baritone.getBuilderProcess().build("supportBlock", new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.AIR.getDefaultState(), Blocks.LAVA.getDefaultState(), Blocks.FLOWING_LAVA.getDefaultState()), Blocks.NETHERRACK.getDefaultState(), false, false, true), placeLoc.down());
+                    baritone.getBuilderProcess().build("supportBlock", new WhiteBlackSchematic(1, 1, 1, blackListBlocks, Blocks.NETHERRACK.getDefaultState(), false, false, true), placeLoc.down());
                     return;
                 }
 
