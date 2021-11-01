@@ -5,10 +5,6 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/MC-1.12.2-brightgreen.svg" alt="Minecraft"/>
-  <img src="https://img.shields.io/badge/MC-1.13.2-brightgreen.svg" alt="Minecraft"/>
-  <img src="https://img.shields.io/badge/MC-1.14.4-brightgreen.svg" alt="Minecraft"/>
-  <img src="https://img.shields.io/badge/MC-1.15.2-brightgreen.svg" alt="Minecraft"/>
-  <img src="https://img.shields.io/badge/MC-1.16.5-brightgreen.svg" alt="Minecraft"/>
 </p>
 
 <p align="center">
@@ -30,38 +26,11 @@
 </p>
 
 <p align="center">
-  <a href="https://impactclient.net/"><img src="https://img.shields.io/badge/Impact%20integration-v1.2.14%20/%20v1.3.8%20/%20v1.4.6%20/%20v1.5.3%20/%20v1.6.3-brightgreen.svg" alt="Impact integration"/></a>
-  <a href="https://github.com/kami-blue/client"><img src="https://img.shields.io/badge/KAMI%20Blue%20integration-v1.2.14--master-green" alt="KAMI Blue integration"/></a>
-  <a href="https://github.com/fr1kin/ForgeHax/"><img src="https://img.shields.io/badge/ForgeHax%20%22integration%22-scuffed-yellow.svg" alt="ForgeHax integration"/></a>
-  <a href="https://aristois.net/"><img src="https://img.shields.io/badge/Aristois%20add--on%20integration-v1.6.3-green.svg" alt="Aristois add-on integration"/></a>
-  <a href="https://rootnet.dev/"><img src="https://img.shields.io/badge/rootNET%20integration-v1.2.14-green.svg" alt="rootNET integration"/></a>
-  <a href="https://futureclient.net/"><img src="https://img.shields.io/badge/Future%20integration-v1.2.12%20%2F%20v1.3.6%20%2F%20v1.4.4-red" alt="Future integration"/></a>
-  <a href="https://rusherhack.org/"><img src="https://img.shields.io/badge/RusherHack%20integration-v1.2.14-green" alt="RusherHack integration"/></a>
-</p>
-
-<p align="center">
   <a href="http://forthebadge.com/"><img src="https://forthebadge.com/images/badges/built-with-swag.svg" alt="forthebadge"/></a>
   <a href="http://forthebadge.com/"><img src="https://forthebadge.com/images/badges/mom-made-pizza-rolls.svg" alt="forthebadge"/></a>
 </p>
 
-A Minecraft pathfinder bot.
-
-[**Baritone Discord Server**](http://discord.gg/s6fRBAUpmr)
-
-Baritone is the pathfinding system used in [Impact](https://impactclient.net/) since 4.4. There's a [showcase video](https://youtu.be/CZkLXWo4Fg4) made by @Adovin#0730 on Baritone which I recommend. [Here's](https://www.youtube.com/watch?v=StquF69-_wI) a (very old!) video I made showing off what it can do. [Tutorial playlist](https://www.youtube.com/playlist?list=PLnwnJ1qsS7CoQl9Si-RTluuzCo_4Oulpa)
-
-The easiest way to install Baritone is to install [Impact](https://impactclient.net/), which comes with Baritone. The second easiest way (for 1.12.2 only) is to install the v1.2.* `api-forge` jar from [releases](https://github.com/cabaletta/baritone/releases). **For 1.12.2 Forge, just click [here](https://github.com/cabaletta/baritone/releases/download/v1.2.15/baritone-api-forge-1.2.15.jar)**. Otherwise, see [Installation & setup](SETUP.md). Once Baritone is installed, look [here](USAGE.md) for instructions on how to use it.
-
-For 1.15.2, [click here](https://www.youtube.com/watch?v=j1qKtCZFURM) and see description. If you need Forge 1.15.2, look [here](https://github.com/cabaletta/baritone/releases/tag/v1.5.3), follow the instructions, and get the `api-forge` jar.
-
-For 1.16.5, [click here](https://www.youtube.com/watch?v=_4eVJ9Qz2J8) and see description. If you need Forge or Fabric 1.16.5, look [here](https://github.com/cabaletta/baritone/releases/tag/v1.6.3) and get the `api-forge` or `api-fabric` jar. **For 1.16.5 Fabric, just click [here](https://github.com/cabaletta/baritone/releases/download/v1.6.3/baritone-api-fabric-1.6.3.jar)**.
-
-This project is an updated version of [MineBot](https://github.com/leijurv/MineBot/),
-the original version of the bot for Minecraft 1.8.9, rebuilt for 1.12.2 through 1.16.5. Baritone focuses on reliability and particularly performance (it's over [30x faster](https://github.com/cabaletta/baritone/pull/180#issuecomment-423822928) than MineBot at calculating paths).
-
-Have committed at least once a day from Aug 1, 2018, to Aug 1, 2019.
-
-1Leijurv3DWTrGAfmmiTphjhXLvQiHg7K2
+A Minecraft pathfinder bot, with mapart capability.
 
 # Getting Started
 
@@ -79,7 +48,7 @@ Here are some links to help to get started:
 
 ## Stars over time
 
-[![Stargazers over time](https://starchart.cc/cabaletta/baritone.svg)](https://starchart.cc/cabaletta/baritone)
+[![Stargazers over time](https://starchart.cc/Mankool0/baritone.svg)](https://starchart.cc/Mankool0/baritone)
 
 # API
 
@@ -97,25 +66,27 @@ BaritoneAPI.getProvider().getPrimaryBaritone().getCustomGoalProcess().setGoalAnd
 ```
 
 # FAQ
+## New Commands
+```mapbuild``` Uses all the new logic programmed
+* A schematica schematic has to be placed for this command to work (mapmatica works aswell)
+* make sure material shulkers are placed with gaps inbetween every 3-4 shulkers
 
-## Can I use Baritone as a library in my custom utility client?
+```mapstop```
+* stops baritone
 
-That's what it's for, sure! (As long as usage complies with the LGPL 3.0 License)
+## Recommend default settings
+Mileage may vary, but these are what I have found to work the best for me
+```
+allowInventory true
+assumeWalkOnWater true
+acceptableThrowawayItems minecraft:dirt,minecraft:cobblestone,minecraft:stone
+blocksToAvoidBreaking crafting_table,furnace,lit_furnace,chest,trapped_chest,standing_sign,wall_sign,white_shulker_box,orange_shulker_box,magenta_shulker_box,light_blue_shulker_box,yellow_shulker_box,lime_shulker_box,pink_shulker_box,gray_shulker_box,silver_shulker_box,cyan_shulker_box,purple_shulker_box,blue_shulker_box,brown_shulker_box,green_shulker_box,red_shulker_box,black_shulker_box
+blockReachDistance 3.8
+failureTimeoutMS 2000
+useSwordToMine false
+```
 
 ## How is it so fast?
 
-Magic. (Hours of [leijurv](https://github.com/leijurv/) enduring excruciating pain)
+Magic. (Hours of [Mankool's](https://github.com/Mankool0/) enduring excruciating bug fixing, and [Redhawk's](https://github.com/Redhawk18/) endless hours of testing)
 
-### Additional Special Thanks To:
-
-![YourKit-Logo](https://www.yourkit.com/images/yklogo.png)
-
-YourKit supports open source projects with innovative and intelligent tools for monitoring and profiling Java and .NET applications.
-
-YourKit is the creator of the [YourKit Java Profiler](https://www.yourkit.com/java/profiler/), [YourKit .NET Profiler](https://www.yourkit.com/.net/profiler/), and [YourKit YouMonitor](https://www.yourkit.com/youmonitor/).
-
-We thank them for granting Baritone an OSS license so that we can make our software the best it can be.
-
-## Why is it called Baritone?
-
-It's named for FitMC's deep sultry voice.
