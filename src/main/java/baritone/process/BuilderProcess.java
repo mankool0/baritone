@@ -631,7 +631,6 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     }
 
     private Goal assemble(BuilderCalculationContext bcc, List<IBlockState> approxPlaceable, boolean logMissing) {
-        int debugvar = 0;
         List<BetterBlockPos> placeable = new ArrayList<>();
         List<BetterBlockPos> breakable = new ArrayList<>();
         List<BetterBlockPos> sourceLiquids = new ArrayList<>();
@@ -680,8 +679,6 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                 logDirect(missing.entrySet().stream()
                         .map(e -> String.format("%sx %s", e.getValue(), e.getKey()))
                         .collect(Collectors.joining("\n")));
-                debugvar++;
-                logDebug("debugvar = " + debugvar);
             }
             if (logMissing && !flowingLiquids.isEmpty()) {
                 logDirect("Unreplaceable liquids at at least:");
