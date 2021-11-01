@@ -503,7 +503,7 @@ public class MapBuilderBehavior extends Behavior implements IMapBuilderBehavior 
 
 
 
-                //never used loop
+                // Loot shulker and update it's contents
                 IBlockState itemLooted = lootItemChestSlot(closestNeededBlock);
                 for (ShulkerInfo curShulker : shulkerList) {
                     if (curShulker.pos.equals(curCheckingShulker)) {
