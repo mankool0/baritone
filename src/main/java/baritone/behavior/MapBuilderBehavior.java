@@ -345,7 +345,20 @@ public class MapBuilderBehavior extends Behavior implements IMapBuilderBehavior 
                         if (shulkerInfo.contents != null) {
                             for (ItemStack itemStack : shulkerInfo.contents) {
 
-                                IBlockState state = ((ItemBlock) itemStack.getItem()).getBlock().getStateForPlacement(ctx.world(), ctx.playerFeet(), EnumFacing.UP, (float) ctx.player().posX, (float) ctx.player().posY, (float) ctx.player().posZ, itemStack.getItem().getMetadata(itemStack.getMetadata()), ctx.player());
+                                //to prevent typecasting crash
+                                if (!(itemStack.getItem() instanceof ItemBlock)) {
+                                    continue;
+                                }
+
+                                IBlockState state = ((ItemBlock) itemStack.getItem()).getBlock().getStateForPlacement(ctx.world(),
+                                        ctx.playerFeet(),
+                                        EnumFacing.UP,
+                                        (float) ctx.player().posX,
+                                        (float) ctx.player().posY,
+                                        (float) ctx.player().posZ,
+                                        itemStack.getItem().getMetadata(itemStack.getMetadata()),
+                                        ctx.player());
+
                                 if (!allBlocks.contains(state) && !(state.getBlock() instanceof BlockAir)) {
                                     allBlocks.add(state);
                                 }
@@ -501,10 +514,6 @@ public class MapBuilderBehavior extends Behavior implements IMapBuilderBehavior 
                     return;
                 }
 
-
-
-                //never used loop
-                IBlockState itemLooted = lootItemChestSlot(closestNeededBlock);
                 for (ShulkerInfo curShulker : shulkerList) {
                     if (curShulker.pos.equals(curCheckingShulker)) {
                         curShulker.contents = getOpenShulkerContents(); // Update the shulker contents
@@ -513,21 +522,7 @@ public class MapBuilderBehavior extends Behavior implements IMapBuilderBehavior 
                             ctx.player().closeScreen();
                             currentState = State.Nothing;
                         }
-                        /*
-                        // Shulker we are looting
-                        for (ItemStack curStack : curShulker.contents) {
-                            IBlockState state = ((ItemBlock) curStack.getItem()).getBlock().getStateForPlacement(ctx.world(), ctx.playerFeet(), EnumFacing.UP, (float) ctx.player().posX, (float) ctx.player().posY, (float) ctx.player().posZ, curStack.getItem().getMetadata(curStack.getMetadata()), ctx.player());
-                            if (state.equals(closestNeededBlock)) {
-                                curShulker.contents.remove(curStack);
-                                break;
-                            }
-                        }
-                        if (!itemLooted.equals(Blocks.AIR.getDefaultState())) {
-                            // Swapped with some inventory block so update the shulker list with that
-                            // TODO : FIX THIS :D
-                            //curShulker.contents.add(itemLooted);
-                        }
-                         */
+
                         timer = 0;
                         return;
                     }
@@ -581,7 +576,8 @@ public class MapBuilderBehavior extends Behavior implements IMapBuilderBehavior 
         Helper.HELPER.logDirect("Found " + set.size() + " invalid locations.");
         for (BlockPos pos : set) {
             // If invalid block we are checking isn't loaded or we don't have any of it in our inventory just skip
-            if (!Helper.mc.world.isBlockLoaded(pos, false) || Helper.mc.world.getBlockState(pos).getBlock() instanceof BlockAir || getItemStackCountInventory(Helper.mc.world.getBlockState(pos)) == 0) {
+            if (!Helper.mc.world.isBlockLoaded(pos, false) || Helper.mc.world.getBlockState(pos).getBlock() instanceof BlockAir ||
+                    getItemStackCountInventory(Helper.mc.world.getBlockState(pos)) == 0) {
                 continue;
             }
             List<BlockPos> validSideBlocks = new LinkedList<>();
@@ -786,7 +782,7 @@ public class MapBuilderBehavior extends Behavior implements IMapBuilderBehavior 
                     current)) {
                 continue;
             }
-            //Item blockNeeded = Item.getItemFromBlock(schematic.desiredState(pos.x, pos.y, pos.z, current, this.allBlocks).getBlock());
+
             IBlockState desiredState = schematic.desiredState(
                     pos.x - schematicOrigin.getX(),
                     pos.y - schematicOrigin.getY(),
@@ -796,6 +792,8 @@ public class MapBuilderBehavior extends Behavior implements IMapBuilderBehavior 
                 blocksNeeded.add(new Tuple<>(pos, desiredState));
             }
         }
+
+        findMostCommonBlock(blocksNeeded); //takes the list of ALL BLOCKS and sets the class var to help with material gathering
 
         IBlockState closestItem = null;
         double closestDistance = Double.MAX_VALUE;
@@ -916,17 +914,24 @@ public class MapBuilderBehavior extends Behavior implements IMapBuilderBehavior 
         return count;
     }
 
-    private IBlockState findMostCommonBlock() {
-        //use a TreeMap to find what block in the schematic is the most common
-        TreeMap<Integer, IBlockState> blocksInSchematic = new TreeMap<>();
+    private void findMostCommonBlock(List blocksNeeded) {
+        /*
+        listOfBlocksAndTheirCount
+        int highestCount
+        int MostCommonCount = 0;
+        IBlockState highestCountState
+        for (every block in schematic) {
+            update count of current block in listOfBlocksAndTheirCount
+            if (current block count > highestCount) {
+                highestCount = current block count
+                highestCountState = current block
+            }
+        }
+         */
+        int highest = -1;
+        int currentblockcount = 0;
 
-        //populate hashmap with blocks from schematic
-        //TODO add this
 
-        //somehow get the highest key value from the treemap
-        //return that highest key as its IBlockState
-        amountOfMostCommonBlock = blocksInSchematic.lastKey(); //amount of common block
-        return (IBlockState) blocksInSchematic.lastEntry(); //the block itself
     }
 
     //shulker methods
