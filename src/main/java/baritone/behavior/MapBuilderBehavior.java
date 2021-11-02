@@ -514,6 +514,7 @@ public class MapBuilderBehavior extends Behavior implements IMapBuilderBehavior 
                     return;
                 }
 
+                IBlockState itemLooted = lootItemChestSlot(closestNeededBlock); //do not delete
                 for (ShulkerInfo curShulker : shulkerList) {
                     if (curShulker.pos.equals(curCheckingShulker)) {
                         curShulker.contents = getOpenShulkerContents(); // Update the shulker contents
