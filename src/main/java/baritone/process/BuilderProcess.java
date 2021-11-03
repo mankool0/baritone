@@ -76,6 +76,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private int layer;
     private int numRepeats;
     private List<IBlockState> approxPlaceable;
+    private int swapInventoryTimer = 0;
 
     public BuilderProcess(Baritone baritone) {
         super(baritone);
@@ -364,6 +365,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         if (recursions > 1000) { // onTick calls itself, don't crash
             return new PathingCommand(null, PathingCommandType.SET_GOAL_AND_PATH);
         }
+        swapInventoryTimer++;
+
         approxPlaceable = approxPlaceable(36);
         if (baritone.getInputOverrideHandler().isInputForcedDown(Input.CLICK_LEFT)) {
             ticks = 5;
@@ -503,9 +506,15 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
 
             outer:
             for (int i = 9; i < 36; i++) {
+
+                if(swapInventoryTimer < 5) break; //to stop anti-cheat blocking fast item swaps
+
+
                 for (IBlockState desired : noValidHotbarOption) {
                     if (valid(approxPlaceable.get(i), desired, true)) {
+
                         baritone.getInventoryBehavior().attemptToPutOnHotbar(i, usefulSlots::contains);
+                        swapInventoryTimer = 0; //so loop checks all slots not just the 9th
                         break outer;
                     }
                 }
