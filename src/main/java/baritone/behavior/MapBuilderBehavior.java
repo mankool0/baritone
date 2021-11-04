@@ -406,6 +406,10 @@ public class MapBuilderBehavior extends Behavior implements IMapBuilderBehavior 
                 curCheckingShulker = null;
                 for (ShulkerInfo curShulker : shulkerList) {
                     for (ItemStack stack : curShulker.contents) {
+                        if (!(stack.getItem() instanceof ItemBlock)) { //to prevent typecasting crash
+                            continue;
+                        }
+
                         //Gets the block state since you can't use block ids due to blocks having same ids but are different
                         IBlockState state =
                                 ((ItemBlock) stack.getItem()).getBlock().getStateForPlacement(ctx.world(),
