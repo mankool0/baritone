@@ -106,7 +106,7 @@ To stop:
 To print out some status info (send this to me when reporting bugs):
 `.b nhwstatus`
 
-## Axis's
+## Axes
 +X = 1 0
 
 +Z = 0 1
