@@ -480,7 +480,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         stuckTimer++;
 
         // Auto totem
-        if (settings.highwayEmptyOffhandTotem.value && currentState == State.BuildingHighway && mc.player.getHeldItemOffhand().getItem() instanceof ItemAir) {
+        if (settings.highwayAutoTotem.value && currentState == State.BuildingHighway && mc.player.getHeldItemOffhand().getItem() != Items.TOTEM_OF_UNDYING) {
             int totemSlot = getItemSlot(Item.getIdFromItem(Items.TOTEM_OF_UNDYING));
             if (totemSlot != -1) {
                 swapOffhand(totemSlot);

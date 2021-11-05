@@ -1329,9 +1329,9 @@ public final class Settings {
     public final Setting<Boolean> highwayAllowMixedShulks = new Setting<>(true);
 
     /**
-     * If true will try to place a totem into an empty offhand during digging/paving
+     * If true will try to place a totem into offhand during digging/paving
      */
-    public final Setting<Boolean> highwayEmptyOffhandTotem = new Setting<>(false);
+    public final Setting<Boolean> highwayAutoTotem = new Setting<>(false);
 
     /**
      * Base Y level of the highway schematic
