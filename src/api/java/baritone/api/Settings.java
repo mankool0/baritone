@@ -1256,6 +1256,11 @@ public final class Settings {
 
     public final Map<Setting<?>, Type> settingTypes;
 
+    /**
+    * enables or disables baritone error messages
+    */
+    public final Setting<Boolean> materialErrorMessageSuppression = new Setting<>(true);
+
     public final class Setting<T> {
 
         public T value;

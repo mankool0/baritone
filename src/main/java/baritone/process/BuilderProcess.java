@@ -682,12 +682,15 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         if (!toPlace.isEmpty()) {
             return new JankyGoalComposite(new GoalComposite(toPlace.toArray(new Goal[0])), new GoalComposite(toBreak.toArray(new Goal[0])));
         }
+
         if (toBreak.isEmpty()) {
-            if (logMissing && !missing.isEmpty()) {
-                logDirect("Missing materials for at least:");
-                logDirect(missing.entrySet().stream()
-                        .map(e -> String.format("%sx %s", e.getValue(), e.getKey()))
-                        .collect(Collectors.joining("\n")));
+            if(Baritone.settings().materialErrorMessageSuppression.value) { //anti spam setting
+                if (logMissing && !missing.isEmpty()) {
+                    logDirect("Missing materials for at least:");
+                    logDirect(missing.entrySet().stream()
+                            .map(e -> String.format("%sx %s", e.getValue(), e.getKey()))
+                            .collect(Collectors.joining("\n")));
+                }
             }
             if (logMissing && !flowingLiquids.isEmpty()) {
                 logDirect("Unreplaceable liquids at at least:");
