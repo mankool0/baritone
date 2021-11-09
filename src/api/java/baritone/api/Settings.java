@@ -1380,7 +1380,7 @@ public final class Settings {
     public final Setting<Integer> highwayEndDistance = new Setting<>(-1);
 
     /**
-     *
+     * Number of blocks the builder can break per tick
      */
     public final Setting<Integer> multiBreak = new Setting<>(-1);
 
