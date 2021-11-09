@@ -304,7 +304,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 } else {
                     liqOriginVector = new Vec3d(0, 0, highwayWidthLiqOffset);
                 }
-                backPathOriginVector = new Vec3d(0, 0, 0);
+                backPathOriginVector = new Vec3d(0, 0, -1);
                 eChestEmptyShulkOriginVector = new Vec3d(0, 0, highwayWidthLiqOffsetRail);
             } else {
                 originVector = new Vec3d(startX, 0, startZ - highwayWidthOffset);
@@ -313,7 +313,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 } else {
                     liqOriginVector = new Vec3d(startX, 0, startZ - highwayWidthLiqOffset);
                 }
-                backPathOriginVector = new Vec3d(startX, 0, startZ);
+                backPathOriginVector = new Vec3d(startX, 0, startZ - 1);
                 eChestEmptyShulkOriginVector = new Vec3d(startX, 0, startZ - highwayWidthLiqOffsetRail);
             }
 
@@ -366,7 +366,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 } else {
                     liqOriginVector = new Vec3d(highwayWidthLiqOffset, 0, 0);
                 }
-                backPathOriginVector = new Vec3d(0, 0, 0);
+                backPathOriginVector = new Vec3d(-1, 0, 0);
                 eChestEmptyShulkOriginVector = new Vec3d(highwayWidthLiqOffsetRail, 0, 0);
             } else {
                 originVector = new Vec3d(startX - highwayWidthOffset, 0, startZ);
@@ -375,7 +375,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 } else {
                     liqOriginVector = new Vec3d(startX - highwayWidthLiqOffset, 0, startZ);
                 }
-                backPathOriginVector = new Vec3d(startX, 0, startZ);
+                backPathOriginVector = new Vec3d(startX - 1, 0, startZ);
                 eChestEmptyShulkOriginVector = new Vec3d(startX - highwayWidthLiqOffsetRail, 0, startZ);
             }
 
