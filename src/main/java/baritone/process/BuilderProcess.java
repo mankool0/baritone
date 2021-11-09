@@ -820,6 +820,14 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         public String toString() {
             return "JankyComposite Primary: " + primary + " Fallback: " + fallback;
         }
+
+        public Goal getPrimary() {
+            return primary;
+        }
+
+        public Goal getFallback() {
+            return fallback;
+        }
     }
 
     public static class GoalBreak extends GoalGetToBlock {

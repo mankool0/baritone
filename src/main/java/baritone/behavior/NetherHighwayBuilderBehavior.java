@@ -22,9 +22,7 @@ import baritone.api.BaritoneAPI;
 import baritone.api.behavior.INetherHighwayBuilderBehavior;
 import baritone.api.event.events.RenderEvent;
 import baritone.api.event.events.TickEvent;
-import baritone.api.pathing.goals.Goal;
-import baritone.api.pathing.goals.GoalBlock;
-import baritone.api.pathing.goals.GoalComposite;
+import baritone.api.pathing.goals.*;
 import baritone.api.schematic.CompositeSchematic;
 import baritone.api.schematic.FillSchematic;
 import baritone.api.schematic.ISchematic;
@@ -32,6 +30,7 @@ import baritone.api.schematic.WhiteBlackSchematic;
 import baritone.api.utils.*;
 import baritone.api.utils.input.Input;
 import baritone.pathing.movement.MovementHelper;
+import baritone.process.BuilderProcess;
 import baritone.utils.BlockStateInterface;
 import baritone.utils.IRenderer;
 import net.minecraft.block.*;
@@ -56,10 +55,7 @@ import net.minecraft.inventory.ItemStackHelper;
 import net.minecraft.item.*;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.nbt.NBTTagList;
-import net.minecraft.network.play.client.CPacketAnimation;
-import net.minecraft.network.play.client.CPacketEntityAction;
-import net.minecraft.network.play.client.CPacketPlayer;
-import net.minecraft.network.play.client.CPacketPlayerDigging;
+import net.minecraft.network.play.client.*;
 import net.minecraft.potion.PotionEffect;
 import net.minecraft.util.EnumActionResult;
 import net.minecraft.util.EnumFacing;
@@ -628,25 +624,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
                 if (walkBackTimer > 120 && baritone.getPathingControlManager().mostRecentCommand().isPresent()) {
                     walkBackTimer = 0;
-                    boolean issueDetected = false;
-                    Goal ourGoal = baritone.getPathingControlManager().mostRecentCommand().get().goal;
-                    if (ourGoal instanceof GoalComposite) {
-                        Goal[] goals = ((GoalComposite) ourGoal).goals();
-                        for (Goal goal : goals) {
-                            if (goal instanceof GoalBlock) {
-                                if (((GoalBlock) goal).getGoalPos().getDistance(ctx.playerFeet().getX(), ctx.playerFeet().getY(), ctx.playerFeet().getZ()) > settings.highwayMaxLostShulkerSearchDist.value) {
-                                    issueDetected = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    if (ourGoal instanceof GoalBlock) {
-                        if (((GoalBlock) ourGoal).getGoalPos().getDistance(ctx.playerFeet().getX(), ctx.playerFeet().getY(), ctx.playerFeet().getZ()) > settings.highwayMaxLostShulkerSearchDist.value) {
-                            issueDetected = true;
-                        }
-                    }
-                    if (issueDetected) {
+                    if (getFarthestGoalDistance(baritone.getPathingControlManager().mostRecentCommand().get().goal) > settings.highwayMaxLostShulkerSearchDist.value) {
                         Helper.HELPER.logDirect("We are walking way too far. Restarting");
                         currentState = State.Nothing;
                         return;
@@ -2518,6 +2496,64 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 break;
             }
         }
+    }
+
+    /* Find the farthest distance baritone will travel with the current goal */
+    private double getFarthestGoalDistance(Goal goal) {
+        double farthest = 0.0d;
+        List<Goal> goalList = new ArrayList<>();
+        if (goal instanceof BuilderProcess.JankyGoalComposite) {
+            Goal primary = ((BuilderProcess.JankyGoalComposite) goal).getPrimary();
+            Goal fallback = ((BuilderProcess.JankyGoalComposite) goal).getFallback();
+            if (primary instanceof GoalComposite) {
+                goalList.addAll(getCompositeGoals((GoalComposite) primary));
+            } else {
+                goalList.add(primary);
+            }
+            if (fallback instanceof GoalComposite) {
+                goalList.addAll(getCompositeGoals((GoalComposite) fallback));
+            } else {
+                goalList.add(fallback);
+            }
+        } else if (goal instanceof GoalComposite) {
+            goalList.addAll(getCompositeGoals((GoalComposite) goal));
+        }
+
+        for (Goal curGoal: goalList) {
+            if (curGoal instanceof GoalGetToBlock) {
+                if (mc.player.getDistanceSq(((GoalGetToBlock) curGoal).getGoalPos()) > farthest) {
+                    farthest = mc.player.getDistanceSq(((GoalGetToBlock) curGoal).getGoalPos());
+                }
+            } else if (curGoal instanceof GoalBlock) {
+                if (mc.player.getDistanceSq(((GoalBlock) curGoal).getGoalPos()) > farthest) {
+                    farthest = mc.player.getDistanceSq(((GoalBlock) curGoal).getGoalPos());
+                }
+            } else if (curGoal instanceof GoalTwoBlocks) {
+                if (mc.player.getDistanceSq(((GoalTwoBlocks) curGoal).getGoalPos()) > farthest) {
+                    farthest = mc.player.getDistanceSq(((GoalTwoBlocks) curGoal).getGoalPos());
+                }
+            } else if (curGoal instanceof GoalXZ) {
+                if (mc.player.getDistanceSq(((GoalXZ) curGoal).getX(), mc.player.posY, ((GoalXZ) curGoal).getZ()) > farthest) {
+                    farthest = mc.player.getDistanceSq(((GoalXZ) curGoal).getX(), mc.player.posY, ((GoalXZ) curGoal).getZ());
+                }
+            }
+        }
+
+        return Math.sqrt(farthest);
+    }
+
+    private List<Goal> getCompositeGoals(GoalComposite goal) {
+        List<Goal> goalList = new ArrayList<>();
+        for (Goal curGoal: goal.goals()) {
+            if (curGoal instanceof BuilderProcess.JankyGoalComposite) {
+                goalList.add(((BuilderProcess.JankyGoalComposite) curGoal).getPrimary());
+                goalList.add(((BuilderProcess.JankyGoalComposite) curGoal).getFallback());
+            } else {
+                goalList.add(curGoal);
+            }
+        }
+
+        return goalList;
     }
 
     private void swapOffhand(int slot) {
