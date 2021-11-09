@@ -1777,6 +1777,14 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     return;
                 }
                 if (mc.world.getBlockState(placeLoc).getBlock() instanceof BlockAir && mc.world.getBlockState(placeLoc.up()).getBlock() instanceof BlockAir) {
+                    Optional<Rotation> eChestLocReachable = RotationUtils.reachable(ctx.player(), placeLoc.down(),
+                            ctx.playerController().getBlockReachDistance());
+                    if (!eChestLocReachable.isPresent()) {
+                        currentState = State.LootEnderChestPlaceLocPrep;
+                        timer = 0;
+                        return;
+                    }
+                    baritone.getLookBehavior().updateTarget(eChestLocReachable.get(), true);
                     baritone.getBuilderProcess().build("enderChest", new FillSchematic(1, 1, 1, Blocks.ENDER_CHEST.getDefaultState()), placeLoc);
                 }
                 else {
