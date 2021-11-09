@@ -209,18 +209,17 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         return state;
     }
 
-    private Optional<Tuple<BetterBlockPos, Rotation>> toBreakNearPlayer(BuilderCalculationContext bcc) {
+    private List<Optional<Tuple<BetterBlockPos, Rotation>>> toBreakNearPlayer(BuilderCalculationContext bcc) {
         BetterBlockPos center = ctx.playerFeet();
         BetterBlockPos pathStart = baritone.getPathingBehavior().pathStart();
+        List<Optional<Tuple<BetterBlockPos, Rotation>>> toReturn = new ArrayList<>();
 
 
         for (BetterBlockPos pos : toBreakEntity) {
             IBlockState curr = bcc.bsi.get0(pos);
             if (curr.getBlock() != Blocks.AIR && !(curr.getBlock() instanceof BlockLiquid) && !valid(curr, Blocks.AIR.getDefaultState(), false)) {
                 Optional<Rotation> rot = RotationUtils.reachable(ctx.player(), pos, ctx.playerController().getBlockReachDistance());
-                if (rot.isPresent()) {
-                    return Optional.of(new Tuple<>(pos, rot.get()));
-                }
+                rot.ifPresent(rotation -> toReturn.add(Optional.of(new Tuple<>(pos, rotation))));
             }
         }
 
@@ -241,14 +240,12 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                     if (curr.getBlock() != Blocks.AIR && !(curr.getBlock() instanceof BlockLiquid) && !valid(curr, desired, false)) {
                         BetterBlockPos pos = new BetterBlockPos(x, y, z);
                         Optional<Rotation> rot = RotationUtils.reachable(ctx.player(), pos, ctx.playerController().getBlockReachDistance());
-                        if (rot.isPresent()) {
-                            return Optional.of(new Tuple<>(pos, rot.get()));
-                        }
+                        rot.ifPresent(rotation -> toReturn.add(Optional.of(new Tuple<>(pos, rotation))));
                     }
                 }
             }
         }
-        return Optional.empty();
+        return toReturn;
     }
 
     public static class Placement {
@@ -472,23 +469,34 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             trim();
         }
 
-        Optional<Tuple<BetterBlockPos, Rotation>> toBreak = toBreakNearPlayer(bcc);
-        if (toBreak.isPresent() && isSafeToCancel && ctx.player().onGround) {
+        List<Optional<Tuple<BetterBlockPos, Rotation>>> toBreak = toBreakNearPlayer(bcc);
+        if (!toBreak.isEmpty() && isSafeToCancel && ctx.player().onGround) {
             // we'd like to pause to break this block
             // only change look direction if it's safe (don't want to fuck up an in progress parkour for example
-            Rotation rot = toBreak.get().getSecond();
-            BetterBlockPos pos = toBreak.get().getFirst();
-            baritone.getLookBehavior().updateTarget(rot, true);
-            MovementHelper.switchToBestToolFor(ctx, bcc.get(pos));
-            if (ctx.player().isSneaking()) {
-                // really horrible bug where a block is visible for breaking while sneaking but not otherwise
-                // so you can't see it, it goes to place something else, sneaks, then the next tick it tries to break
-                // and is unable since it's unsneaked in the intermediary tick
-                baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
+            int count = 0;
+            int toBreakCount = Baritone.settings().multiBreak.value <= 0 ? 1 : Baritone.settings().multiBreak.value;
+            for (Optional<Tuple<BetterBlockPos, Rotation>> blockInfo: toBreak) {
+                if (count >= toBreakCount) {
+                    break;
+                }
+                if (blockInfo.isPresent()) {
+                    Rotation rot = blockInfo.get().getSecond();
+                    BetterBlockPos pos = blockInfo.get().getFirst();
+                    baritone.getLookBehavior().updateTarget(rot, true);
+                    MovementHelper.switchToBestToolFor(ctx, bcc.get(pos));
+                    if (ctx.player().isSneaking()) {
+                        // really horrible bug where a block is visible for breaking while sneaking but not otherwise
+                        // so you can't see it, it goes to place something else, sneaks, then the next tick it tries to break
+                        // and is unable since it's unsneaked in the intermediary tick
+                        baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
+                    }
+                    if (ctx.isLookingAt(pos) || ctx.playerRotations().isReallyCloseTo(rot)) {
+                        baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_LEFT, true);
+                    }
+                    count++;
+                }
             }
-            if (ctx.isLookingAt(pos) || ctx.playerRotations().isReallyCloseTo(rot)) {
-                baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_LEFT, true);
-            }
+
             return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
         }
         List<IBlockState> desirableOnHotbar = new ArrayList<>();

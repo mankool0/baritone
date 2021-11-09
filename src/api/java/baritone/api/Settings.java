@@ -1380,6 +1380,11 @@ public final class Settings {
     public final Setting<Integer> highwayEndDistance = new Setting<>(-1);
 
     /**
+     *
+     */
+    public final Setting<Integer> multiBreak = new Setting<>(-1);
+
+    /**
      * A map of lowercase setting field names to their respective setting
      */
     public final Map<String, Setting<?>> byLowerName;
