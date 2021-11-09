@@ -2208,10 +2208,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 }
 
 
-                if (instantMinePlace /*&& placeLoc.down().equals(ctx.getSelectedBlock().orElse(null))*/) {
-                    //baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
-                    //baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
-
+                if (instantMinePlace) {
                     final Vec3d pos = new Vec3d(mc.player.lastTickPosX + (mc.player.posX - mc.player.lastTickPosX) * mc.getRenderPartialTicks(),
                             mc.player.lastTickPosY + (mc.player.posY - mc.player.lastTickPosY) * mc.getRenderPartialTicks(),
                             mc.player.lastTickPosZ + (mc.player.posZ - mc.player.lastTickPosZ) * mc.getRenderPartialTicks());
@@ -2225,37 +2222,25 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     timer = 0;
                     return;
                 }
-                if (!instantMinePlace) {
-                    //baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, false);
-                    //if (mc.world.getBlockState(placeLoc).getBlock().equals(Blocks.ENDER_CHEST)) {
-                    if (!instantMineActivated) {
-                        currentState = State.FarmingEnderChestPrepPick;
-                    }
-                    if (instantMineLastBlock != null) {
-                        if (mc.player.getHeldItem(EnumHand.MAIN_HAND).getItem() == Items.DIAMOND_PICKAXE) {
-                            mc.player.connection.sendPacket(new CPacketPlayerDigging(CPacketPlayerDigging.Action.STOP_DESTROY_BLOCK,
-                                    instantMineLastBlock, instantMineDirection));
-                        }
-                    }
 
-                    try {
-                        Field delay = PlayerControllerMP.class.getDeclaredField("blockHitDelay");
-                        delay.setAccessible(true);
-                        delay.set(mc.playerController, 0);
-                    } catch (Exception ignored) {}
 
-                    instantMinePlace = true;
-                    //}
+                if (!instantMineActivated) {
+                    currentState = State.FarmingEnderChestPrepPick;
+                }
+                if (instantMineLastBlock != null) {
+                    if (mc.player.getHeldItem(EnumHand.MAIN_HAND).getItem() == Items.DIAMOND_PICKAXE) {
+                        mc.player.connection.sendPacket(new CPacketPlayerDigging(CPacketPlayerDigging.Action.STOP_DESTROY_BLOCK,
+                                instantMineLastBlock, instantMineDirection));
+                    }
                 }
 
-/*
-                if (mc.world.getBlockState(placeLoc).getBlock().equals(Blocks.AIR) && placeLoc.down().equals(ctx.getSelectedBlock().orElse(null))) {
-                    baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
-                    timer = 0;
-                    return;
-                }
-*/
+                try {
+                    Field delay = PlayerControllerMP.class.getDeclaredField("field_78781_i"); // blockHitDelay
+                    delay.setAccessible(true);
+                    delay.set(mc.playerController, 0);
+                } catch (Exception ignored) {}
 
+                instantMinePlace = true;
                 break;
             }
 
