@@ -313,7 +313,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 } else {
                     liqOriginVector = new Vec3d(startX, 0, startZ - highwayWidthLiqOffset);
                 }
-                backPathOriginVector = new Vec3d(startX, 0, startZ - 1);
+                backPathOriginVector = new Vec3d(startX, 0, startZ - highwayWidthLiqOffsetRail + 1);
                 eChestEmptyShulkOriginVector = new Vec3d(startX, 0, startZ - highwayWidthLiqOffsetRail);
             }
 
@@ -375,7 +375,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 } else {
                     liqOriginVector = new Vec3d(startX - highwayWidthLiqOffset, 0, startZ);
                 }
-                backPathOriginVector = new Vec3d(startX - 1, 0, startZ);
+                backPathOriginVector = new Vec3d(startX - highwayWidthLiqOffsetRail + 1, 0, startZ);
                 eChestEmptyShulkOriginVector = new Vec3d(startX - highwayWidthLiqOffsetRail, 0, startZ);
             }
 
