@@ -684,7 +684,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         }
 
         if (toBreak.isEmpty()) {
-            if(Baritone.settings().materialErrorMessageSuppression.value) { //anti spam setting
+            if(!(Baritone.settings().materialErrorMessageSuppression.value)) { //anti spam setting
                 if (logMissing && !missing.isEmpty()) {
                     logDirect("Missing materials for at least:");
                     logDirect(missing.entrySet().stream()
