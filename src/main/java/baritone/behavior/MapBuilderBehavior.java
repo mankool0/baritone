@@ -391,53 +391,66 @@ public class MapBuilderBehavior extends Behavior implements IMapBuilderBehavior 
                 //finds how many stacks of already chosen block are needed
                 int stacksNeeded = stacksOfBlockNeededSchematic(closestNeededBlock);
                 int airSlots = getItemStackCountInventory(Blocks.AIR.getDefaultState());
-                if (isSingleBlockBuild()) {
-                    stacksToLoot = Math.min(stacksNeeded, airSlots);
-                } else {
-                    stacksToLoot = Math.min(stacksNeeded, 5);
-                    if (airSlots < stacksToLoot) {
-                        stacksToLoot = airSlots;
-                    }
-                }
 
 
-                //figures out which shulker contains the blocks needed
-                Helper.HELPER.logDirect("We need " + stacksToLoot + " stacks of: " + closestNeededBlock.toString());
-                curCheckingShulker = null;
-                for (ShulkerInfo curShulker : shulkerList) {
-                    for (ItemStack stack : curShulker.contents) {
-                        if (!(stack.getItem() instanceof ItemBlock)) { //to prevent typecasting crash
-                            continue;
-                        }
+                /*
+                    if inventory is full and stackstoloot is also 0
+                    it creates a runtime infinite loop where it keeps trying to keep grabbing items
+                    then it cant, walks away, and then tries again
+                */
 
-                        //Gets the block state since you can't use block ids due to blocks having same ids but are different
-                        IBlockState state =
-                                ((ItemBlock) stack.getItem()).getBlock().getStateForPlacement(ctx.world(),
-                                ctx.playerFeet(),
-                                EnumFacing.UP,
-                                (float) ctx.player().posX, (float) ctx.player().posY,
-                                (float) ctx.player().posZ, stack.getItem().getMetadata(stack.getMetadata()),
-                                ctx.player());
-
-                        // Torches can be placed in diff facing directions so we need this
-                        if (closestNeededBlock.getBlock() instanceof BlockTorch) {
-                            if (((ItemBlock) stack.getItem()).getBlock().equals(closestNeededBlock.getBlock())) {
-                                curCheckingShulker = curShulker.pos;
-                            }
-                        } else {
-                            if (state.equals(closestNeededBlock)) {
-                                curCheckingShulker = curShulker.pos;
-                            }
+                    if (isSingleBlockBuild()) {
+                        stacksToLoot = Math.min(stacksNeeded, airSlots);
+                    } else {
+                        stacksToLoot = Math.min(stacksNeeded, 5);
+                        if (airSlots < stacksToLoot) {
+                            stacksToLoot = airSlots;
                         }
                     }
-                }
-                if (curCheckingShulker == null) {
-                    Helper.HELPER.logDirect("Shulkers don't have any " + closestNeededBlock);
-                    Helper.HELPER.logDirect("Please refill and restart building");
-                    paused = true;
-                    return;
-                }
+                    if(stacksToLoot == 0) {
+                        //we want to ignore the rest of the method
+                        currentState = State.Building;
+                    }
+
+                    //figures out which shulker contains the blocks needed
+                    Helper.HELPER.logDirect("We need " + stacksToLoot + " stacks of: " + closestNeededBlock.toString());
+                    curCheckingShulker = null;
+                    for (ShulkerInfo curShulker : shulkerList) {
+                        for (ItemStack stack : curShulker.contents) {
+                            if (!(stack.getItem() instanceof ItemBlock)) { //to prevent typecasting crash
+                                continue;
+                            }
+
+                            //Gets the block state since you can't use block ids due to blocks having same ids but are different
+                            IBlockState state =
+                                    ((ItemBlock) stack.getItem()).getBlock().getStateForPlacement(ctx.world(),
+                                            ctx.playerFeet(),
+                                            EnumFacing.UP,
+                                            (float) ctx.player().posX, (float) ctx.player().posY,
+                                            (float) ctx.player().posZ, stack.getItem().getMetadata(stack.getMetadata()),
+                                            ctx.player());
+
+                            // Torches can be placed in diff facing directions so we need this
+                            if (closestNeededBlock.getBlock() instanceof BlockTorch) {
+                                if (((ItemBlock) stack.getItem()).getBlock().equals(closestNeededBlock.getBlock())) {
+                                    curCheckingShulker = curShulker.pos;
+                                }
+                            } else {
+                                if (state.equals(closestNeededBlock)) {
+                                    curCheckingShulker = curShulker.pos;
+                                }
+                            }
+                        }
+                    }
+                    if (curCheckingShulker == null) {
+                        Helper.HELPER.logDirect("Shulkers don't have any " + closestNeededBlock);
+                        Helper.HELPER.logDirect("Please refill and restart building");
+                        paused = true;
+                        return;
+                    }
+
                 currentState = State.PathingToShulker;
+
                 break;
             }
 
@@ -919,24 +932,35 @@ public class MapBuilderBehavior extends Behavior implements IMapBuilderBehavior 
         return count;
     }
 
-    private void findMostCommonBlock(List blocksNeeded) {
-        /*
-        listOfBlocksAndTheirCount
-        int highestCount
-        int MostCommonCount = 0;
-        IBlockState highestCountState
-        for (every block in schematic) {
-            update count of current block in listOfBlocksAndTheirCount
-            if (current block count > highestCount) {
-                highestCount = current block count
-                highestCountState = current block
-            }
-        }
-         */
+    private void findMostCommonBlock(List<Tuple<BetterBlockPos, IBlockState>> blocksNeeded) {
+        int countOfBlock = 0;
+        HashMap<IBlockState, Integer> perBlockCount = new HashMap<>(); //will add +1 whenever the same block is detected to value
         int highest = -1;
-        int currentblockcount = 0;
+        IBlockState highestCountState = null;
 
+        //figures out the highest block count
+        for(int i = 0; i < blocksNeeded.size(); i++) { //loop through every block in the schematic (aka blocksNeeded list)
+            if (perBlockCount.containsKey(blocksNeeded.get(i).getSecond())) { //if the block is already listed in the hashmap
 
+                countOfBlock = perBlockCount.get(blocksNeeded.get(i).getSecond()); //saves value to var
+                countOfBlock++;
+                perBlockCount.replace(blocksNeeded.get(i).getSecond(), countOfBlock); //overwrites old value 1 more block
+
+                //finds highest count
+                if(countOfBlock > highest) {
+                    highest = countOfBlock;
+                    highestCountState = blocksNeeded.get(i).getSecond(); //saves key to var
+                }
+
+            } else if (!(perBlockCount.containsKey(blocksNeeded.get(i).getSecond()))) { //block is not in the hash map
+                //add it as a key value and +1 to value
+                perBlockCount.putIfAbsent(blocksNeeded.get(i).getSecond(), 1);
+
+            } else Helper.HELPER.logDirect("something has gone wrong in `findMostCommonBlock`");
+        }
+
+        mostCommonBlock = highestCountState;
+        amountOfMostCommonBlock = countOfBlock;
     }
 
     //shulker methods
