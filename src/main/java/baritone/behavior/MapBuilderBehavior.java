@@ -404,14 +404,15 @@ public class MapBuilderBehavior extends Behavior implements IMapBuilderBehavior 
                         }
                     }
                     if(stacksToLoot == 0) {
-                        //we want to ignore the rest of the method
-                        currentState = State.Building;
+                        //if its 0 it creates an infinite loop
+                        stacksToLoot = 1;
                     }
 
                     //figures out which shulker contains the blocks needed
                     Helper.HELPER.logDirect("We need " + stacksToLoot + " stacks of: " + closestNeededBlock.toString());
                     curCheckingShulker = null;
                     for (ShulkerInfo curShulker : shulkerList) {
+                        curShulker.contents = getOpenShulkerContents(); // Update the shulker contents
                         for (ItemStack stack : curShulker.contents) {
                             if (!(stack.getItem() instanceof ItemBlock)) { //to prevent typecasting crash
                                 continue;
