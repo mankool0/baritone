@@ -81,10 +81,6 @@ public class MapBuilderBehavior extends Behavior implements IMapBuilderBehavior 
     private IBlockState closestNeededBlock;
     private int stacksToLoot = 0;
 
-    private IBlockState mostCommonBlock; //holds the most common block in the schematic
-    private int amountOfMostCommonBlock = -1;
-
-
 
     private enum State {
         Nothing,
@@ -811,8 +807,6 @@ public class MapBuilderBehavior extends Behavior implements IMapBuilderBehavior 
             }
         }
 
-        findMostCommonBlock(blocksNeeded); //takes the list of ALL BLOCKS and sets the class var to help with material gathering
-
         IBlockState closestItem = null;
         double closestDistance = Double.MAX_VALUE;
         for (Tuple<BetterBlockPos, IBlockState> curCheck : blocksNeeded) {
@@ -930,37 +924,6 @@ public class MapBuilderBehavior extends Behavior implements IMapBuilderBehavior 
         }
 
         return count;
-    }
-
-    private void findMostCommonBlock(List<Tuple<BetterBlockPos, IBlockState>> blocksNeeded) {
-        int countOfBlock = 0;
-        HashMap<IBlockState, Integer> perBlockCount = new HashMap<>(); //will add +1 whenever the same block is detected to value
-        int highest = -1;
-        IBlockState highestCountState = null;
-
-        //figures out the highest block count
-        for(int i = 0; i < blocksNeeded.size(); i++) { //loop through every block in the schematic (aka blocksNeeded list)
-            if (perBlockCount.containsKey(blocksNeeded.get(i).getSecond())) { //if the block is already listed in the hashmap
-
-                countOfBlock = perBlockCount.get(blocksNeeded.get(i).getSecond()); //saves value to var
-                countOfBlock++;
-                perBlockCount.replace(blocksNeeded.get(i).getSecond(), countOfBlock); //overwrites old value 1 more block
-
-                //finds highest count
-                if(countOfBlock > highest) {
-                    highest = countOfBlock;
-                    highestCountState = blocksNeeded.get(i).getSecond(); //saves key to var
-                }
-
-            } else if (!(perBlockCount.containsKey(blocksNeeded.get(i).getSecond()))) { //block is not in the hash map
-                //add it as a key value and +1 to value
-                perBlockCount.putIfAbsent(blocksNeeded.get(i).getSecond(), 1);
-
-            } else Helper.HELPER.logDirect("something has gone wrong in `findMostCommonBlock`");
-        }
-
-        mostCommonBlock = highestCountState;
-        amountOfMostCommonBlock = countOfBlock;
     }
 
     //shulker methods
