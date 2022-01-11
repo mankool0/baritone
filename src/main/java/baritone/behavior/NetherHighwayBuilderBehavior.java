@@ -760,7 +760,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                         curState = isHighwayCorrect(startCheckPos, startCheckPosLiq, tempCheckBackDist + 5, settings.highwayRenderLiquidScanArea.value);
                     }
                     if (curState == HighwayState.Liquids) {
-                        Helper.HELPER.logDirect("Found liquids that should be something else. Fixing.");
+                        Helper.HELPER.logDirect("Removing liquids.");
                         currentState = State.LiquidRemovalPrep;
                         liquidPathingCanMine = true;
                         timer = 0;
@@ -777,7 +777,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
                     curState = isHighwayCorrect(startCheckPos, startCheckPosLiq, tempCheckBackDist, false); // Don't check front for blocks as we are probably just mining
                     if (curState == HighwayState.Blocks) {
-                        Helper.HELPER.logDirect("Found blocks that should be something else. Fixing.");
+                        Helper.HELPER.logDirect("Fixing invalid blocks.");
                         currentState = State.Nothing;
                         timer = 0;
                         return;
@@ -1718,7 +1718,6 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     return;
                 }
 
-                Helper.HELPER.logDirect("LootEnderChestPlaceLocPrep");
                 Vec3d curPos = new Vec3d(ctx.playerFeet().getX() + (7 * -highwayDirection.x), ctx.playerFeet().getY(), ctx.playerFeet().getZ() + (7 * -highwayDirection.z)); // Go back a bit just in case
                 Vec3d direction = new Vec3d(highwayDirection.x, highwayDirection.y, highwayDirection.z);
 
@@ -1733,7 +1732,6 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     return; // Wait to get there
                 }
 
-                Helper.HELPER.logDirect("GoingToLootEnderChestPlaceLoc");
                 if (ctx.playerFeet().getDistance(placeLoc.getX(), placeLoc.getY(), placeLoc.getZ()) <= (ctx.playerController().getBlockReachDistance() - 1)) {
                     // We have arrived
                     baritone.getPathingBehavior().cancelEverything();
@@ -1767,7 +1765,6 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     return; // Wait for build to complete
                 }
 
-                Helper.HELPER.logDirect("PlacingLootEnderChest");
                 baritone.getPathingBehavior().cancelEverything();
                 settings.buildRepeat.value = new Vec3i(0, 0, 0);
 
@@ -1802,7 +1799,6 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     return;
                 }
 
-                Helper.HELPER.logDirect("OpeningLootEnderChest");
                 Optional<Rotation> enderChestReachable = RotationUtils.reachable(ctx.player(), placeLoc,
                         ctx.playerController().getBlockReachDistance());
                 enderChestReachable.ifPresent(rotation -> baritone.getLookBehavior().updateTarget(rotation, true));
@@ -1825,7 +1821,6 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     return;
                 }
 
-                Helper.HELPER.logDirect("LootingLootEnderChestPicks");
                 if (!(Helper.mc.currentScreen instanceof GuiChest)) {
                     currentState = State.OpeningLootEnderChest;
                     return;
@@ -1859,7 +1854,6 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 if (timer < 40) {
                     return;
                 }
-                Helper.HELPER.logDirect("LootingLootEnderChestEnderChests");
                 if (!(Helper.mc.currentScreen instanceof GuiChest)) {
                     currentState = State.OpeningLootEnderChest;
                     return;
@@ -1894,7 +1888,6 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
             case LootingLootEnderChestGapples: {
                 // TODO: Finish this
-                Helper.HELPER.logDirect("LootingLootEnderChestGapples");
                 currentState = State.Nothing;
                 break;
             }
@@ -2345,7 +2338,6 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     return;
                 }
 
-                Helper.HELPER.logDirect("EmptyShulkerPlaceLocPrep");
                 Vec3d curPos = new Vec3d(ctx.playerFeet().getX() + (7 * -highwayDirection.x), ctx.playerFeet().getY(), ctx.playerFeet().getZ() + (7 * -highwayDirection.z)); // Go back a bit just in case
                 Vec3d direction = new Vec3d(highwayDirection.x, highwayDirection.y, highwayDirection.z);
 
@@ -2360,7 +2352,6 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     return; // Wait to get there
                 }
 
-                Helper.HELPER.logDirect("GoingToEmptyShulkerPlaceLoc");
                 if (ctx.playerFeet().getDistance(placeLoc.getX(), placeLoc.getY(), placeLoc.getZ()) <= (ctx.playerController().getBlockReachDistance() - 1)) {
                     // We have arrived
                     baritone.getPathingBehavior().cancelEverything();
@@ -2404,7 +2395,6 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     return; // Wait for build to complete
                 }
 
-                Helper.HELPER.logDirect("PlacingEmptyShulker");
                 baritone.getPathingBehavior().cancelEverything();
                 // Shulker box spot isn't air or shulker, lets fix that
                 if (!(Helper.mc.world.getBlockState(placeLoc).getBlock() instanceof BlockAir) && !(Helper.mc.world.getBlockState(placeLoc).getBlock() instanceof BlockShulkerBox)) {
