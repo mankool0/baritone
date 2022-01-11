@@ -1294,9 +1294,14 @@ public final class Settings {
     public final Setting<Double> highwayObsidianMaxSearchDist = new Setting<>(6D);
 
     /**
-     * If true will render all of the locations being scanned for liquids while building
+     * If true will render all the locations being scanned for liquids while building
      */
     public final Setting<Boolean> highwayRenderLiquidScanArea = new Setting<>(false);
+
+    /**
+     * If true will render the highway building locations
+     */
+    public final Setting<Boolean> highwayRenderBuildingArea = new Setting<>(false);
 
     /**
      * The maximum distance Baritone should go back when looking for a lost shulker
@@ -1324,9 +1329,9 @@ public final class Settings {
     public final Setting<Boolean> highwayAllowMixedShulks = new Setting<>(true);
 
     /**
-     * If true will try to place a totem into an empty offhand during digging/paving
+     * If true will try to place a totem into offhand during digging/paving
      */
-    public final Setting<Boolean> highwayEmptyOffhandTotem = new Setting<>(false);
+    public final Setting<Boolean> highwayAutoTotem = new Setting<>(false);
 
     /**
      * Base Y level of the highway schematic
@@ -1342,6 +1347,42 @@ public final class Settings {
      * Support Y level, where empty shulkers and echests for looting get placed
      */
     public final Setting<Integer> highwayEmptyShulkEchestY = new Setting<>(121);
+
+    /**
+     * Highway width without the rails
+     */
+    public final Setting<Integer> highwayWidth = new Setting<>(4);
+
+    /**
+     * Highway height without the obsidian
+     */
+    public final Setting<Integer> highwayHeight = new Setting<>(4);
+
+    /**
+     * Width of support blocks for unpaved highway
+     */
+    public final Setting<Integer> highwaySupportWidth = new Setting<>(2);
+
+    /**
+     * Offset of support blocks
+     */
+    public final Setting<Integer> highwaySupportOffset = new Setting<>(2);
+
+    /**
+     * If enabled will dig and pave for rails
+     */
+    public final Setting<Boolean> highwayRail = new Setting<>(true);
+
+    /**
+     * If not -1 will keep this distance from the end of the highway
+     * Useful for digging small tunnels quicker
+     */
+    public final Setting<Integer> highwayEndDistance = new Setting<>(-1);
+
+    /**
+     * Number of blocks the builder can break per tick
+     */
+    public final Setting<Integer> multiBreak = new Setting<>(-1);
 
     /**
      * A map of lowercase setting field names to their respective setting
