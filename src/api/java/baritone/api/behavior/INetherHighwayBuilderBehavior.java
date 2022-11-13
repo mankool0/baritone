@@ -15,17 +15,16 @@
  * along with Baritone.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package baritone.utils.accessor;
+package baritone.api.behavior;
 
-import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
 
-public interface IPlayerControllerMP {
+public interface INetherHighwayBuilderBehavior extends IBehavior {
+    boolean isBuildingHighwayState();
 
-    void setIsHittingBlock(boolean isHittingBlock);
+    void build(int startX, int startZ, Vec3 direct, boolean selfSolve, boolean pave);
 
-    BlockPos getCurrentBlock();
+    void stop();
 
-    void callSyncCurrentPlayItem();
-
-    void setDestroyDelay(int delay);
+    void printStatus();
 }

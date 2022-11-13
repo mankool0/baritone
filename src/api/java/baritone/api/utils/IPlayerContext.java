@@ -21,6 +21,7 @@ import baritone.api.cache.IWorldData;
 import java.util.Optional;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
+import baritone.api.utils.accessor.IClientPlayerEntity;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -40,6 +41,8 @@ public interface IPlayerContext {
     LocalPlayer player();
 
     IPlayerController playerController();
+
+    IClientPlayerEntity getPlayerEntity();
 
     Level world();
 

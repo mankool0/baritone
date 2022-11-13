@@ -38,4 +38,7 @@ public abstract class MixinPlayerController implements IPlayerControllerMP {
     @Invoker("ensureHasSentCarriedItem")
     @Override
     public abstract void callSyncCurrentPlayItem();
+
+    @Accessor("destroyDelay")
+    public abstract void setDestroyDelay(int delay);
 }

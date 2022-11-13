@@ -17,12 +17,15 @@
     "MixinEntityRenderManager",
     "MixinItemStack",
     "MixinLivingEntity",
+    "MixinLongArrayNBT",
     "MixinLootContext",
     "MixinMinecraft",
-    "MixinLongArrayNBT",
     "MixinNetworkManager",
     "MixinPlayerController",
     "MixinScreen",
     "MixinWorldRenderer"
+  ],
+  "mixins": [
+    "MixinBlockBehaviourBehaviour"
   ]
 }

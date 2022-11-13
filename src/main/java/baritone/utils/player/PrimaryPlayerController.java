@@ -93,4 +93,9 @@ public enum PrimaryPlayerController implements IPlayerController, Helper {
     public void setHittingBlock(boolean hittingBlock) {
         ((IPlayerControllerMP) mc.gameMode).setIsHittingBlock(hittingBlock);
     }
+
+    @Override
+    public void setDestroyDelay(int delay) {
+        ((IPlayerControllerMP) mc.gameMode).setDestroyDelay(delay);
+    }
 }

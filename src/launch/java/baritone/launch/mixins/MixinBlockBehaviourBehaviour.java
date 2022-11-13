@@ -15,17 +15,20 @@
  * along with Baritone.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package baritone.utils.accessor;
+package baritone.launch.mixins;
 
-import net.minecraft.core.BlockPos;
+import baritone.api.utils.accessor.IBlockBehaviour;
+import net.minecraft.world.level.block.state.BlockBehaviour;
+import org.spongepowered.asm.mixin.Final;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
 
-public interface IPlayerControllerMP {
+@Mixin(BlockBehaviour.class)
+public abstract class MixinBlockBehaviourBehaviour implements IBlockBehaviour {
+    @Shadow @Final protected boolean hasCollision;
 
-    void setIsHittingBlock(boolean isHittingBlock);
-
-    BlockPos getCurrentBlock();
-
-    void callSyncCurrentPlayItem();
-
-    void setDestroyDelay(int delay);
+    public boolean hasCollision()
+    {
+        return this.hasCollision;
+    }
 }

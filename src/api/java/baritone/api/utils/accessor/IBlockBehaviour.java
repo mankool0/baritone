@@ -15,17 +15,8 @@
  * along with Baritone.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package baritone.utils.accessor;
+package baritone.api.utils.accessor;
 
-import net.minecraft.core.BlockPos;
-
-public interface IPlayerControllerMP {
-
-    void setIsHittingBlock(boolean isHittingBlock);
-
-    BlockPos getCurrentBlock();
-
-    void callSyncCurrentPlayItem();
-
-    void setDestroyDelay(int delay);
+public interface IBlockBehaviour {
+    boolean hasCollision();
 }

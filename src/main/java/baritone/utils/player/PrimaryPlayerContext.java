@@ -23,6 +23,7 @@ import baritone.api.utils.Helper;
 import baritone.api.utils.IPlayerContext;
 import baritone.api.utils.IPlayerController;
 import baritone.api.utils.RayTraceUtils;
+import baritone.api.utils.accessor.IClientPlayerEntity;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.HitResult;
@@ -45,6 +46,11 @@ public enum PrimaryPlayerContext implements IPlayerContext, Helper {
     @Override
     public IPlayerController playerController() {
         return PrimaryPlayerController.INSTANCE;
+    }
+
+    @Override
+    public IClientPlayerEntity getPlayerEntity() {
+        return ClientPlayerEntity.INSTANCE;
     }
 
     @Override
