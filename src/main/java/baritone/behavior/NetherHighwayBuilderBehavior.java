@@ -29,20 +29,16 @@ import baritone.api.schematic.ISchematic;
 import baritone.api.schematic.WhiteBlackSchematic;
 import baritone.api.utils.*;
 import baritone.api.utils.Rotation;
-import baritone.api.utils.accessor.IBlockBehaviour;
 import baritone.api.utils.input.Input;
 import baritone.pathing.movement.MovementHelper;
 import baritone.process.BuilderProcess;
 import baritone.utils.BlockStateInterface;
 import baritone.utils.IRenderer;
-import baritone.utils.player.ClientPlayerEntity;
-import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.ContainerScreen;
 import net.minecraft.client.gui.screens.inventory.ShulkerBoxScreen;
 import net.minecraft.core.*;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
@@ -51,7 +47,6 @@ import net.minecraft.network.protocol.game.ServerboundSwingPacket;
 import net.minecraft.world.ContainerHelper;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
-import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
@@ -70,9 +65,10 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.util.Mth;
+import net.minecraft.world.phys.shapes.Shapes;
+import net.minecraft.world.phys.shapes.VoxelShape;
 
 import java.awt.*;
-import java.lang.reflect.Field;
 import java.util.List;
 import java.util.*;
 import java.util.concurrent.locks.Lock;
@@ -84,7 +80,7 @@ import static baritone.pathing.movement.Movement.HORIZONTALS_BUT_ALSO_DOWN_____S
 public final class NetherHighwayBuilderBehavior extends Behavior implements INetherHighwayBuilderBehavior, IRenderer {
 
     private CompositeSchematic schematic;
-    private FillSchematic liqCheckSchem;
+    private WhiteBlackSchematic liqCheckSchem;
     private BetterBlockPos originBuild;
     private BetterBlockPos firstStartingPos;
     private Vec3 originVector = new Vec3(0, 0, 0);
@@ -158,7 +154,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             Items.YELLOW_SHULKER_BOX, Items.LIME_SHULKER_BOX, Items.PINK_SHULKER_BOX, Items.GRAY_SHULKER_BOX, Items.LIGHT_GRAY_SHULKER_BOX, Items.CYAN_SHULKER_BOX, Items.PURPLE_SHULKER_BOX,
             Items.BLUE_SHULKER_BOX, Items.BROWN_SHULKER_BOX, Items.GREEN_SHULKER_BOX, Items.RED_SHULKER_BOX, Items.BLACK_SHULKER_BOX);
 
-    private final List<BlockState> blackListBlocks = Arrays.asList(Blocks.AIR.defaultBlockState(), Blocks.LAVA.defaultBlockState(), Blocks.FIRE.defaultBlockState(), Blocks.BROWN_MUSHROOM.defaultBlockState(), Blocks.RED_MUSHROOM.defaultBlockState());
+    private final List<BlockState> blackListBlocks = Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.LAVA.defaultBlockState(), Blocks.FIRE.defaultBlockState(), Blocks.BROWN_MUSHROOM.defaultBlockState(), Blocks.RED_MUSHROOM.defaultBlockState());
 
 
     private BlockPos boatLocation = null;
@@ -292,7 +288,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         int highwayWidthLiqOffsetRail = -(Math.round(highwayWidth / 2.0f)) - 2;
 
         ISchematic obsidSchemBot;
-        FillSchematic topAir;
+        WhiteBlackSchematic topAir;
         WhiteBlackSchematic noLavaBotSides = new WhiteBlackSchematic(1, 1, 1, Collections.singletonList(Blocks.LAVA.defaultBlockState()), Blocks.NETHERRACK.defaultBlockState(), false, true, true);
         WhiteBlackSchematic supportNetherRack;
         WhiteBlackSchematic sideRailSupport;
@@ -300,9 +296,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         if (pave)
             sideRail = new FillSchematic(1, 1, 1, Blocks.OBSIDIAN.defaultBlockState());
         else
-            sideRail = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.AIR.defaultBlockState(), Blocks.OBSIDIAN.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
+            sideRail = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.OBSIDIAN.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
 
-        FillSchematic sideRailAir = new FillSchematic(1, 2, 1, Blocks.AIR.defaultBlockState());
+        WhiteBlackSchematic sideRailAir = new WhiteBlackSchematic(1, 2, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
         CompositeSchematic fullSchem = new CompositeSchematic(0, 0,0);
 
         // +X, -X, +X +Z, -X -Z
@@ -328,28 +324,28 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 eChestEmptyShulkOriginVector = new Vec3(startX, 0, startZ - highwayWidthLiqOffsetRail);
             }
 
-            topAir = new FillSchematic(1, highwayHeight - 1, highwayWidth, Blocks.AIR.defaultBlockState());
+            topAir = new WhiteBlackSchematic(1, highwayHeight - 1, highwayWidth, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
             if (pave) {
                 obsidSchemBot = new FillSchematic(1, 1, highwayWidth, Blocks.OBSIDIAN.defaultBlockState());
                 liqOriginVector = liqOriginVector.add(0, 0, 1);
                 if (highwayRail) {
-                    liqCheckSchem = new FillSchematic(1, highwayHeight - 1, highwayWidth + 2, Blocks.AIR.defaultBlockState());
+                    liqCheckSchem = new WhiteBlackSchematic(1, highwayHeight - 1, highwayWidth + 2, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
                 } else {
-                    liqCheckSchem = new FillSchematic(1, highwayHeight - 1, highwayWidth, Blocks.AIR.defaultBlockState());
+                    liqCheckSchem = new WhiteBlackSchematic(1, highwayHeight - 1, highwayWidth, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
                 }
 
                 if (diag && highwayRail) {
-                    sideRailSupport = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.AIR.defaultBlockState(), Blocks.LAVA.defaultBlockState(), Blocks.FIRE.defaultBlockState()), Blocks.NETHERRACK.defaultBlockState(), false, true, true);
+                    sideRailSupport = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.LAVA.defaultBlockState(), Blocks.FIRE.defaultBlockState()), Blocks.NETHERRACK.defaultBlockState(), false, true, true);
                     fullSchem.put(sideRailSupport, 0, 1, 0);
                     fullSchem.put(sideRailSupport, 0, 1, highwayWidth + 1);
                 }
             } else {
-                obsidSchemBot = new WhiteBlackSchematic(1, 1, highwayWidth, Arrays.asList(Blocks.AIR.defaultBlockState(), Blocks.OBSIDIAN.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false); // Allow only air and obsidian
+                obsidSchemBot = new WhiteBlackSchematic(1, 1, highwayWidth, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.OBSIDIAN.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false); // Allow only air and obsidian
                 supportNetherRack = new WhiteBlackSchematic(1, 1, supportWidth, blackListBlocks, Blocks.NETHERRACK.defaultBlockState(), false, true, true); // Allow everything other than air and lava
                 if (highwayRail) {
-                    liqCheckSchem = new FillSchematic(1, highwayHeight + 1, highwayWidth + 4, Blocks.AIR.defaultBlockState());
+                    liqCheckSchem = new WhiteBlackSchematic(1, highwayHeight + 1, highwayWidth + 4, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
                 } else {
-                    liqCheckSchem = new FillSchematic(1, highwayHeight + 1, highwayWidth + 2, Blocks.AIR.defaultBlockState());
+                    liqCheckSchem = new WhiteBlackSchematic(1, highwayHeight + 1, highwayWidth + 2, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
                 }
                 if (supportWidth + 2 <= highwayWidth) {
                     fullSchem.put(noLavaBotSides, 0, 0, 1);
@@ -390,28 +386,28 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 eChestEmptyShulkOriginVector = new Vec3(startX - highwayWidthLiqOffsetRail, 0, startZ);
             }
 
-            topAir = new FillSchematic(highwayWidth, highwayHeight - 1, 1, Blocks.AIR.defaultBlockState());
+            topAir = new WhiteBlackSchematic(highwayWidth, highwayHeight - 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
             if (pave) {
                 obsidSchemBot = new FillSchematic(highwayWidth, 1, 1, Blocks.OBSIDIAN.defaultBlockState());
                 liqOriginVector = liqOriginVector.add(1, 0, 0);
                 if (highwayRail) {
-                    liqCheckSchem = new FillSchematic(highwayWidth + 2, highwayHeight - 1, 1, Blocks.AIR.defaultBlockState());
+                    liqCheckSchem = new WhiteBlackSchematic(highwayWidth + 2, highwayHeight - 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
                 } else {
-                    liqCheckSchem = new FillSchematic(highwayWidth, highwayHeight - 1, 1, Blocks.AIR.defaultBlockState());
+                    liqCheckSchem = new WhiteBlackSchematic(highwayWidth, highwayHeight - 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
                 }
 
                 if (diag && highwayRail) {
-                    sideRailSupport = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.AIR.defaultBlockState(), Blocks.LAVA.defaultBlockState(), Blocks.FIRE.defaultBlockState()), Blocks.NETHERRACK.defaultBlockState(), false, true, true);
+                    sideRailSupport = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.LAVA.defaultBlockState(), Blocks.FIRE.defaultBlockState()), Blocks.NETHERRACK.defaultBlockState(), false, true, true);
                     fullSchem.put(sideRailSupport, 0, 1, 0);
                     fullSchem.put(sideRailSupport, highwayWidth + 1, 1, 0);
                 }
             } else {
-                obsidSchemBot = new WhiteBlackSchematic(highwayWidth, 1, 1, Arrays.asList(Blocks.AIR.defaultBlockState(), Blocks.OBSIDIAN.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false); // Allow only air and obsidian
+                obsidSchemBot = new WhiteBlackSchematic(highwayWidth, 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.OBSIDIAN.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false); // Allow only air and obsidian
                 supportNetherRack = new WhiteBlackSchematic(supportWidth, 1, 1, blackListBlocks, Blocks.NETHERRACK.defaultBlockState(), false, true, true); // Allow everything other than air and lava
                 if (highwayRail) {
-                    liqCheckSchem = new FillSchematic(highwayWidth + 4, highwayHeight + 1, 1, Blocks.AIR.defaultBlockState());
+                    liqCheckSchem = new WhiteBlackSchematic(highwayWidth + 4, highwayHeight + 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
                 } else {
-                    liqCheckSchem = new FillSchematic(highwayWidth + 2, highwayHeight + 1, 1, Blocks.AIR.defaultBlockState());
+                    liqCheckSchem = new WhiteBlackSchematic(highwayWidth + 2, highwayHeight + 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
                 }
                 if (supportWidth + 2 <= highwayWidth) {
                     fullSchem.put(noLavaBotSides, 1, 0, 0);
@@ -692,7 +688,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     return;
                 }
 
-                if (getItemCountInventory(Item.getId(Items.GOLDEN_APPLE)) <= settings.highwayGapplesThreshold.value) {
+                if (getItemCountInventory(Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) <= settings.highwayGapplesThreshold.value) {
                     if (getShulkerCountInventory(ShulkerType.Gapple) == 0) {
                         Helper.HELPER.logDirect("No more gapples, pausing");
                         baritone.getPathingBehavior().cancelEverything();
@@ -962,7 +958,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             }
 
             case LiquidRemovalGapplePrep: {
-                int gappleSlot = putItemHotbar(Item.getId(Items.GOLDEN_APPLE));
+                int gappleSlot = putItemHotbar(Item.getId(Items.ENCHANTED_GOLDEN_APPLE));
                 if (gappleSlot == -1) {
                     Helper.HELPER.logDirect("Error getting gapple slot");
                     currentState = State.LiquidRemovalPrep;
@@ -970,7 +966,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 }
 
                 ItemStack stack = ctx.player().getInventory().items.get(gappleSlot);
-                if (Item.getId(stack.getItem()) == Item.getId(Items.GOLDEN_APPLE)) {
+                if (Item.getId(stack.getItem()) == Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) {
                     ctx.player().getInventory().selected = gappleSlot;
                 }
 
@@ -1460,7 +1456,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     return; // Wait to get there
                 }
 
-                if (getItemCountInventory(Item.getId(Items.GOLDEN_APPLE)) >= settings.highwayGapplesToHave.value || getShulkerSlot(ShulkerType.Gapple) == -1) {
+                if (getItemCountInventory(Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) >= settings.highwayGapplesToHave.value || getShulkerSlot(ShulkerType.Gapple) == -1) {
                     // We have enough gapples, or no more gapple shulker
                     currentState = State.Nothing;
                     return;
@@ -1536,7 +1532,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     return;
                 }
 
-                if (getItemCountInventory(Item.getId(Items.GOLDEN_APPLE)) < settings.highwayGapplesToHave.value) {
+                if (getItemCountInventory(Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) < settings.highwayGapplesToHave.value) {
                     int gapplesLooted = lootGappleChestSlot();
                     if (gapplesLooted > 0) {
                         Helper.HELPER.logDirect("Looted " + gapplesLooted + " gapples");
@@ -1783,7 +1779,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     baritone.getBuilderProcess().build("enderChest", new FillSchematic(1, 1, 1, Blocks.ENDER_CHEST.defaultBlockState()), placeLoc);
                 }
                 else {
-                    baritone.getBuilderProcess().build("eChestPrep", new FillSchematic(1, 2, 1, Blocks.AIR.defaultBlockState()), placeLoc);
+                    WhiteBlackSchematic tempSchem = new WhiteBlackSchematic(1, 2, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
+                    baritone.getBuilderProcess().build("eChestPrep", tempSchem, placeLoc);
                 }
                 //return;
 
@@ -2141,7 +2138,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     ctx.player().getInventory().selected = pickSlot;
                 }
 
-                if (!mc.level.getBlockState(placeLoc).getBlock().equals(Blocks.AIR)) {
+                // TODO: Debug and confirm this works
+                if (!(mc.level.getBlockState(placeLoc).getBlock() instanceof AirBlock)) {
                     setTarget(placeLoc);
                     instantMineActivated = true;
                 }
@@ -2190,7 +2188,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 }
 
                 // Force look at location
-                if (mc.level.getBlockState(placeLoc).getBlock().equals(Blocks.AIR)) {
+                if (mc.level.getBlockState(placeLoc).getBlock() instanceof AirBlock) {
                     Optional<Rotation> shulkerReachable = RotationUtils.reachable(ctx.player(), placeLoc.below(),
                             ctx.playerController().getBlockReachDistance());
                     shulkerReachable.ifPresent(rotation -> baritone.getLookBehavior().updateTarget(rotation, true));
@@ -2626,7 +2624,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             //boolean l_IsWater = mc.level.getBlockState(neighbor).getBlock() == Blocks.WATER;
 
             // TODO: MAKE SURE THIS WORKS
-            if (((IBlockBehaviour) mc.level.getBlockState(neighbor)).hasCollision())
+            VoxelShape collisionShape = mc.level.getBlockState(neighbor).getCollisionShape(mc.level, neighbor);
+            boolean hasCollison = collisionShape != Shapes.empty();
+            if (hasCollison)
             {
                 final Vec3 hitVec = new Vec3(neighbor.getX(), neighbor.getY(), neighbor.getZ()).add(0.5, 0.5, 0.5).add(new Vec3(side2.getStepX(), side2.getStepY(), side2.getStepZ()).scale(0.5));
                 if (eyesPos.distanceTo(hitVec) <= p_Distance)
@@ -2683,7 +2683,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
         BlockState l_State = mc.level.getBlockState(pos);
 
-        if (l_State.getBlock() == Blocks.AIR)
+        if (l_State.getBlock() instanceof AirBlock)
         {
             final BlockPos[] l_Blocks =
                     { pos.north(), pos.south(), pos.east(), pos.west(), pos.above(), pos.below() };
@@ -2692,7 +2692,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             {
                 BlockState l_State2 = mc.level.getBlockState(l_Pos);
 
-                if (l_State2.getBlock() == Blocks.AIR)
+                if (l_State2.getBlock() instanceof AirBlock)
                     continue;
 
                 for (final Direction side : Direction.values())
@@ -2702,8 +2702,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     boolean l_IsWater = mc.level.getBlockState(neighbor).getBlock() == Blocks.WATER;
 
                     // TODO: make sure this works
-                    boolean hasCollison = ((IBlockBehaviour) mc.level.getBlockState(neighbor)).hasCollision(); // TODO IS TEMP
-                    if (((IBlockBehaviour) mc.level.getBlockState(neighbor)).hasCollision())
+                    VoxelShape collisionShape = mc.level.getBlockState(neighbor).getCollisionShape(mc.level, neighbor);
+                    boolean hasCollison = collisionShape != Shapes.empty();
+                    if (hasCollison)
                     {
                         return ValidResult.Ok;
                     }
@@ -2993,7 +2994,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                         }
                         if (i == 1) {
                             BlockState desiredState = schematic.desiredState(x, y, z, current, this.approxPlaceable);
-                            if (desiredState.getBlock().equals(Blocks.AIR)) {
+                            if (desiredState.getBlock() instanceof AirBlock) {
                                 renderBlocksBuilding.put(new BlockPos(blockX, blockY, blockZ), Color.CYAN);
                             } else if (desiredState.getBlock().equals(Blocks.NETHERRACK)) {
                                 renderBlocksBuilding.put(new BlockPos(blockX, blockY, blockZ), Color.RED);
@@ -3074,15 +3075,19 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
             renderBlocksLiquid.forEach(pos -> {
                 BlockState state = bsi.get0(pos);
+                VoxelShape shape;
                 AABB toDraw;
 
-                if (state.getBlock().equals(Blocks.AIR)) {
-                    toDraw = Blocks.DIRT.defaultBlockState().getShape(player.level, pos).bounds();
+                if (state.getBlock() instanceof AirBlock) {
+                    shape = Blocks.DIRT.defaultBlockState().getShape(player.level, pos);
                 } else {
-                    toDraw = state.getShape(player.level, pos).bounds();
+                    shape = state.getShape(player.level, pos);
                 }
-
-                IRenderer.drawAABB(event.getModelViewStack(), toDraw, .002D);
+                if (!shape.isEmpty()) {
+                    AABB bounds = shape.bounds();
+                    toDraw = new AABB(pos.getX(), pos.getY(), pos.getZ(), pos.getX() + bounds.getXsize(), pos.getY() + bounds.getYsize(), pos.getZ() + bounds.getZsize());
+                    IRenderer.drawAABB(event.getModelViewStack(), toDraw, .002D);
+                }
             });
 
             IRenderer.endLines(settings.renderSelectionBoxesIgnoreDepth.value);
@@ -3097,17 +3102,21 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 IRenderer.startLines(color, 2, settings.renderSelectionBoxesIgnoreDepth.value);
 
                 BlockState state = bsi.get0(pos);
+                VoxelShape shape;
                 AABB toDraw;
 
-                if (state.getBlock().equals(Blocks.AIR)) {
-                    toDraw = Blocks.DIRT.defaultBlockState().getShape(player.level, pos).bounds();
+                if (state.getBlock() instanceof AirBlock) {
+                    shape = Blocks.DIRT.defaultBlockState().getShape(player.level, pos);
                 } else {
-                    toDraw = state.getShape(player.level, pos).bounds();
+                    shape = state.getShape(player.level, pos);
                 }
+                if (!shape.isEmpty()) {
+                    AABB bounds = shape.bounds();
+                    toDraw = new AABB(pos.getX(), pos.getY(), pos.getZ(), pos.getX() + bounds.getXsize(), pos.getY() + bounds.getYsize(), pos.getZ() + bounds.getZsize());
+                    IRenderer.drawAABB(event.getModelViewStack(), toDraw, .002D);
 
-                IRenderer.drawAABB(event.getModelViewStack(), toDraw, .002D);
-
-                IRenderer.endLines(settings.renderSelectionBoxesIgnoreDepth.value);
+                    IRenderer.endLines(settings.renderSelectionBoxesIgnoreDepth.value);
+                }
             });
         }
     }
@@ -3324,11 +3333,11 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
         int gappleCount = 0;
         for (ItemStack curStack : contents) {
-            if (Item.getId(curStack.getItem()) != Item.getId(Items.AIR) && Item.getId(curStack.getItem()) != Item.getId(Items.GOLDEN_APPLE)) {
+            if (Item.getId(curStack.getItem()) != Item.getId(Items.AIR) && Item.getId(curStack.getItem()) != Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) {
                 return 0;
             }
 
-            if (Item.getId(curStack.getItem()) == Item.getId(Items.GOLDEN_APPLE)) {
+            if (Item.getId(curStack.getItem()) == Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) {
                 gappleCount++;
             }
         }
@@ -3557,7 +3566,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             if (curContainer.getSlot(i).getItem().getItem() instanceof EnchantedGoldenAppleItem) {
                 count += curContainer.getSlot(i).getItem().getCount();
 
-                if (getItemCountInventory(Item.getId(Items.GOLDEN_APPLE)) == 0 && getItemSlot(Item.getId(Items.AIR)) == -1) {
+                if (getItemCountInventory(Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) == 0 && getItemSlot(Item.getId(Items.AIR)) == -1) {
                     // For some reason we have no gapples and no air slots so we have to throw out some netherrack
                     int netherRackSlot = getItemSlot(Item.getId(Blocks.NETHERRACK.asItem()));
                     if (netherRackSlot == 8) {

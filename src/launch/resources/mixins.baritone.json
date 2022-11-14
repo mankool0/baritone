@@ -24,8 +24,5 @@
     "MixinPlayerController",
     "MixinScreen",
     "MixinWorldRenderer"
-  ],
-  "mixins": [
-    "MixinBlockBehaviourBehaviour"
   ]
 }
