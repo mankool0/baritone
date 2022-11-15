@@ -2621,9 +2621,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             final BlockPos neighbor = pos.offset(side.getNormal());
             final Direction side2 = side.getOpposite();
 
-            //boolean l_IsWater = mc.level.getBlockState(neighbor).getBlock() == Blocks.WATER;
+            if (!mc.level.getBlockState(neighbor).getFluidState().isEmpty())
+                continue;
 
-            // TODO: MAKE SURE THIS WORKS
             VoxelShape collisionShape = mc.level.getBlockState(neighbor).getCollisionShape(mc.level, neighbor);
             boolean hasCollison = collisionShape != Shapes.empty();
             if (hasCollison)
@@ -2631,12 +2631,12 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 final Vec3 hitVec = new Vec3(neighbor.getX(), neighbor.getY(), neighbor.getZ()).add(0.5, 0.5, 0.5).add(new Vec3(side2.getStepX(), side2.getStepY(), side2.getStepZ()).scale(0.5));
                 if (eyesPos.distanceTo(hitVec) <= p_Distance)
                 {
-                    final Block neighborPos = mc.level.getBlockState(neighbor).getBlock();
+                    final Block neighborBlock = mc.level.getBlockState(neighbor).getBlock();
 
-                    final BlockHitResult neighborRes = new BlockHitResult(new Vec3(pos.getX(), pos.getY(), pos.getZ()), side, pos, false);
-                    final boolean activated = mc.level.getBlockState(neighbor).use(mc.level, mc.player, hand, neighborRes) == InteractionResult.PASS ? true : false;
+                    BlockHitResult blockHitResult = new BlockHitResult(hitVec, side2, neighbor, false);
+                    final boolean activated = mc.level.getBlockState(neighbor).use(mc.level, mc.player, hand, blockHitResult) == InteractionResult.SUCCESS;
 
-                    if (blackList.contains(neighborPos) || shulkerBlockList.contains(neighborPos) || activated)
+                    if (blackList.contains(neighborBlock) || shulkerBlockList.contains(neighborBlock) || activated)
                     {
                         mc.player.connection.send(new ServerboundPlayerCommandPacket(mc.player, ServerboundPlayerCommandPacket.Action.PRESS_SHIFT_KEY));
                     }
@@ -2644,10 +2644,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     {
                         faceVectorPacketInstant(hitVec);
                     }
-                    BlockHitResult blockHitResult = new BlockHitResult(new Vec3(neighbor.getX(), neighbor.getY(), neighbor.getZ()), side2, new BlockPos(hitVec), false);
                     InteractionResult l_Result2 = ctx.playerController().processRightClickBlock(mc.player, mc.level, hand, blockHitResult);
 
-                    if (l_Result2 != InteractionResult.FAIL)
+                    if (l_Result2 == InteractionResult.SUCCESS)
                     {
                         if (packetSwing)
                             mc.player.connection.send(new ServerboundSwingPacket(hand));
@@ -3500,7 +3499,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     lastZ + (mc.player.getZ() - lastZ) * mc.getFrameTime());
             BlockPos originPos = new BlockPos(pos.x, pos.y+0.5f, pos.z);
             double l_Offset = pos.y - originPos.getY();
-            PlaceResult l_Place = place(shulkerPlaceLoc, 5.0f, false, l_Offset == -0.5f, InteractionHand.MAIN_HAND);
+            PlaceResult l_Place = place(shulkerPlaceLoc, 5.0f, true, l_Offset == -0.5f, InteractionHand.MAIN_HAND);
         }
 
         return currentState;
