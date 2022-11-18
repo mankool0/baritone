@@ -156,6 +156,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
     private final List<BlockState> blackListBlocks = Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.LAVA.defaultBlockState(), Blocks.FIRE.defaultBlockState(), Blocks.BROWN_MUSHROOM.defaultBlockState(), Blocks.RED_MUSHROOM.defaultBlockState(), Blocks.MAGMA_BLOCK.defaultBlockState(), Blocks.SOUL_SAND.defaultBlockState(), Blocks.SOUL_SOIL.defaultBlockState());
 
+    private static final List<ItemLike> validPicksList = Arrays.asList(Items.DIAMOND_PICKAXE, Items.NETHERITE_PICKAXE);
 
     private BlockPos boatLocation = null;
     private boolean boatHasPassenger = false;
@@ -845,7 +846,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     return;
                 }
                 ItemStack stack = ctx.player().getInventory().items.get(pickSlot);
-                if (Item.getId(stack.getItem()) == Item.getId(Items.DIAMOND_PICKAXE)) {
+                if (validPicksList.contains(stack.getItem())) {
                     ctx.player().getInventory().selected = pickSlot;
                 }
 
@@ -1114,7 +1115,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                         return;
                     }
                     ItemStack stack = ctx.player().getInventory().items.get(pickSlot);
-                    if (Item.getId(stack.getItem()) == Item.getId(Items.DIAMOND_PICKAXE)) {
+                    if (validPicksList.contains(stack.getItem())) {
                         ctx.player().getInventory().selected = pickSlot;
                     }
 
@@ -2134,7 +2135,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     return;
                 }
                 ItemStack stack = ctx.player().getInventory().items.get(pickSlot);
-                if (Item.getId(stack.getItem()) == Item.getId(Items.DIAMOND_PICKAXE)) {
+                if (validPicksList.contains(stack.getItem())) {
                     ctx.player().getInventory().selected = pickSlot;
                 }
 
@@ -2218,7 +2219,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     currentState = State.FarmingEnderChestPrepPick;
                 }
                 if (instantMineLastBlock != null) {
-                    if (mc.player.getItemInHand(InteractionHand.MAIN_HAND).getItem() == Items.DIAMOND_PICKAXE) {
+                    if (validPicksList.contains(mc.player.getItemInHand(InteractionHand.MAIN_HAND).getItem())) {
                         mc.player.connection.send(new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK,
                                 instantMineLastBlock, instantMineDirection));
                     }
