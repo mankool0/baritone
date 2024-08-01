@@ -128,7 +128,7 @@ public class ToolSet {
             if (!Baritone.settings().useSwordToMine.value && itemStack.getItem() instanceof SwordItem) {
                 continue;
             }
-          
+
             if (Baritone.settings().itemSaver.value && (itemStack.getDamageValue() + Baritone.settings().itemSaverThreshold.value) >= itemStack.getMaxDamage() && itemStack.getMaxDamage() > 1) {
                 continue;
             }
@@ -177,7 +177,13 @@ public class ToolSet {
      * @return how long it would take in ticks
      */
     public static double calculateSpeedVsBlock(ItemStack item, BlockState state) {
-        float hardness = state.getDestroySpeed(null, null);
+        float hardness;
+        try {
+            hardness = state.getDestroySpeed(null, null);
+        } catch (NullPointerException npe) {
+            // can't easily determine the hardness so treat it as unbreakable
+            return -1;
+        }
         if (hardness < 0) {
             return -1;
         }

@@ -18,10 +18,7 @@
 package baritone.api.utils;
 
 import baritone.api.cache.IWorldData;
-import java.util.Optional;
-import java.util.stream.Stream;
-import java.util.stream.StreamSupport;
-import baritone.api.utils.accessor.IClientPlayerEntity;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -32,17 +29,21 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.Optional;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
+
 /**
  * @author Brady
  * @since 11/12/2018
  */
 public interface IPlayerContext {
 
+    Minecraft minecraft();
+
     LocalPlayer player();
 
     IPlayerController playerController();
-
-    IClientPlayerEntity getPlayerEntity();
 
     Level world();
 
@@ -87,6 +88,12 @@ public interface IPlayerContext {
     default Vec3 playerHead() {
         return new Vec3(player().position().x, player().position().y + player().getEyeHeight(), player().position().z);
     }
+
+    default Vec3 playerMotion() {
+        return player().getDeltaMovement();
+    }
+
+    BetterBlockPos viewerPos();
 
     default Rotation playerRotations() {
         return new Rotation(player().getYRot(), player().getXRot());

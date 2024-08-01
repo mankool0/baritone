@@ -20,8 +20,8 @@ package baritone.command.defaults;
 import baritone.Baritone;
 import baritone.api.IBaritone;
 import baritone.api.cache.IWaypoint;
-import baritone.api.cache.Waypoint;
 import baritone.api.cache.IWorldData;
+import baritone.api.cache.Waypoint;
 import baritone.api.command.Command;
 import baritone.api.command.argument.IArgConsumer;
 import baritone.api.command.datatypes.ForWaypoints;
@@ -50,7 +50,7 @@ import static baritone.api.command.IBaritoneChatControl.FORCE_COMMAND_PREFIX;
 
 public class WaypointsCommand extends Command {
 
-    private Map<IWorldData,List<IWaypoint>> deletedWaypoints = new HashMap<>();
+    private Map<IWorldData, List<IWaypoint>> deletedWaypoints = new HashMap<>();
 
     public WaypointsCommand(IBaritone baritone) {
         super(baritone, "waypoints", "waypoint", "wp");
@@ -149,7 +149,11 @@ public class WaypointsCommand extends Command {
             logDirect(component);
         } else if (action == Action.CLEAR) {
             args.requireMax(1);
-            IWaypoint.Tag tag = IWaypoint.Tag.getByName(args.getString());
+            String name = args.getString();
+            IWaypoint.Tag tag = IWaypoint.Tag.getByName(name);
+            if (tag == null) {
+                throw new CommandInvalidStateException("Invalid tag, \"" + name + "\"");
+            }
             IWaypoint[] waypoints = ForWaypoints.getWaypointsByTag(this.baritone, tag);
             for (IWaypoint waypoint : waypoints) {
                 ForWaypoints.waypoints(this.baritone).removeWaypoint(waypoint);

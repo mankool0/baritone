@@ -17,10 +17,9 @@
 
 package baritone.utils.player;
 
-import baritone.api.utils.Helper;
 import baritone.api.utils.IPlayerController;
 import baritone.utils.accessor.IPlayerControllerMP;
-import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -39,9 +38,13 @@ import net.minecraft.world.phys.BlockHitResult;
  * @author Brady
  * @since 12/14/2018
  */
-public enum PrimaryPlayerController implements IPlayerController, Helper {
+public final class BaritonePlayerController implements IPlayerController {
 
-    INSTANCE;
+    private final Minecraft mc;
+
+    public BaritonePlayerController(Minecraft mc) {
+        this.mc = mc;
+    }
 
     @Override
     public void syncHeldItem() {
@@ -50,7 +53,7 @@ public enum PrimaryPlayerController implements IPlayerController, Helper {
 
     @Override
     public boolean hasBrokenBlock() {
-        return ((IPlayerControllerMP) mc.gameMode).getCurrentBlock().getY() == -1;
+        return !((IPlayerControllerMP) mc.gameMode).isHittingBlock();
     }
 
     @Override

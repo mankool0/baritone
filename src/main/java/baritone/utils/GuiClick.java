@@ -22,13 +22,11 @@ import baritone.api.BaritoneAPI;
 import baritone.api.pathing.goals.GoalBlock;
 import baritone.api.utils.BetterBlockPos;
 import baritone.api.utils.Helper;
-import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.math.Matrix4f;
-import com.mojang.math.Vector4f;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
@@ -39,12 +37,13 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import org.joml.Matrix4f;
+import org.joml.Vector4f;
 
 import java.awt.*;
 import java.util.Collections;
 
 import static baritone.api.command.IBaritoneChatControl.FORCE_COMMAND_PREFIX;
-import static org.lwjgl.opengl.GL11.*;
 
 public class GuiClick extends Screen implements Helper {
 
@@ -74,7 +73,6 @@ public class GuiClick extends Screen implements Helper {
         Vec3 far = toWorld(mx, my, 1); // "Use 0.945 that's what stack overflow says" - leijurv
 
         if (near != null && far != null) {
-            ///
             Vec3 viewerPos = new Vec3(PathRenderer.posX(), PathRenderer.posY(), PathRenderer.posZ());
             LocalPlayer player = BaritoneAPI.getProvider().getPrimaryBaritone().getPlayerContext().player();
             HitResult result = player.level.clip(new ClipContext(near.add(viewerPos), far.add(viewerPos), ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
@@ -118,8 +116,8 @@ public class GuiClick extends Screen implements Helper {
     }
 
     public void onRender(PoseStack modelViewStack, Matrix4f projectionMatrix) {
-        this.projectionViewMatrix = projectionMatrix.copy();
-        this.projectionViewMatrix.multiply(modelViewStack.last().pose());
+        this.projectionViewMatrix = new Matrix4f(projectionMatrix);
+        this.projectionViewMatrix.mul(modelViewStack.last().pose());
         this.projectionViewMatrix.invert();
 
         if (currentMouseOver != null) {
@@ -127,22 +125,11 @@ public class GuiClick extends Screen implements Helper {
             // drawSingleSelectionBox WHEN?
             PathRenderer.drawManySelectionBoxes(modelViewStack, e, Collections.singletonList(currentMouseOver), Color.CYAN);
             if (clickStart != null && !clickStart.equals(currentMouseOver)) {
-                RenderSystem.enableBlend();
-                RenderSystem.blendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ZERO);
-                //TODO: check
-                IRenderer.glColor(Color.RED, 0.4F);
-                RenderSystem.lineWidth(Baritone.settings().pathRenderLineWidthPixels.value);
-                RenderSystem.disableTexture();
-                RenderSystem.depthMask(false);
-                RenderSystem.disableDepthTest();
+                IRenderer.startLines(Color.RED, Baritone.settings().pathRenderLineWidthPixels.value, true);
                 BetterBlockPos a = new BetterBlockPos(currentMouseOver);
                 BetterBlockPos b = new BetterBlockPos(clickStart);
-                IRenderer.drawAABB(modelViewStack, new AABB(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.min(a.z, b.z), Math.max(a.x, b.x) + 1, Math.max(a.y, b.y) + 1, Math.max(a.z, b.z) + 1));
-                RenderSystem.enableDepthTest();
-
-                RenderSystem.depthMask(true);
-                RenderSystem.enableTexture();
-                RenderSystem.disableBlend();
+                IRenderer.emitAABB(modelViewStack, new AABB(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.min(a.z, b.z), Math.max(a.x, b.x) + 1, Math.max(a.y, b.y) + 1, Math.max(a.z, b.z) + 1));
+                IRenderer.endLines(true);
             }
         }
     }
@@ -158,12 +145,13 @@ public class GuiClick extends Screen implements Helper {
         y = y * 2 - 1;
 
         Vector4f pos = new Vector4f((float) x, (float) y, (float) z, 1.0F);
-        pos.transform(this.projectionViewMatrix);
+        projectionViewMatrix.transform(pos);
+
         if (pos.w() == 0) {
             return null;
         }
 
-        pos.perspectiveDivide();
+        pos.mul(1/pos.w());
         return new Vec3(pos.x(), pos.y(), pos.z());
     }
 }

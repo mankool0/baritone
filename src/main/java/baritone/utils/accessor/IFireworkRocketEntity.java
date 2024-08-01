@@ -17,11 +17,9 @@
 
 package baritone.utils.accessor;
 
-/**
- * @author rycbar
- * @since 26.09.2022
- */
-public interface ILongArrayNBT {
+import net.minecraft.world.entity.LivingEntity;
 
-    long[] getLongArray();
+public interface IFireworkRocketEntity {
+
+    LivingEntity getBoostedEntity();
 }

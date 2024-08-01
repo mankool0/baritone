@@ -15,21 +15,24 @@
  * along with Baritone.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package baritone.launch.mixins;
-
-import baritone.utils.accessor.ILongArrayNBT;
-import net.minecraft.nbt.LongArrayTag;
-import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.gen.Accessor;
+package baritone.api.utils;
 
 /**
- * @author rycbar
- * @since 26.09.2022
+ * @author Brady
  */
-@Mixin(LongArrayTag.class)
-public abstract class MixinLongArrayNBT implements ILongArrayNBT {
+public enum BooleanBinaryOperators implements BooleanBinaryOperator {
+    OR((a, b) -> a || b),
+    AND((a, b) -> a && b),
+    XOR((a, b) -> a ^ b);
 
-    @Accessor("data")
+    private final BooleanBinaryOperator op;
+
+    BooleanBinaryOperators(BooleanBinaryOperator op) {
+        this.op = op;
+    }
+
     @Override
-    public abstract long[] getLongArray();
+    public boolean applyAsBoolean(boolean a, boolean b) {
+        return this.op.applyAsBoolean(a, b);
+    }
 }
