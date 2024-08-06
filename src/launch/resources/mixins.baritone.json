@@ -18,7 +18,6 @@
     "MixinFireworkRocketEntity",
     "MixinItemStack",
     "MixinLivingEntity",
-    "MixinLongArrayNBT",
     "MixinLootContext",
     "MixinMinecraft",
     "MixinNetworkManager",

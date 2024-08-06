@@ -28,6 +28,7 @@ import baritone.api.process.PathingCommandType;
 import baritone.api.schematic.*;
 import baritone.api.schematic.format.ISchematicFormat;
 import baritone.api.utils.*;
+import baritone.api.utils.Rotation;
 import baritone.api.utils.input.Input;
 import baritone.pathing.movement.CalculationContext;
 import baritone.pathing.movement.Movement;
@@ -284,7 +285,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         for (BetterBlockPos pos : toBreakEntity) {
             BlockState curr = bcc.bsi.get0(pos);
             if (curr.getBlock() != Blocks.AIR && !(curr.getBlock() instanceof LiquidBlock) && !valid(curr, Blocks.AIR.defaultBlockState(), false)) {
-                Optional<Rotation> rot = RotationUtils.reachable(ctx.player(), pos, ctx.playerController().getBlockReachDistance());
+                Optional<Rotation> rot = RotationUtils.reachable(ctx, pos, ctx.playerController().getBlockReachDistance());
                 rot.ifPresent(rotation -> toReturn.add(Optional.of(new Tuple<>(pos, rotation))));
             }
         }

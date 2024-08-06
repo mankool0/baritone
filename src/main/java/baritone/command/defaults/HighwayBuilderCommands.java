@@ -21,7 +21,7 @@ import baritone.api.IBaritone;
 import baritone.api.command.Command;
 import baritone.api.command.argument.IArgConsumer;
 import baritone.api.command.exception.CommandException;
-import net.minecraft.world.phys.Vec3;
+import net.minecraft.core.Vec3i;
 
 import java.util.Arrays;
 import java.util.List;
@@ -68,7 +68,7 @@ public class HighwayBuilderCommands {
 
                 logDirect("Calculating build location");
 
-                baritone.getNetherHighwayBuilderBehavior().build(origX, origZ, new Vec3(xDir, 0, zDir), selfSolve, doPaving);
+                baritone.getNetherHighwayBuilderBehavior().build(origX, origZ, new Vec3i(xDir, 0, zDir), selfSolve, doPaving);
             }
 
             @Override

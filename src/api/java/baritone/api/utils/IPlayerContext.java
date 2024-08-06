@@ -18,6 +18,7 @@
 package baritone.api.utils;
 
 import baritone.api.cache.IWorldData;
+import baritone.api.utils.accessor.IClientPlayerEntity;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
@@ -44,6 +45,8 @@ public interface IPlayerContext {
     LocalPlayer player();
 
     IPlayerController playerController();
+
+    IClientPlayerEntity getPlayerEntity();
 
     Level world();
 

@@ -17,12 +17,12 @@
 
 package baritone.api.behavior;
 
-import net.minecraft.world.phys.Vec3;
+import net.minecraft.core.Vec3i;
 
 public interface INetherHighwayBuilderBehavior extends IBehavior {
     boolean isBuildingHighwayState();
 
-    void build(int startX, int startZ, Vec3 direct, boolean selfSolve, boolean pave);
+    void build(int startX, int startZ, Vec3i direct, boolean selfSolve, boolean pave);
 
     void stop();
 

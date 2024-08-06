@@ -22,6 +22,7 @@ import baritone.api.IBaritone;
 import baritone.api.event.events.PlayerUpdateEvent;
 import baritone.api.event.events.SprintStateEvent;
 import baritone.api.event.events.type.EventState;
+import baritone.api.utils.accessor.IClientPlayerEntity;
 import baritone.behavior.LookBehavior;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.player.LocalPlayer;
@@ -29,6 +30,7 @@ import net.minecraft.world.entity.player.Abilities;
 import net.minecraft.world.item.ElytraItem;
 import net.minecraft.world.item.ItemStack;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.gen.Accessor;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
@@ -39,7 +41,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * @since 8/1/2018
  */
 @Mixin(LocalPlayer.class)
-public class MixinClientPlayerEntity {
+public abstract class MixinClientPlayerEntity implements IClientPlayerEntity {
 
     @Inject(
             method = "tick",
@@ -122,4 +124,16 @@ public class MixinClientPlayerEntity {
         }
         return ElytraItem.isFlyEnabled(stack);
     }
+
+    @Accessor("xLast")
+    @Override
+    public abstract double getXLast();
+
+    @Accessor("yLast1")
+    @Override
+    public abstract double getYLast();
+
+    @Accessor("zLast")
+    @Override
+    public abstract double getZLast();
 }
