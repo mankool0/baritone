@@ -770,7 +770,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             if (state.getBlock() instanceof AirBlock) {
                 // Mine out blocks below if entity in the way
                 toBreakEntity.clear();
-                if (!checkNoEntityCollision(new AABB(pos), mc.player)) {
+                if (!checkNoEntityCollision(new AABB(pos), ctx.player())) {
                     entityDetected.set(true);
                     int xSize = 1;
                     int zSize = 1;

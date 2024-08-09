@@ -38,7 +38,6 @@ import net.minecraft.client.gui.screens.inventory.ContainerScreen;
 import net.minecraft.client.gui.screens.inventory.ShulkerBoxScreen;
 import net.minecraft.core.*;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
@@ -127,7 +126,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     private int stuckTimer = 0;
     private float cachedHealth = 0.0f;
     //private final double maxSearchDistance = 6;
-    private final List<BlockState> approxPlaceable = new ArrayList<BlockState>() {};
+    private final List<BlockState> approxPlaceable = new ArrayList<>() {};
 
     private final Lock renderLockLiquid = new ReentrantLock();
     private final Lock renderLockBuilding = new ReentrantLock();
@@ -271,7 +270,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             picksToUse = ShulkerType.AnyPickaxe;
             picksToHave = settings.highwayPicksToHaveDigging.value;
         } else {
-            // If paving then we mine echests and need non silk picks
+            // If paving then we mine echests and need non-silk picks
             picksToUse = ShulkerType.NonSilkPickaxe;
             picksToHave = settings.highwayPicksToHavePaving.value;
         }
@@ -472,7 +471,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
     @Override
     public void onTick(TickEvent event) {
-        if (paused || schematic == null || ctx.minecraft().player == null || ctx.minecraft().player.getInventory().isEmpty() || event.getType() == TickEvent.Type.OUT) {
+        if (paused || schematic == null || ctx.player() == null || ctx.player().getInventory().isEmpty() || event.getType() == TickEvent.Type.OUT) {
             return;
         }
 
@@ -482,7 +481,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         stuckTimer++;
 
         // Auto totem
-        if (settings.highwayAutoTotem.value && currentState == State.BuildingHighway && ctx.minecraft().player.getOffhandItem().getItem() != Items.TOTEM_OF_UNDYING) {
+        if (settings.highwayAutoTotem.value && currentState == State.BuildingHighway && ctx.player().getOffhandItem().getItem() != Items.TOTEM_OF_UNDYING) {
             int totemSlot = getItemSlot(Item.getId(Items.TOTEM_OF_UNDYING));
             if (totemSlot != -1) {
                 swapOffhand(totemSlot);
@@ -491,7 +490,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             }
         }
 
-        if (!ctx.minecraft().player.containerMenu.getCarried().isEmpty() && ctx.player().containerMenu == ctx.player().inventoryMenu) {
+        if (!ctx.player().containerMenu.getCarried().isEmpty() && ctx.player().containerMenu == ctx.player().inventoryMenu) {
             if (cursorStackNonEmpty && timer >= 20) {
                 // We have some item on our cursor for 20 ticks, try to place it somewhere
                 timer = 0;
@@ -499,7 +498,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
                 int emptySlot = getItemSlot(Item.getId(Items.AIR));
                 if (emptySlot != -1) {
-                    Helper.HELPER.logDirect("Had " + ctx.minecraft().player.containerMenu.getCarried().getDisplayName() + " on our cursor. Trying to place into slot " + emptySlot);
+                    Helper.HELPER.logDirect("Had " + ctx.player().containerMenu.getCarried().getDisplayName() + " on our cursor. Trying to place into slot " + emptySlot);
 
                     if (emptySlot <= 8) {
                         // Fix slot id if it's a hotbar slot
@@ -509,7 +508,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     cursorStackNonEmpty = false;
                     return;
                 } else {
-                    if (Item.getId(ctx.minecraft().player.containerMenu.getCarried().getItem()) == Item.getId(Blocks.NETHERRACK.asItem())) {
+                    if (Item.getId(ctx.player().containerMenu.getCarried().getItem()) == Item.getId(Blocks.NETHERRACK.asItem())) {
                         // Netherrack on our cursor, we can just throw it out
                         ctx.playerController().windowClick(ctx.player().inventoryMenu.containerId, -999, 0, ClickType.PICKUP, ctx.player());
                         cursorStackNonEmpty = false;
@@ -546,8 +545,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
         // Stuck check
         if (/*baritone.getBuilderProcess().isActive() && !baritone.getBuilderProcess().isPaused() &&*/ stuckTimer >= settings.highwayStuckCheckTicks.value) {
-            if (ctx.minecraft().player.hasContainerOpen()) {
-                ctx.minecraft().player.closeContainer(); // Close chest gui so we can actually build
+            if (ctx.player().hasContainerOpen()) {
+                ctx.player().closeContainer(); // Close chest gui so we can actually build
                 stuckTimer = 0;
                 return;
             }
@@ -1074,7 +1073,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                         double faceZ = (sourceBlocks.get(0).getZ() + against1.getZ() + 1.0D) * 0.5D;
                         Rotation place = RotationUtils.calcRotationFromVec3d(ctx.playerHead(), new Vec3(faceX, faceY, faceZ), ctx.playerRotations());
                         HitResult res = RayTraceUtils.rayTraceTowards(ctx.player(), place, ctx.playerController().getBlockReachDistance(), false);
-                        if (res != null && res.getType() == HitResult.Type.BLOCK && ((BlockHitResult) res).getBlockPos().equals(against1) && ((BlockHitResult) res).getBlockPos().relative(((BlockHitResult) res).getDirection()).equals(sourceBlocks.get(0))) {
+                        if (res.getType() == HitResult.Type.BLOCK && ((BlockHitResult) res).getBlockPos().equals(against1) && ((BlockHitResult) res).getBlockPos().relative(((BlockHitResult) res).getDirection()).equals(sourceBlocks.get(0))) {
                             lavaReachable = Optional.ofNullable(place);
                             if (supportNeeded) {
                                 liquidPathingCanMine = false;
@@ -1158,7 +1157,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                                 double faceZ = (placeAt.getZ() + against1.getZ() + 1.0D) * 0.5D;
                                 Rotation place = RotationUtils.calcRotationFromVec3d(ctx.playerHead(), new Vec3(faceX, faceY, faceZ), ctx.playerRotations());
                                 HitResult res = RayTraceUtils.rayTraceTowards(ctx.player(), place, ctx.playerController().getBlockReachDistance(), false);
-                                if (res != null && res.getType() == HitResult.Type.BLOCK && ((BlockHitResult) res).getBlockPos().equals(against1) && ((BlockHitResult) res).getBlockPos().relative(((BlockHitResult) res).getDirection()).equals(placeAt)) {
+                                if (res.getType() == HitResult.Type.BLOCK && ((BlockHitResult) res).getBlockPos().equals(against1) && ((BlockHitResult) res).getBlockPos().relative(((BlockHitResult) res).getDirection()).equals(placeAt)) {
                                     baritone.getLookBehavior().updateTarget(place, true);
                                     baritone.getInputOverrideHandler().clearAllKeys();
                                     int netherRackSlot = putItemHotbar(Item.getId(Blocks.NETHERRACK.asItem()));
@@ -1174,9 +1173,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                                     double lastX = ctx.getPlayerEntity().getXLast();
                                     double lastY = ctx.getPlayerEntity().getYLast();
                                     double lastZ = ctx.getPlayerEntity().getZLast();
-                                    final Vec3 pos = new Vec3(lastX + (ctx.minecraft().player.getX() - lastX) * ctx.minecraft().getFrameTime(),
-                                            lastY + (ctx.minecraft().player.getY() - lastY) * ctx.minecraft().getFrameTime(),
-                                            lastZ + (ctx.minecraft().player.getZ() - lastZ) * ctx.minecraft().getFrameTime());
+                                    final Vec3 pos = new Vec3(lastX + (ctx.player().getX() - lastX) * ctx.minecraft().getFrameTime(),
+                                            lastY + (ctx.player().getY() - lastY) * ctx.minecraft().getFrameTime(),
+                                            lastZ + (ctx.player().getZ() - lastZ) * ctx.minecraft().getFrameTime());
                                     BetterBlockPos originPos = new BetterBlockPos(pos.x, pos.y+0.5f, pos.z);
                                     double l_Offset = pos.y - originPos.getY();
                                     if (place(placeAt, (float) ctx.playerController().getBlockReachDistance(), true, l_Offset == -0.5f, InteractionHand.MAIN_HAND) == PlaceResult.Placed) {
@@ -1259,7 +1258,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
 
                 placeLoc = getClosestPoint(new Vec3(backPathOriginVector.x, backPathOriginVector.y, backPathOriginVector.z), direction, curPos, LocationType.ShulkerEchestInteraction);
-                // Get closest point
+                // Get the closest point
 
                 settings.buildRepeat.value = new Vec3i(0, 0, 0);
                 currentState = State.GoingToPlaceLocPickaxeShulker;
@@ -1312,7 +1311,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                         ctx.playerController().getBlockReachDistance());
 
 
-                currentState = placeShulkerBox(shulkerReachable, underShulkerReachable, placeLoc, State.GoingToPlaceLocPickaxeShulker, currentState, State.OpeningPickaxeShulker, picksToUse);
+                currentState = placeShulkerBox(shulkerReachable.orElse(null), underShulkerReachable.orElse(null), placeLoc, State.GoingToPlaceLocPickaxeShulker, currentState, State.OpeningPickaxeShulker, picksToUse);
 
                 break;
             }
@@ -1394,7 +1393,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     return; // Wait for us to reach the goal
                 }
 
-                for (Entity entity : ctx.minecraft().level.entitiesForRendering()) {
+                for (Entity entity : ctx.entities()) {
                     if (entity instanceof ItemEntity) {
                         if (shulkerItemList.contains(((ItemEntity) entity).getItem().getItem())) {
                             if (getItemCountInventory(Item.getId(Items.AIR)) == 0) {
@@ -1440,7 +1439,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
 
                 placeLoc = getClosestPoint(new Vec3(backPathOriginVector.x, backPathOriginVector.y, backPathOriginVector.z), direction, curPos, LocationType.ShulkerEchestInteraction);
-                // Get closest point
+                // Get the closest point
 
                 settings.buildRepeat.value = new Vec3i(0, 0, 0);
                 currentState = State.GoingToPlaceLocGappleShulker;
@@ -1492,7 +1491,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                         ctx.playerController().getBlockReachDistance());
 
 
-                currentState = placeShulkerBox(shulkerReachable, underShulkerReachable, placeLoc, State.GoingToPlaceLocGappleShulker, currentState, State.OpeningGappleShulker, ShulkerType.Gapple);
+                currentState = placeShulkerBox(shulkerReachable.orElse(null), underShulkerReachable.orElse(null), placeLoc, State.GoingToPlaceLocGappleShulker, currentState, State.OpeningGappleShulker, ShulkerType.Gapple);
 
                 break;
             }
@@ -1574,7 +1573,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     return; // Wait for us to reach the goal
                 }
 
-                for (Entity entity : ctx.minecraft().level.entitiesForRendering()) {
+                for (Entity entity : ctx.entities()) {
                     if (entity instanceof ItemEntity) {
                         if (shulkerItemList.contains(((ItemEntity) entity).getItem().getItem())) {
                             if (getItemCountInventory(Item.getId(Items.AIR)) == 0) {
@@ -1620,7 +1619,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     return; // Wait for us to reach the goal
                 }
 
-                for (Entity entity : ctx.minecraft().level.entitiesForRendering()) {
+                for (Entity entity : ctx.entities()) {
                     if (entity instanceof ItemEntity) {
                         if (shulkerItemList.contains(((ItemEntity) entity).getItem().getItem())) {
                             if (getItemCountInventory(Item.getId(Items.AIR)) == 0) {
@@ -1665,7 +1664,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
 
                 placeLoc = getClosestPoint(new Vec3(backPathOriginVector.x, backPathOriginVector.y, backPathOriginVector.z), direction, curPos, LocationType.ShulkerEchestInteraction);
-                // Get closest point and shift it so it's in the middle of the highway
+                // Get the closest point and shift it so it's in the middle of the highway
 
                 settings.buildRepeat.value = new Vec3i(0, 0, 0);
                 currentState = State.ShulkerSearchPathing;
@@ -1741,7 +1740,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
                 baritone.getPathingBehavior().cancelEverything();
                 settings.buildRepeat.value = new Vec3i(0, 0, 0);
-                if (ctx.minecraft().level.getBlockState(placeLoc.below()).getBlock() instanceof AirBlock) {
+                if (ctx.world().getBlockState(placeLoc.below()).getBlock() instanceof AirBlock) {
                     baritone.getBuilderProcess().build("supportBlock", new WhiteBlackSchematic(1, 1, 1, blackListBlocks, Blocks.NETHERRACK.defaultBlockState(), false, false, true), placeLoc.below());
                     return;
                 }
@@ -1758,15 +1757,15 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 baritone.getPathingBehavior().cancelEverything();
                 settings.buildRepeat.value = new Vec3i(0, 0, 0);
 
-                if (ctx.minecraft().level.getBlockState(placeLoc).getBlock() instanceof EnderChestBlock && ctx.minecraft().level.getBlockState(placeLoc.above()).getBlock() instanceof AirBlock) {
+                if (ctx.world().getBlockState(placeLoc).getBlock() instanceof EnderChestBlock && ctx.world().getBlockState(placeLoc.above()).getBlock() instanceof AirBlock) {
                     currentState = State.OpeningLootEnderChest;
                     timer = 0;
                     return;
                 }
-                if (ctx.minecraft().level.getBlockState(placeLoc).getBlock() instanceof AirBlock && ctx.minecraft().level.getBlockState(placeLoc.above()).getBlock() instanceof AirBlock) {
+                if (ctx.world().getBlockState(placeLoc).getBlock() instanceof AirBlock && ctx.world().getBlockState(placeLoc.above()).getBlock() instanceof AirBlock) {
                     Optional<Rotation> eChestLocReachable = RotationUtils.reachable(ctx, placeLoc.below(),
                             ctx.playerController().getBlockReachDistance());
-                    if (!eChestLocReachable.isPresent()) {
+                    if (eChestLocReachable.isEmpty()) {
                         currentState = State.LootEnderChestPlaceLocPrep;
                         timer = 0;
                         return;
@@ -1890,7 +1889,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
 
                 placeLoc = getClosestPoint(new Vec3(backPathOriginVector.x, backPathOriginVector.y, backPathOriginVector.z), direction, curPos, LocationType.ShulkerEchestInteraction);
-                // Get closest point
+                // Get the closest point
 
                 settings.buildRepeat.value = new Vec3i(0, 0, 0);
                 currentState = State.GoingToPlaceLocEnderShulker;
@@ -1920,14 +1919,14 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 }
 
                 // No shulker in inventory and not placed
-                if (getShulkerSlot(ShulkerType.EnderChest) == -1 && !(ctx.minecraft().level.getBlockState(placeLoc).getBlock() instanceof ShulkerBoxBlock)) {
+                if (getShulkerSlot(ShulkerType.EnderChest) == -1 && !(ctx.world().getBlockState(placeLoc).getBlock() instanceof ShulkerBoxBlock)) {
                     Helper.HELPER.logDirect("Error getting shulker slot at PlacingEnderShulker. Restarting.");
                     currentState = State.Nothing;
                     return;
                 }
 
                 // Shulker box spot isn't air or shulker, lets fix that
-                if (!(ctx.minecraft().level.getBlockState(placeLoc).getBlock() instanceof AirBlock) && !(ctx.minecraft().level.getBlockState(placeLoc).getBlock() instanceof ShulkerBoxBlock)) {
+                if (!(ctx.world().getBlockState(placeLoc).getBlock() instanceof AirBlock) && !(ctx.world().getBlockState(placeLoc).getBlock() instanceof ShulkerBoxBlock)) {
                     baritone.getPathingBehavior().cancelEverything();
                     baritone.getBuilderProcess().clearArea(placeLoc, placeLoc);
                     timer = 0;
@@ -1941,7 +1940,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                         ctx.playerController().getBlockReachDistance());
 
 
-                currentState = placeShulkerBox(shulkerReachable, underShulkerReachable, placeLoc, State.GoingToPlaceLocEnderShulker, currentState, State.OpeningEnderShulker, ShulkerType.EnderChest);
+                currentState = placeShulkerBox(shulkerReachable.orElse(null), underShulkerReachable.orElse(null), placeLoc, State.GoingToPlaceLocEnderShulker, currentState, State.OpeningEnderShulker, ShulkerType.EnderChest);
 
                 break;
             }
@@ -1955,7 +1954,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                         ctx.playerController().getBlockReachDistance());
                 shulkerReachable.ifPresent(rotation -> baritone.getLookBehavior().updateTarget(rotation, true));
 
-                if (ctx.minecraft().level.getBlockState(placeLoc).getBlock() instanceof ShulkerBoxBlock && !shulkerReachable.isPresent()) {
+                if (ctx.world().getBlockState(placeLoc).getBlock() instanceof ShulkerBoxBlock && shulkerReachable.isEmpty()) {
                     Helper.HELPER.logDirect("Shulker has been placed, but can't be reached, pathing closer.");
                     currentState = State.GoingToPlaceLocEnderShulker;
                     timer = 0;
@@ -2020,7 +2019,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 }
 
                 baritone.getPathingBehavior().cancelEverything();
-                if (!(ctx.minecraft().level.getBlockState(placeLoc).getBlock() instanceof AirBlock)) {
+                if (!(ctx.world().getBlockState(placeLoc).getBlock() instanceof AirBlock)) {
                     baritone.getBuilderProcess().clearArea(placeLoc, placeLoc);
                     timer = 0;
                     return;
@@ -2036,7 +2035,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     return; // Wait for us to reach the goal
                 }
 
-                for (Entity entity : ctx.minecraft().level.entitiesForRendering()) {
+                for (Entity entity : ctx.entities()) {
                     if (entity instanceof ItemEntity) {
                         if (shulkerItemList.contains(((ItemEntity) entity).getItem().getItem())) {
                             if (getItemCountInventory(Item.getId(Items.AIR)) == 0) {
@@ -2085,7 +2084,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     baritone.getPathingBehavior().cancelEverything();
                     settings.buildRepeat.value = new Vec3i(0, 0, 0);
                     timer = 0;
-                    instantMineOriginalOffhandItem = ctx.minecraft().player.getOffhandItem().getItem();
+                    instantMineOriginalOffhandItem = ctx.player().getOffhandItem().getItem();
                     currentState = State.FarmingEnderChestPrepEchest;
                 } else {
                     // Keep trying to get there
@@ -2107,7 +2106,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     return;
                 }
 
-                Item origItem = ctx.minecraft().player.getOffhandItem().getItem();
+                Item origItem = ctx.player().getOffhandItem().getItem();
                 if (!(origItem instanceof BlockItem) || !(((BlockItem) origItem).getBlock().equals(Blocks.ENDER_CHEST))) {
                     int eChestSlot = getLargestItemSlot(Item.getId(Blocks.ENDER_CHEST.asItem()));
                     swapOffhand(eChestSlot);
@@ -2135,7 +2134,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 }
 
                 // TODO: Debug and confirm this works
-                if (!(ctx.minecraft().level.getBlockState(placeLoc).getBlock() instanceof AirBlock)) {
+                if (!(ctx.world().getBlockState(placeLoc).getBlock() instanceof AirBlock)) {
                     setTarget(placeLoc);
                     instantMineActivated = true;
                 }
@@ -2168,8 +2167,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 }
 
 
-                Item origItem = ctx.minecraft().player.getOffhandItem().getItem();
-                if ((getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) + ctx.minecraft().player.getOffhandItem().getCount()) <= settings.highwayEnderChestsToKeep.value) {
+                Item origItem = ctx.player().getOffhandItem().getItem();
+                if ((getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) + ctx.player().getOffhandItem().getCount()) <= settings.highwayEnderChestsToKeep.value) {
                     baritone.getInputOverrideHandler().clearAllKeys();
                     instantMinePlace = true;
                     instantMineActivated = false;
@@ -2184,7 +2183,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 }
 
                 // Force look at location
-                if (ctx.minecraft().level.getBlockState(placeLoc).getBlock() instanceof AirBlock) {
+                if (ctx.world().getBlockState(placeLoc).getBlock() instanceof AirBlock) {
                     Optional<Rotation> shulkerReachable = RotationUtils.reachable(ctx, placeLoc.below(),
                             ctx.playerController().getBlockReachDistance());
                     shulkerReachable.ifPresent(rotation -> baritone.getLookBehavior().updateTarget(rotation, true));
@@ -2195,9 +2194,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     double lastX = ctx.getPlayerEntity().getXLast();
                     double lastY = ctx.getPlayerEntity().getYLast();
                     double lastZ = ctx.getPlayerEntity().getZLast();
-                    final Vec3 pos = new Vec3(lastX + (ctx.minecraft().player.getX() - lastX) * ctx.minecraft().getFrameTime(),
-                            lastY + (ctx.minecraft().player.getY() - lastY) * ctx.minecraft().getFrameTime(),
-                            lastZ + (ctx.minecraft().player.getZ() - lastZ) * ctx.minecraft().getFrameTime());
+                    final Vec3 pos = new Vec3(lastX + (ctx.player().getX() - lastX) * ctx.minecraft().getFrameTime(),
+                            lastY + (ctx.player().getY() - lastY) * ctx.minecraft().getFrameTime(),
+                            lastZ + (ctx.player().getZ() - lastZ) * ctx.minecraft().getFrameTime());
                     BlockPos originPos = new BetterBlockPos(pos.x, pos.y+0.5f, pos.z);
                     double l_Offset = pos.y - originPos.getY();
                     PlaceResult l_Place = place(placeLoc, 5.0f, false, l_Offset == -0.5f, InteractionHand.OFF_HAND);
@@ -2214,8 +2213,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     currentState = State.FarmingEnderChestPrepPick;
                 }
                 if (instantMineLastBlock != null) {
-                    if (validPicksList.contains(ctx.minecraft().player.getItemInHand(InteractionHand.MAIN_HAND).getItem())) {
-                        ctx.minecraft().player.connection.send(new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK,
+                    if (validPicksList.contains(ctx.player().getItemInHand(InteractionHand.MAIN_HAND).getItem())) {
+                        ctx.player().connection.send(new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK,
                                 instantMineLastBlock, instantMineDirection));
                     }
                 }
@@ -2232,7 +2231,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 if (timer < 10) {
                     return;
                 }
-                Item curItem = ctx.minecraft().player.getOffhandItem().getItem();
+                Item curItem = ctx.player().getOffhandItem().getItem();
                 if (!curItem.equals(instantMineOriginalOffhandItem)) {
                     int origItemSlot = getItemSlot(Item.getId(instantMineOriginalOffhandItem));
                     swapOffhand(origItemSlot);
@@ -2256,7 +2255,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
                 baritone.getPathingBehavior().cancelEverything();
 
-                if (!(ctx.minecraft().level.getBlockState(placeLoc).getBlock() instanceof AirBlock)) {
+                if (!(ctx.world().getBlockState(placeLoc).getBlock() instanceof AirBlock)) {
                     baritone.getBuilderProcess().clearArea(placeLoc, placeLoc);
                     timer = 0;
                     return;
@@ -2273,7 +2272,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     return; // Wait for us to reach the goal
                 }
 
-                for (Entity entity : ctx.minecraft().level.entitiesForRendering()) {
+                for (Entity entity : ctx.entities()) {
                     if (entity instanceof ItemEntity) {
                         if (((ItemEntity) entity).getItem().getItem() instanceof BlockItem &&
                                 ((BlockItem) ((ItemEntity) entity).getItem().getItem()).getBlock() == Blocks.OBSIDIAN) {
@@ -2366,7 +2365,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
                 baritone.getPathingBehavior().cancelEverything();
                 settings.buildRepeat.value = new Vec3i(0, 0, 0);
-                if (ctx.minecraft().level.getBlockState(placeLoc.below()).getBlock() instanceof AirBlock) {
+                if (ctx.world().getBlockState(placeLoc.below()).getBlock() instanceof AirBlock) {
                     baritone.getBuilderProcess().build("supportBlock", new WhiteBlackSchematic(1, 1, 1, blackListBlocks, Blocks.NETHERRACK.defaultBlockState(), false, false, true), placeLoc.below());
                     return;
                 }
@@ -2387,7 +2386,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
                 baritone.getPathingBehavior().cancelEverything();
                 // Shulker box spot isn't air or shulker, lets fix that
-                if (!(ctx.minecraft().level.getBlockState(placeLoc).getBlock() instanceof AirBlock) && !(ctx.minecraft().level.getBlockState(placeLoc).getBlock() instanceof ShulkerBoxBlock)) {
+                if (!(ctx.world().getBlockState(placeLoc).getBlock() instanceof AirBlock) && !(ctx.world().getBlockState(placeLoc).getBlock() instanceof ShulkerBoxBlock)) {
                     baritone.getPathingBehavior().cancelEverything();
                     baritone.getBuilderProcess().clearArea(placeLoc, placeLoc.above());
                     timer = 0;
@@ -2401,7 +2400,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 Optional<Rotation> underShulkerReachable = RotationUtils.reachable(ctx, placeLoc.below(),
                         ctx.playerController().getBlockReachDistance());
 
-                currentState = placeShulkerBox(shulkerReachable, underShulkerReachable, placeLoc, State.GoingToEmptyShulkerPlaceLoc, currentState, State.Nothing, ShulkerType.Empty);
+                currentState = placeShulkerBox(shulkerReachable.orElse(null), underShulkerReachable.orElse(null), placeLoc, State.GoingToEmptyShulkerPlaceLoc, currentState, State.Nothing, ShulkerType.Empty);
                 if (currentState == State.Nothing) {
                     Helper.HELPER.logDirect("Lowering startShulkerCount from " + startShulkerCount + " to " + --startShulkerCount);
                 }
@@ -2410,7 +2409,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 //    Helper.HELPER.logDirect("Lowering startShulkerCount from " + startShulkerCount + " to " + --startShulkerCount);
                 //}
 
-                if (!shulkerReachable.isPresent() && !underShulkerReachable.isPresent()) {
+                if (shulkerReachable.isEmpty() && underShulkerReachable.isEmpty()) {
                     // None are reachable so walk back to location
                     currentState = State.GoingToEmptyShulkerPlaceLoc;
                     timer = 0;
@@ -2435,9 +2434,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 boolean done;
                 if (boatHasPassenger) {
                     //Helper.HELPER.logDirect("Boat has a passenger, mining deeper");
-                    done = baritone.getBuilderProcess().checkNoEntityCollision(new AABB(boatLocation), ctx.minecraft().player) && baritone.getBuilderProcess().checkNoEntityCollision(new AABB(boatLocation.below()), ctx.minecraft().player);
+                    done = baritone.getBuilderProcess().checkNoEntityCollision(new AABB(boatLocation), ctx.player()) && baritone.getBuilderProcess().checkNoEntityCollision(new AABB(boatLocation.below()), ctx.player());
                 } else {
-                    done = baritone.getBuilderProcess().checkNoEntityCollision(new AABB(boatLocation), ctx.minecraft().player);
+                    done = baritone.getBuilderProcess().checkNoEntityCollision(new AABB(boatLocation), ctx.player());
                 }
 
                 // Check if boat is still there
@@ -2460,7 +2459,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 baritone.getBuilderProcess().clearArea(boatLocation.offset(2, 1, 2), boatLocation.offset(-2, -depth, -2));
 
                 // Check if boat is still there
-                //if (!baritone.getBuilderProcess().checkNoEntityCollision(new AABB(boatLocation), ctx.minecraft().player)) {
+                //if (!baritone.getBuilderProcess().checkNoEntityCollision(new AABB(boatLocation), ctx.player())) {
                 //baritone.getBuilderProcess().build("boatClearing", toClear, boatLocation.add(-1, yOffset, -3));
                 //return;
                 //}
@@ -2495,7 +2494,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         for (Goal curGoal: goalList) {
             BlockPos blockPos;
             Vec3 vecPos;
-            double dist = 0;
+            double dist;
             if (curGoal instanceof GoalGetToBlock) {
                 blockPos = ((GoalGetToBlock) curGoal).getGoalPos();
             } else if (curGoal instanceof GoalBlock) {
@@ -2510,7 +2509,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             }
 
             vecPos = new Vec3(blockPos.getX(), blockPos.getY(), blockPos.getZ());
-            dist = vecPos.distanceToSqr(ctx.minecraft().player.position());
+            dist = vecPos.distanceToSqr(ctx.player().position());
             if (dist > farthest) {
                 farthest = dist;
             }
@@ -2534,9 +2533,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     }
 
     private void swapOffhand(int slot) {
-        ctx.playerController().windowClick(0, 45, 0, ClickType.PICKUP, ctx.minecraft().player);
-        ctx.playerController().windowClick(0, slot < 9 ? slot + 36 : slot, 0, ClickType.PICKUP, ctx.minecraft().player);
-        ctx.playerController().windowClick(0, 45, 0, ClickType.PICKUP, ctx.minecraft().player);
+        ctx.playerController().windowClick(0, 45, 0, ClickType.PICKUP, ctx.player());
+        ctx.playerController().windowClick(0, slot < 9 ? slot + 36 : slot, 0, ClickType.PICKUP, ctx.player());
+        ctx.playerController().windowClick(0, 45, 0, ClickType.PICKUP, ctx.player());
     }
 
     private boolean checkForNeighbours(BlockPos blockPos)
@@ -2564,7 +2563,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         for (Direction side : Direction.values())
         {
             BlockPos neighbour = blockPos.offset(side.getNormal());
-            if (!ctx.minecraft().level.getBlockState(neighbour).getMaterial().isReplaceable())
+            if (!ctx.world().getBlockState(neighbour).getMaterial().isReplaceable())
             {
                 return true;
             }
@@ -2585,7 +2584,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     }
 
     private PlaceResult place(BlockPos pos, float p_Distance, boolean p_Rotate, boolean p_UseSlabRule, boolean packetSwing, InteractionHand hand) {
-        BlockState l_State = ctx.minecraft().level.getBlockState(pos);
+        BlockState l_State = ctx.world().getBlockState(pos);
 
         boolean l_Replaceable = l_State.getMaterial().isReplaceable();
 
@@ -2610,47 +2609,47 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 return PlaceResult.CantPlace;
         }
 
-        final Vec3 eyesPos = new Vec3(ctx.minecraft().player.getX(), ctx.minecraft().player.getEyeY(), ctx.minecraft().player.getZ());
+        final Vec3 eyesPos = new Vec3(ctx.player().getX(), ctx.player().getEyeY(), ctx.player().getZ());
 
         for (final Direction side : Direction.values())
         {
             final BlockPos neighbor = pos.offset(side.getNormal());
             final Direction side2 = side.getOpposite();
 
-            if (!ctx.minecraft().level.getBlockState(neighbor).getFluidState().isEmpty())
+            if (!ctx.world().getBlockState(neighbor).getFluidState().isEmpty())
                 continue;
 
-            VoxelShape collisionShape = ctx.minecraft().level.getBlockState(neighbor).getCollisionShape(ctx.minecraft().level, neighbor);
-            boolean hasCollison = collisionShape != Shapes.empty();
-            if (hasCollison)
+            VoxelShape collisionShape = ctx.world().getBlockState(neighbor).getCollisionShape(ctx.world(), neighbor);
+            boolean hasCollision = collisionShape != Shapes.empty();
+            if (hasCollision)
             {
                 final Vec3 hitVec = new Vec3(neighbor.getX(), neighbor.getY(), neighbor.getZ()).add(0.5, 0.5, 0.5).add(new Vec3(side2.getStepX(), side2.getStepY(), side2.getStepZ()).scale(0.5));
                 if (eyesPos.distanceTo(hitVec) <= p_Distance)
                 {
-                    final Block neighborBlock = ctx.minecraft().level.getBlockState(neighbor).getBlock();
+                    final Block neighborBlock = ctx.world().getBlockState(neighbor).getBlock();
 
                     BlockHitResult blockHitResult = new BlockHitResult(hitVec, side2, neighbor, false);
-                    final boolean activated = ctx.minecraft().level.getBlockState(neighbor).use(ctx.minecraft().level, ctx.minecraft().player, hand, blockHitResult) == InteractionResult.SUCCESS;
+                    final boolean activated = ctx.world().getBlockState(neighbor).use(ctx.world(), ctx.player(), hand, blockHitResult) == InteractionResult.SUCCESS;
 
                     if (blackList.contains(neighborBlock) || shulkerBlockList.contains(neighborBlock) || activated)
                     {
-                        ctx.minecraft().player.connection.send(new ServerboundPlayerCommandPacket(ctx.minecraft().player, ServerboundPlayerCommandPacket.Action.PRESS_SHIFT_KEY));
+                        ctx.player().connection.send(new ServerboundPlayerCommandPacket(ctx.player(), ServerboundPlayerCommandPacket.Action.PRESS_SHIFT_KEY));
                     }
                     if (p_Rotate)
                     {
                         faceVectorPacketInstant(hitVec);
                     }
-                    InteractionResult l_Result2 = ctx.playerController().processRightClickBlock(ctx.minecraft().player, ctx.minecraft().level, hand, blockHitResult);
+                    InteractionResult l_Result2 = ctx.playerController().processRightClickBlock(ctx.player(), ctx.world(), hand, blockHitResult);
 
                     if (l_Result2 == InteractionResult.SUCCESS)
                     {
                         if (packetSwing)
-                            ctx.minecraft().player.connection.send(new ServerboundSwingPacket(hand));
+                            ctx.player().connection.send(new ServerboundSwingPacket(hand));
                         else
-                            ctx.minecraft().player.swing(hand);
+                            ctx.player().swing(hand);
                         if (activated)
                         {
-                            ctx.minecraft().player.connection.send(new ServerboundPlayerCommandPacket(ctx.minecraft().player, ServerboundPlayerCommandPacket.Action.RELEASE_SHIFT_KEY));
+                            ctx.player().connection.send(new ServerboundPlayerCommandPacket(ctx.player(), ServerboundPlayerCommandPacket.Action.RELEASE_SHIFT_KEY));
                         }
                         return PlaceResult.Placed;
                     }
@@ -2676,7 +2675,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         if (!checkForNeighbours(pos))
             return ValidResult.NoNeighbors;
 
-        BlockState l_State = ctx.minecraft().level.getBlockState(pos);
+        BlockState l_State = ctx.world().getBlockState(pos);
 
         if (l_State.getBlock() instanceof AirBlock)
         {
@@ -2685,7 +2684,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
             for (BlockPos l_Pos : l_Blocks)
             {
-                BlockState l_State2 = ctx.minecraft().level.getBlockState(l_Pos);
+                BlockState l_State2 = ctx.world().getBlockState(l_Pos);
 
                 if (l_State2.getBlock() instanceof AirBlock)
                     continue;
@@ -2694,12 +2693,12 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 {
                     final BlockPos neighbor = pos.offset(side.getNormal());
 
-                    boolean l_IsWater = ctx.minecraft().level.getBlockState(neighbor).getBlock() == Blocks.WATER;
+                    boolean l_IsWater = ctx.world().getBlockState(neighbor).getBlock() == Blocks.WATER;
 
                     // TODO: make sure this works
-                    VoxelShape collisionShape = ctx.minecraft().level.getBlockState(neighbor).getCollisionShape(ctx.minecraft().level, neighbor);
-                    boolean hasCollison = collisionShape != Shapes.empty();
-                    if (hasCollison)
+                    VoxelShape collisionShape = ctx.world().getBlockState(neighbor).getCollisionShape(ctx.world(), neighbor);
+                    boolean hasCollision = collisionShape != Shapes.empty();
+                    if (hasCollision)
                     {
                         return ValidResult.Ok;
                     }
@@ -2725,26 +2724,26 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         float pitch = (float) -Math.toDegrees(Math.atan2(diffY, diffXZ));
 
         return new float[]
-                { ctx.minecraft().player.getYRot() + Mth.wrapDegrees(yaw - ctx.minecraft().player.getYRot()),
-                        ctx.minecraft().player.getXRot() + Mth.wrapDegrees(pitch - ctx.minecraft().player.getXRot()) };
+                { ctx.player().getYRot() + Mth.wrapDegrees(yaw - ctx.player().getYRot()),
+                        ctx.player().getXRot() + Mth.wrapDegrees(pitch - ctx.player().getXRot()) };
     }
 
     private Vec3 getEyesPos() {
-        return new Vec3(ctx.minecraft().player.getX(), ctx.minecraft().player.getEyeY(), ctx.minecraft().player.getZ());
+        return new Vec3(ctx.player().getX(), ctx.player().getEyeY(), ctx.player().getZ());
     }
 
     private void faceVectorPacketInstant(Vec3 vec) {
         float[] rotations = getLegitRotations(vec);
 
-        ctx.minecraft().player.connection.send(new ServerboundMovePlayerPacket.Rot(rotations[0], rotations[1], ctx.minecraft().player.isOnGround()));
+        ctx.player().connection.send(new ServerboundMovePlayerPacket.Rot(rotations[0], rotations[1], ctx.player().isOnGround()));
     }
 
     private void setTarget(BlockPos pos) {
         instantMinePacketCancel = false;
-        ctx.minecraft().player.connection.send(new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK,
+        ctx.player().connection.send(new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK,
                 pos, Direction.DOWN));
         instantMinePacketCancel = true;
-        ctx.minecraft().player.connection.send(new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK,
+        ctx.player().connection.send(new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK,
                 pos, Direction.DOWN));
         instantMineDirection = Direction.DOWN;
         instantMineLastBlock = pos;
@@ -2769,18 +2768,11 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     private BetterBlockPos getClosestPoint(Vec3 origin, Vec3 direction, Vec3 point, LocationType locType) {
         // https://stackoverflow.com/a/51906100
 
-        int yLevel = 120;
-        switch (locType) {
-            case HighwayBuild:
-                yLevel = settings.highwayLowestY.value;
-                break;
-            case ShulkerEchestInteraction:
-                yLevel = paving ? settings.highwayMainY.value + 1 : settings.highwayMainY.value;
-                break;
-            case SideStorage:
-                yLevel = settings.highwayEmptyShulkEchestY.value;
-                break;
-        }
+        int yLevel = switch (locType) {
+            case HighwayBuild -> settings.highwayLowestY.value;
+            case ShulkerEchestInteraction -> paving ? settings.highwayMainY.value + 1 : settings.highwayMainY.value;
+            case SideStorage -> settings.highwayEmptyShulkEchestY.value;
+        };
 
         // Never allow points behind the original starting location
         if (firstStartingPos != null &&
@@ -2876,7 +2868,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         BlockPos startCheckPos = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z), direction, curPlayerPos, LocationType.HighwayBuild);
         int distanceToCheckAhead = 5;
         for (int i = 1; i < distanceToCheckAhead; i++) {
-            BlockPos curPos = startCheckPos.offset(i * (int)highwayDirection.getX(), 0, i * (int)highwayDirection.getZ());
+            BlockPos curPos = startCheckPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
             for (int y = 0; y < schematic.heightY(); y++) {
                 for (int z = 0; z < schematic.lengthZ(); z++) {
                     for (int x = 0; x < schematic.widthX(); x++) {
@@ -2933,7 +2925,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
 
         for (int i = 0; i < 10; i++) {
-            BlockPos curPos = startCheckPos.offset(i * (int)highwayDirection.getX(), 0, i * (int)highwayDirection.getZ());
+            BlockPos curPos = startCheckPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
             for (int y = 0; y < schematic.heightY(); y++) {
                 for (int z = 0; z < schematic.lengthZ(); z++) {
                     for (int x = 0; x < schematic.widthX(); x++) {
@@ -2975,7 +2967,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         renderBlocksBuilding.clear();
         boolean foundBlocks = false;
         for (int i = 1; i < distanceToCheck; i++) {
-            BlockPos curPos = startPos.offset(i * (int)highwayDirection.getX(), 0, i * (int)highwayDirection.getZ());
+            BlockPos curPos = startPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
             for (int y = 0; y < schematic.heightY(); y++) {
                 for (int z = 0; z < schematic.lengthZ(); z++) {
                     for (int x = 0; x < schematic.widthX(); x++) {
@@ -3009,8 +3001,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                             }
 
                             if (!schematic.desiredState(x, y, z, current, this.approxPlaceable).equals(current)) {
-                                if (!baritone.getBuilderProcess().checkNoEntityCollision(new AABB(new BlockPos(blockX, blockY, blockZ)), ctx.minecraft().player)) {
-                                    List<Entity> entityList = ctx.world().getEntities((Entity) null, new AABB(new BlockPos(blockX, blockY, blockZ)));
+                                if (!baritone.getBuilderProcess().checkNoEntityCollision(new AABB(new BlockPos(blockX, blockY, blockZ)), ctx.player())) {
+                                    List<Entity> entityList = ctx.world().getEntities(null, new AABB(new BlockPos(blockX, blockY, blockZ)));
                                     for (Entity entity : entityList) {
                                         if (entity instanceof Boat || entity.isVehicle()) {
                                             // can't do boats lol
@@ -3256,7 +3248,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 pickaxeCount++;
             } else if (!(curStack.getItem() instanceof AirItem)) {
                 if (!settings.highwayAllowMixedShulks.value || !(curStack.getItem() instanceof BlockItem) || !(((BlockItem)curStack.getItem()).getBlock() instanceof EnderChestBlock)) {
-                    return 0; // Found a non pickaxe and non air item
+                    return 0; // Found a non pickaxe and non-air item
                 }
             }
         }
@@ -3281,7 +3273,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 }
             } else if (!(curStack.getItem() instanceof AirItem)) {
                 if (!settings.highwayAllowMixedShulks.value || !(curStack.getItem() instanceof BlockItem) || !(((BlockItem)curStack.getItem()).getBlock() instanceof EnderChestBlock)) {
-                    return 0; // Found a non pickaxe and non air item
+                    return 0; // Found a non pickaxe and non-air item
                 }
             }
         }
@@ -3438,10 +3430,10 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         return shulkerSlot;
     }
 
-    private State placeShulkerBox(Optional<Rotation> shulkerReachable, Optional<Rotation> underShulkerReachable, BlockPos shulkerPlaceLoc, State prevState, State currentState, State nextState, ShulkerType shulkerType) {
-        if (shulkerReachable.isPresent()) {
+    private State placeShulkerBox(Rotation shulkerReachable, Rotation underShulkerReachable, BlockPos shulkerPlaceLoc, State prevState, State currentState, State nextState, ShulkerType shulkerType) {
+        if (shulkerReachable != null) {
             Block shulkerLocBlock = ctx.world().getBlockState(shulkerPlaceLoc).getBlock();
-            baritone.getLookBehavior().updateTarget(shulkerReachable.get(), true); // Look at shulker spot
+            baritone.getLookBehavior().updateTarget(shulkerReachable, true); // Look at shulker spot
 
             if (shulkerLocBlock instanceof ShulkerBoxBlock) {
                 Helper.HELPER.logDirect("Shulker has been placed successfully");
@@ -3453,9 +3445,11 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 return prevState; // Go back a state
             }
         }
-        else underShulkerReachable.ifPresent(rotation -> baritone.getLookBehavior().updateTarget(rotation, true));
+        else if (underShulkerReachable != null) {
+            baritone.getLookBehavior().updateTarget(underShulkerReachable, true);
+        }
 
-        if (underShulkerReachable.isEmpty()) {
+        if (underShulkerReachable == null) {
             return prevState; // Something is wrong with where we are trying to place, go back
         }
 
@@ -3478,9 +3472,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             double lastX = ctx.getPlayerEntity().getXLast();
             double lastY = ctx.getPlayerEntity().getYLast();
             double lastZ = ctx.getPlayerEntity().getZLast();
-            final Vec3 pos = new Vec3(lastX + (ctx.minecraft().player.getX() - lastX) * ctx.minecraft().getFrameTime(),
-                    lastY + (ctx.minecraft().player.getY() - lastY) * ctx.minecraft().getFrameTime(),
-                    lastZ + (ctx.minecraft().player.getZ() - lastZ) * ctx.minecraft().getFrameTime());
+            final Vec3 pos = new Vec3(lastX + (ctx.player().getX() - lastX) * ctx.minecraft().getFrameTime(),
+                    lastY + (ctx.player().getY() - lastY) * ctx.minecraft().getFrameTime(),
+                    lastZ + (ctx.player().getZ() - lastZ) * ctx.minecraft().getFrameTime());
             BetterBlockPos originPos = new BetterBlockPos(pos.x, pos.y+0.5f, pos.z);
             double l_Offset = pos.y - originPos.getY();
             PlaceResult l_Place = place(shulkerPlaceLoc, 5.0f, true, l_Offset == -0.5f, InteractionHand.MAIN_HAND);
@@ -3501,7 +3495,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     }
 
     private int lootPickaxeChestSlot() {
-        AbstractContainerMenu curContainer = ctx.minecraft().player.containerMenu;
+        AbstractContainerMenu curContainer = ctx.player().containerMenu;
         for (int i = 0; i < 27; i++) {
             if (curContainer.getSlot(i).getItem().getItem() instanceof PickaxeItem) {
                 // Don't loot depleted picks if we're using item saver mode
@@ -3544,7 +3538,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
     private int lootGappleChestSlot() {
         int count = 0;
-        AbstractContainerMenu curContainer = ctx.minecraft().player.containerMenu;
+        AbstractContainerMenu curContainer = ctx.player().containerMenu;
         for (int i = 0; i < 27; i++) {
             if (curContainer.getSlot(i).getItem().getItem() instanceof EnchantedGoldenAppleItem) {
                 count += curContainer.getSlot(i).getItem().getCount();
@@ -3563,7 +3557,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     ctx.playerController().windowClick(curContainer.containerId, -999, 0, ClickType.PICKUP, ctx.player());
                 } else {
                     // Gapples exist already or there's an air slot so we can just do a quick move
-                    ctx.playerController().windowClick(curContainer.containerId, i, 0, ClickType.QUICK_MOVE, ctx.minecraft().player);
+                    ctx.playerController().windowClick(curContainer.containerId, i, 0, ClickType.QUICK_MOVE, ctx.player());
                 }
 
                 return count;
@@ -3575,7 +3569,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
     private int lootEnderChestSlot() {
         int count = 0;
-        AbstractContainerMenu curContainer = ctx.minecraft().player.containerMenu;
+        AbstractContainerMenu curContainer = ctx.player().containerMenu;
         for (int i = 0; i < 27; i++) {
             if (curContainer.getSlot(i).getItem().getItem() instanceof BlockItem &&
                     ((BlockItem) curContainer.getSlot(i).getItem().getItem()).getBlock() instanceof EnderChestBlock) {
@@ -3595,7 +3589,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     ctx.playerController().windowClick(curContainer.containerId, -999, 0, ClickType.PICKUP, ctx.player());
                 } else {
                     // There's an air slot so we can just do a quick move
-                    ctx.playerController().windowClick(curContainer.containerId, i, 0, ClickType.QUICK_MOVE, ctx.minecraft().player);
+                    ctx.playerController().windowClick(curContainer.containerId, i, 0, ClickType.QUICK_MOVE, ctx.player());
                 }
 
                 return count;
@@ -3606,7 +3600,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     }
 
     private int lootShulkerChestSlot(ShulkerType shulkerType) {
-        AbstractContainerMenu curContainer = ctx.minecraft().player.containerMenu;
+        AbstractContainerMenu curContainer = ctx.player().containerMenu;
         for (int i = 0; i < 27; i++) {
             ItemStack stack = curContainer.getSlot(i).getItem();
             if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem)) {
@@ -3659,7 +3653,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                         ctx.playerController().windowClick(curContainer.containerId, -999, 0, ClickType.PICKUP, ctx.player());
                     } else {
                         // There's an air slot so we can just do a quick move
-                        ctx.playerController().windowClick(curContainer.containerId, i, 0, ClickType.QUICK_MOVE, ctx.minecraft().player);
+                        ctx.playerController().windowClick(curContainer.containerId, i, 0, ClickType.QUICK_MOVE, ctx.player());
                     }
                     return 1;
                 }
@@ -3719,7 +3713,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     }
 
     private boolean isShulkerOnGround() {
-        for (Entity entity : ctx.minecraft().level.entitiesForRendering()) {
+        for (Entity entity : ctx.entities()) {
             if (entity instanceof ItemEntity) {
                 if (shulkerItemList.contains(((ItemEntity) entity).getItem().getItem())) {
                     return true;
