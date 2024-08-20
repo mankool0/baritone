@@ -555,7 +555,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         }
 
         List<Optional<Tuple<BetterBlockPos, Rotation>>> toBreak = toBreakNearPlayer(bcc);
-        if (!toBreak.isEmpty() && isSafeToCancel && ctx.player().isOnGround()) {
+        if (!toBreak.isEmpty() && isSafeToCancel && ctx.player().onGround()) {
             // we'd like to pause to break this block
             // only change look direction if it's safe (don't want to fuck up an in progress parkour for example
             int count = 0;
