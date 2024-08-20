@@ -15,19 +15,27 @@
  * along with Baritone.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package baritone.utils.accessor;
+package baritone.utils.player;
 
-import net.minecraft.core.BlockPos;
+import baritone.api.utils.Helper;
+import baritone.api.utils.accessor.IClientPlayerEntity;
 
-public interface IPlayerControllerMP {
+public enum ClientPlayerEntity implements IClientPlayerEntity, Helper {
 
-    void setIsHittingBlock(boolean isHittingBlock);
+    INSTANCE;
 
-    boolean isHittingBlock();
+    @Override
+    public double getXLast() {
+        return ((IClientPlayerEntity) mc.player).getXLast();
+    }
 
-    BlockPos getCurrentBlock();
+    @Override
+    public double getYLast() {
+        return ((IClientPlayerEntity) mc.player).getYLast();
+    }
 
-    void callSyncCurrentPlayItem();
-
-    void setDestroyDelay(int destroyDelay);
+    @Override
+    public double getZLast() {
+        return ((IClientPlayerEntity) mc.player).getZLast();
+    }
 }

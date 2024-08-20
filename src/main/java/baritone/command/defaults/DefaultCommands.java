@@ -74,6 +74,12 @@ public final class DefaultCommands {
         commands.add(prc.resumeCommand);
         commands.add(prc.pausedCommand);
         commands.add(prc.cancelCommand);
+
+        HighwayBuilderCommands hbc = new HighwayBuilderCommands(baritone);
+        commands.add(hbc.netherBuildCommand);
+        commands.add(hbc.netherStatusCommand);
+        commands.add(hbc.netherStopCommand);
+
         return Collections.unmodifiableList(commands);
     }
 }

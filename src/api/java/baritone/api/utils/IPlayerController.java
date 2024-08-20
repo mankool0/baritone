@@ -58,4 +58,6 @@ public interface IPlayerController {
     default double getBlockReachDistance() {
         return this.getGameType().isCreative() ? 5.0F : BaritoneAPI.getSettings().blockReachDistance.value;
     }
+
+    void setDestroyDelay(int delay);
 }

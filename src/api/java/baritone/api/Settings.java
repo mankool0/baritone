@@ -211,7 +211,8 @@ public final class Settings {
             Blocks.DIRT.asItem(),
             Blocks.COBBLESTONE.asItem(),
             Blocks.NETHERRACK.asItem(),
-            Blocks.STONE.asItem()
+            Blocks.STONE.asItem(),
+            Blocks.OBSIDIAN.asItem()
     )));
 
     /**
@@ -387,7 +388,7 @@ public final class Settings {
 
     /**
      * How many ticks between breaking a block and starting to break the next block. Default in game is 6 ticks.
-     * Values under 2 will be clamped.
+     * Values under 1 will be clamped. The delay only applies to non-instant (1-tick) breaks.
      */
     public final Setting<Integer> blockBreakSpeed = new Setting<>(6);
 
@@ -860,7 +861,7 @@ public final class Settings {
     /**
      * Stop using tools just before they are going to break.
      */
-    public final Setting<Boolean> itemSaver = new Setting<>(false);
+    public final Setting<Boolean> itemSaver = new Setting<>(true);
 
     /**
      * Durability to leave on the tool when using itemSaver
@@ -974,6 +975,11 @@ public final class Settings {
     public final Setting<Boolean> replantNetherWart = new Setting<>(false);
 
     /**
+     * Farming will scan for at most this many blocks.
+     */
+    public final Setting<Integer> farmMaxScanSize = new Setting<>(256);
+
+    /**
      * When the cache scan gives less blocks than the maximum threshold (but still above zero), scan the main world too.
      * <p>
      * Only if you have a beefy CPU and automatically mine blocks that are in cache
@@ -1029,6 +1035,16 @@ public final class Settings {
      * Mainly for backward compatibility.
      */
     public final Setting<Boolean> buildRepeatSneaky = new Setting<>(true);
+
+    /**
+     * If this is true, when buildRepeat occurs the new information will be logged to chat
+     */
+    public final Setting<Boolean> buildRepeatLog = new Setting<>(false);
+
+    /**
+     * If this is true then BuilderProcess will try to place blocks over flowing liquids
+     */
+    public final Setting<Boolean> placeOnFlowingLiquid = new Setting<>(true);
 
     /**
      * Allow standing above a block while mining it, in BuilderProcess
@@ -1497,6 +1513,157 @@ public final class Settings {
      * Verbose chat logging in elytra mode
      */
     public final Setting<Boolean> elytraChatSpam = new Setting<>(false);
+
+    /**
+     * In ticks the minimum duration of fire resistance to have before going into lava
+     */
+    public final Setting<Integer> highwayFireRestMinDuration = new Setting<>(1200);
+
+    /**
+     * Pickaxe threshold for acquiring more pickaxes
+     */
+    public final Setting<Integer> highwayPicksThreshold = new Setting<>(1);
+
+    /**
+     * Pickaxes to keep in inventory while digging
+     */
+    public final Setting<Integer> highwayPicksToHaveDigging = new Setting<>(5);
+
+    /**
+     * Pickaxes to keep in inventory while paving
+     */
+    public final Setting<Integer> highwayPicksToHavePaving = new Setting<>(2);
+
+    /**
+     * Gapple threshold for acquiring more gapples
+     */
+    public final Setting<Integer> highwayGapplesThreshold = new Setting<>(8);
+
+    /**
+     * Minimum amount of gapples to stop looting
+     */
+    public final Setting<Integer> highwayGapplesToHave = new Setting<>(48);
+
+    /**
+     * Obsidian threshold for acquiring more obsidian
+     */
+    public final Setting<Integer> highwayObsidianThreshold = new Setting<>(32);
+
+    /**
+     * Pickaxes shulkers to have in inventory during looting
+     */
+    public final Setting<Integer> highwayPickShulksToHave = new Setting<>(1);
+
+    /**
+     * Ender chest shulkers to have in inventory during looting
+     */
+    public final Setting<Integer> highwayEnderChestShulksToHave = new Setting<>(1);
+
+    /**
+     * Ender chests to loot for obsidian farming
+     */
+    public final Setting<Integer> highwayEnderChestsToLoot = new Setting<>(64);
+
+    /**
+     * Ender chests to keep in inventory and not mine
+     */
+    public final Setting<Integer> highwayEnderChestsToKeep = new Setting<>(8);
+
+    /**
+     * Max search distance for obsidian after mining ender chests
+     */
+    public final Setting<Double> highwayObsidianMaxSearchDist = new Setting<>(6D);
+
+    /**
+     * If true will render all the locations being scanned for liquids while building
+     */
+    public final Setting<Boolean> highwayRenderLiquidScanArea = new Setting<>(false);
+
+    /**
+     * If true will render the highway building locations
+     */
+    public final Setting<Boolean> highwayRenderBuildingArea = new Setting<>(false);
+
+    /**
+     * The maximum distance Baritone should go back when looking for a lost shulker
+     */
+    public final Setting<Integer> highwayMaxLostShulkerSearchDist = new Setting<>(256);
+
+    /**
+     * If Baritone is stuck longer than this it'll try to fix
+     */
+    public final Setting<Integer> highwayStuckCheckTicks = new Setting<>(800);
+
+    /**
+     * Distance to check when checking if stuck
+     */
+    public final Setting<Integer> highwayStuckDistance = new Setting<>(5);
+
+    /**
+     * Disconnect from the server if lost some health
+     */
+    public final Setting<Boolean> highwayDcOnHealthLoss = new Setting<>(true);
+
+    /**
+     * If true will treat shulkers with pickaxes and ender chests mixed as valid
+     */
+    public final Setting<Boolean> highwayAllowMixedShulks = new Setting<>(true);
+
+    /**
+     * If true will try to place a totem into offhand during digging/paving
+     */
+    public final Setting<Boolean> highwayAutoTotem = new Setting<>(false);
+
+    /**
+     * Base Y level of the highway schematic
+     */
+    public final Setting<Integer> highwayLowestY = new Setting<>(118);
+
+    /**
+     * Main Y level of the highway, where obsidian is placed
+     */
+    public final Setting<Integer> highwayMainY = new Setting<>(119);
+
+    /**
+     * Support Y level, where empty shulkers and echests for looting get placed
+     */
+    public final Setting<Integer> highwayEmptyShulkEchestY = new Setting<>(121);
+
+    /**
+     * Highway width without the rails
+     */
+    public final Setting<Integer> highwayWidth = new Setting<>(4);
+
+    /**
+     * Highway height without the obsidian
+     */
+    public final Setting<Integer> highwayHeight = new Setting<>(4);
+
+    /**
+     * Width of support blocks for unpaved highway
+     */
+    public final Setting<Integer> highwaySupportWidth = new Setting<>(2);
+
+    /**
+     * Offset of support blocks
+     */
+    public final Setting<Integer> highwaySupportOffset = new Setting<>(2);
+
+    /**
+     * If enabled will dig and pave for rails
+     */
+    public final Setting<Boolean> highwayRail = new Setting<>(true);
+
+    /**
+     * If not -1 will keep this distance from the end of the highway
+     * Useful for digging small tunnels quicker
+     */
+    public final Setting<Integer> highwayEndDistance = new Setting<>(-1);
+
+    /**
+     * Number of blocks the builder can break per tick
+     */
+    public final Setting<Integer> multiBreak = new Setting<>(-1);
 
     /**
      * A map of lowercase setting field names to their respective setting

@@ -17,6 +17,7 @@
 
 package baritone.api;
 
+import baritone.api.behavior.INetherHighwayBuilderBehavior;
 import baritone.api.behavior.ILookBehavior;
 import baritone.api.behavior.IPathingBehavior;
 import baritone.api.cache.IWorldProvider;
@@ -75,6 +76,12 @@ public interface IBaritone {
      * @see IFarmProcess
      */
     IFarmProcess getFarmProcess();
+
+    /**
+     * @return The {@link INetherHighwayBuilderBehavior} instance
+     * @see INetherHighwayBuilderBehavior
+     */
+    INetherHighwayBuilderBehavior getNetherHighwayBuilderBehavior();
 
     /**
      * @return The {@link ICustomGoalProcess} instance

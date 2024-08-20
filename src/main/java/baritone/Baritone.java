@@ -69,6 +69,7 @@ public class Baritone implements IBaritone {
     private final PathingBehavior pathingBehavior;
     private final LookBehavior lookBehavior;
     private final InventoryBehavior inventoryBehavior;
+    private final NetherHighwayBuilderBehavior netherHighwayBuilderBehavior;
     private final InputOverrideHandler inputOverrideHandler;
 
     private final FollowProcess followProcess;
@@ -110,6 +111,7 @@ public class Baritone implements IBaritone {
             this.inventoryBehavior    = this.registerBehavior(InventoryBehavior::new);
             this.inputOverrideHandler = this.registerBehavior(InputOverrideHandler::new);
             this.registerBehavior(WaypointBehavior::new);
+            this.netherHighwayBuilderBehavior = this.registerBehavior(NetherHighwayBuilderBehavior::new);
         }
 
         this.pathingControlManager = new PathingControlManager(this);
@@ -194,6 +196,10 @@ public class Baritone implements IBaritone {
     @Override
     public ExploreProcess getExploreProcess() {
         return this.exploreProcess;
+    }
+
+    public NetherHighwayBuilderBehavior getNetherHighwayBuilderBehavior() {
+        return this.netherHighwayBuilderBehavior;
     }
 
     @Override
