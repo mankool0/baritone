@@ -22,6 +22,7 @@ import baritone.api.IBaritone;
 import baritone.api.event.events.PlayerUpdateEvent;
 import baritone.api.event.events.SprintStateEvent;
 import baritone.api.event.events.type.EventState;
+import baritone.api.utils.accessor.IClientPlayerEntity;
 import baritone.behavior.LookBehavior;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.player.LocalPlayer;

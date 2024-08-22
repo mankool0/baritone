@@ -34,10 +34,15 @@ import baritone.pathing.movement.MovementHelper;
 import baritone.process.BuilderProcess;
 import baritone.utils.BlockStateInterface;
 import baritone.utils.IRenderer;
+import baritone.utils.ToolSet;
+import com.mojang.blaze3d.vertex.BufferBuilder;
 import net.minecraft.client.gui.screens.inventory.ContainerScreen;
 import net.minecraft.client.gui.screens.inventory.ShulkerBoxScreen;
 import net.minecraft.core.*;
+import net.minecraft.core.component.DataComponentMap;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
@@ -54,7 +59,11 @@ import net.minecraft.world.entity.vehicle.Boat;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.*;
+import net.minecraft.world.item.component.CustomData;
+import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
+import net.minecraft.world.item.enchantment.Enchantments;
+import net.minecraft.world.item.enchantment.ItemEnchantments;
 import net.minecraft.world.level.ItemLike;
 import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.state.BlockState;
@@ -1173,9 +1182,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                                     double lastX = ctx.getPlayerEntity().getXLast();
                                     double lastY = ctx.getPlayerEntity().getYLast();
                                     double lastZ = ctx.getPlayerEntity().getZLast();
-                                    final Vec3 pos = new Vec3(lastX + (ctx.player().getX() - lastX) * ctx.minecraft().getFrameTime(),
-                                            lastY + (ctx.player().getY() - lastY) * ctx.minecraft().getFrameTime(),
-                                            lastZ + (ctx.player().getZ() - lastZ) * ctx.minecraft().getFrameTime());
+                                    final Vec3 pos = new Vec3(lastX + (ctx.player().getX() - lastX) * ctx.minecraft().getTimer().getGameTimeDeltaPartialTick(true),
+                                            lastY + (ctx.player().getY() - lastY) * ctx.minecraft().getTimer().getGameTimeDeltaPartialTick(true),
+                                            lastZ + (ctx.player().getZ() - lastZ) * ctx.minecraft().getTimer().getGameTimeDeltaPartialTick(true));
                                     BetterBlockPos originPos = new BetterBlockPos(pos.x, pos.y+0.5f, pos.z);
                                     double l_Offset = pos.y - originPos.getY();
                                     if (place(placeAt, (float) ctx.playerController().getBlockReachDistance(), true, l_Offset == -0.5f, InteractionHand.MAIN_HAND) == PlaceResult.Placed) {
@@ -2194,9 +2203,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     double lastX = ctx.getPlayerEntity().getXLast();
                     double lastY = ctx.getPlayerEntity().getYLast();
                     double lastZ = ctx.getPlayerEntity().getZLast();
-                    final Vec3 pos = new Vec3(lastX + (ctx.player().getX() - lastX) * ctx.minecraft().getFrameTime(),
-                            lastY + (ctx.player().getY() - lastY) * ctx.minecraft().getFrameTime(),
-                            lastZ + (ctx.player().getZ() - lastZ) * ctx.minecraft().getFrameTime());
+                    final Vec3 pos = new Vec3(lastX + (ctx.player().getX() - lastX) * ctx.minecraft().getTimer().getGameTimeDeltaPartialTick(true),
+                            lastY + (ctx.player().getY() - lastY) * ctx.minecraft().getTimer().getGameTimeDeltaPartialTick(true),
+                            lastZ + (ctx.player().getZ() - lastZ) * ctx.minecraft().getTimer().getGameTimeDeltaPartialTick(true));
                     BlockPos originPos = new BetterBlockPos(pos.x, pos.y+0.5f, pos.z);
                     double l_Offset = pos.y - originPos.getY();
                     PlaceResult l_Place = place(placeLoc, 5.0f, false, l_Offset == -0.5f, InteractionHand.OFF_HAND);
@@ -2563,7 +2572,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         for (Direction side : Direction.values())
         {
             BlockPos neighbour = blockPos.offset(side.getNormal());
-            if (!ctx.world().getBlockState(neighbour).getMaterial().isReplaceable())
+            if (!ctx.world().getBlockState(neighbour).canBeReplaced())
             {
                 return true;
             }
@@ -2586,7 +2595,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     private PlaceResult place(BlockPos pos, float p_Distance, boolean p_Rotate, boolean p_UseSlabRule, boolean packetSwing, InteractionHand hand) {
         BlockState l_State = ctx.world().getBlockState(pos);
 
-        boolean l_Replaceable = l_State.getMaterial().isReplaceable();
+        boolean l_Replaceable = l_State.canBeReplaced();
 
         boolean l_IsSlabAtBlock = l_State.getBlock() instanceof SlabBlock;
 
@@ -2629,7 +2638,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     final Block neighborBlock = ctx.world().getBlockState(neighbor).getBlock();
 
                     BlockHitResult blockHitResult = new BlockHitResult(hitVec, side2, neighbor, false);
-                    final boolean activated = ctx.world().getBlockState(neighbor).use(ctx.world(), ctx.player(), hand, blockHitResult) == InteractionResult.SUCCESS;
+                    final boolean activated = ctx.world().getBlockState(neighbor).useWithoutItem(ctx.world(), ctx.player(), blockHitResult) == InteractionResult.SUCCESS;
 
                     if (blackList.contains(neighborBlock) || shulkerBlockList.contains(neighborBlock) || activated)
                     {
@@ -2735,7 +2744,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     private void faceVectorPacketInstant(Vec3 vec) {
         float[] rotations = getLegitRotations(vec);
 
-        ctx.player().connection.send(new ServerboundMovePlayerPacket.Rot(rotations[0], rotations[1], ctx.player().isOnGround()));
+        ctx.player().connection.send(new ServerboundMovePlayerPacket.Rot(rotations[0], rotations[1], ctx.player().onGround()));
     }
 
     private void setTarget(BlockPos pos) {
@@ -3055,7 +3064,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         if (settings.highwayRenderLiquidScanArea.value) {
             renderLockLiquid.lock();
             //PathRenderer.drawManySelectionBoxes(ctx.minecraft().getRenderViewEntity(), renderBlocks, Color.CYAN);
-            IRenderer.startLines(Color.BLUE, 2, settings.renderSelectionBoxesIgnoreDepth.value);
+            BufferBuilder bufferBuilder = IRenderer.startLines(Color.BLUE, 2, settings.renderSelectionBoxesIgnoreDepth.value);
 
             //BlockPos blockpos = movingObjectPositionIn.getBlockPos();
             BlockStateInterface bsi = new BlockStateInterface(BaritoneAPI.getProvider().getPrimaryBaritone().getPlayerContext()); // TODO this assumes same dimension between primary baritone and render view? is this safe?
@@ -3066,18 +3075,18 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 AABB toDraw;
 
                 if (state.getBlock() instanceof AirBlock) {
-                    shape = Blocks.DIRT.defaultBlockState().getShape(player.level, pos);
+                    shape = Blocks.DIRT.defaultBlockState().getShape(player.level(), pos);
                 } else {
-                    shape = state.getShape(player.level, pos);
+                    shape = state.getShape(player.level(), pos);
                 }
                 if (!shape.isEmpty()) {
                     AABB bounds = shape.bounds();
                     toDraw = new AABB(pos.getX(), pos.getY(), pos.getZ(), pos.getX() + bounds.getXsize(), pos.getY() + bounds.getYsize(), pos.getZ() + bounds.getZsize());
-                    IRenderer.emitAABB(event.getModelViewStack(), toDraw, .002D);
+                    IRenderer.emitAABB(bufferBuilder, event.getModelViewStack(), toDraw, .002D);
                 }
             });
 
-            IRenderer.endLines(settings.renderSelectionBoxesIgnoreDepth.value);
+            IRenderer.endLines(bufferBuilder, settings.renderSelectionBoxesIgnoreDepth.value);
 
             renderLockLiquid.unlock();
         }
@@ -3086,23 +3095,23 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             renderLockBuilding.lock();
             BlockStateInterface bsi = new BlockStateInterface(BaritoneAPI.getProvider().getPrimaryBaritone().getPlayerContext());
             renderBlocksBuilding.forEach((pos, color) -> {
-                IRenderer.startLines(color, 2, settings.renderSelectionBoxesIgnoreDepth.value);
+                BufferBuilder bufferBuilder = IRenderer.startLines(color, 2, settings.renderSelectionBoxesIgnoreDepth.value);
 
                 BlockState state = bsi.get0(pos);
                 VoxelShape shape;
                 AABB toDraw;
 
                 if (state.getBlock() instanceof AirBlock) {
-                    shape = Blocks.DIRT.defaultBlockState().getShape(player.level, pos);
+                    shape = Blocks.DIRT.defaultBlockState().getShape(player.level(), pos);
                 } else {
-                    shape = state.getShape(player.level, pos);
+                    shape = state.getShape(player.level(), pos);
                 }
                 if (!shape.isEmpty()) {
                     AABB bounds = shape.bounds();
                     toDraw = new AABB(pos.getX(), pos.getY(), pos.getZ(), pos.getX() + bounds.getXsize(), pos.getY() + bounds.getYsize(), pos.getZ() + bounds.getZsize());
-                    IRenderer.emitAABB(event.getModelViewStack(), toDraw, .002D);
+                    IRenderer.emitAABB(bufferBuilder, event.getModelViewStack(), toDraw, .002D);
 
-                    IRenderer.endLines(settings.renderSelectionBoxesIgnoreDepth.value);
+                    IRenderer.endLines(bufferBuilder, settings.renderSelectionBoxesIgnoreDepth.value);
                 }
             });
         }
@@ -3225,11 +3234,14 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
     private NonNullList<ItemStack> getShulkerContents(ItemStack shulker) {
         NonNullList<ItemStack> contents = NonNullList.withSize(27, ItemStack.EMPTY);
-        CompoundTag nbtTagCompound = shulker.getTag();
-        if (nbtTagCompound != null && nbtTagCompound.contains("BlockEntityTag", 10)) {
-            CompoundTag nbtTagCompoundTags = nbtTagCompound.getCompound("BlockEntityTag");
-            if (nbtTagCompoundTags.contains("Items", 9)) {
-                ContainerHelper.loadAllItems(nbtTagCompoundTags, contents);
+
+        if (shulker.has(DataComponents.BLOCK_ENTITY_DATA)) {
+            CustomData data = shulker.get(DataComponents.BLOCK_ENTITY_DATA);
+            if (data != null && data.contains("Items")) {
+                CompoundTag compoundTag = data.copyTag();
+                if (compoundTag.contains("Items")) {
+                    ContainerHelper.loadAllItems(compoundTag, contents, ctx.player().registryAccess());
+                }
             }
         }
 
@@ -3267,9 +3279,13 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 }
                 pickaxeCount++;
 
-                if (EnchantmentHelper.hasSilkTouch(curStack)) {
-                    // Pickaxe is enchanted with silk touch
-                    return 0;
+
+                ItemEnchantments enchantments = curStack.getEnchantments();
+                for (Holder<Enchantment> enchant : enchantments.keySet()) {
+                    if (enchant.is(Enchantments.SILK_TOUCH) && enchantments.getLevel(enchant) > 0) {
+                        // Pickaxe is enchanted with silk touch
+                        return 0;
+                    }
                 }
             } else if (!(curStack.getItem() instanceof AirItem)) {
                 if (!settings.highwayAllowMixedShulks.value || !(curStack.getItem() instanceof BlockItem) || !(((BlockItem)curStack.getItem()).getBlock() instanceof EnderChestBlock)) {
@@ -3472,9 +3488,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             double lastX = ctx.getPlayerEntity().getXLast();
             double lastY = ctx.getPlayerEntity().getYLast();
             double lastZ = ctx.getPlayerEntity().getZLast();
-            final Vec3 pos = new Vec3(lastX + (ctx.player().getX() - lastX) * ctx.minecraft().getFrameTime(),
-                    lastY + (ctx.player().getY() - lastY) * ctx.minecraft().getFrameTime(),
-                    lastZ + (ctx.player().getZ() - lastZ) * ctx.minecraft().getFrameTime());
+            final Vec3 pos = new Vec3(lastX + (ctx.player().getX() - lastX) * ctx.minecraft().getTimer().getGameTimeDeltaPartialTick(true),
+                    lastY + (ctx.player().getY() - lastY) * ctx.minecraft().getTimer().getGameTimeDeltaPartialTick(true),
+                    lastZ + (ctx.player().getZ() - lastZ) * ctx.minecraft().getTimer().getGameTimeDeltaPartialTick(true));
             BetterBlockPos originPos = new BetterBlockPos(pos.x, pos.y+0.5f, pos.z);
             double l_Offset = pos.y - originPos.getY();
             PlaceResult l_Place = place(shulkerPlaceLoc, 5.0f, true, l_Offset == -0.5f, InteractionHand.MAIN_HAND);
@@ -3540,7 +3556,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         int count = 0;
         AbstractContainerMenu curContainer = ctx.player().containerMenu;
         for (int i = 0; i < 27; i++) {
-            if (curContainer.getSlot(i).getItem().getItem() instanceof EnchantedGoldenAppleItem) {
+            if (curContainer.getSlot(i).getItem().getItem() == Items.ENCHANTED_GOLDEN_APPLE) {
                 count += curContainer.getSlot(i).getItem().getCount();
 
                 if (getItemCountInventory(Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) == 0 && getItemSlot(Item.getId(Items.AIR)) == -1) {
