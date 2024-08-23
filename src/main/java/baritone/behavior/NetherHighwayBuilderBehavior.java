@@ -3556,7 +3556,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         int count = 0;
         AbstractContainerMenu curContainer = ctx.player().containerMenu;
         for (int i = 0; i < 27; i++) {
-            if (curContainer.getSlot(i).getItem().getItem() == Items.ENCHANTED_GOLDEN_APPLE) {
+            if (curContainer.getSlot(i).getItem().is(Items.ENCHANTED_GOLDEN_APPLE)) {
                 count += curContainer.getSlot(i).getItem().getCount();
 
                 if (getItemCountInventory(Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) == 0 && getItemSlot(Item.getId(Items.AIR)) == -1) {
