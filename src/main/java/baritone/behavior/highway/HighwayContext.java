@@ -51,6 +51,7 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.*;
 import net.minecraft.world.item.component.CustomData;
+import net.minecraft.world.item.component.ItemContainerContents;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.item.enchantment.ItemEnchantments;
@@ -781,7 +782,11 @@ public class HighwayContext {
     private NonNullList<ItemStack> getShulkerContents(ItemStack shulker) {
         NonNullList<ItemStack> contents = NonNullList.withSize(27, ItemStack.EMPTY);
 
-        if (shulker.has(DataComponents.BLOCK_ENTITY_DATA)) {
+        if (shulker.has(DataComponents.CONTAINER)) {
+            ItemContainerContents container = shulker.get(DataComponents.CONTAINER);
+            container.copyInto(contents);
+        }
+        else if (shulker.has(DataComponents.BLOCK_ENTITY_DATA)) {
             CustomData data = shulker.get(DataComponents.BLOCK_ENTITY_DATA);
             if (data != null && data.contains("Items")) {
                 CompoundTag compoundTag = data.copyTag();

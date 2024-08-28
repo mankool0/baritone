@@ -89,13 +89,12 @@ public class WhiteBlackSchematic extends AbstractSchematic {
             return getDefaultOrThrowaway();
         }
 
-        for (BlockState placeable : approxPlaceable) {
-            for (BlockOptionalMeta bom : BomList) {
+        for (BlockOptionalMeta bom : BomList) {
+            for (BlockState placeable: approxPlaceable) {
                 if (bom.matches(placeable)) {
                     return placeable;
                 }
             }
-            return placeable;
         }
 
         return BomList.get(0).getAnyBlockState();
