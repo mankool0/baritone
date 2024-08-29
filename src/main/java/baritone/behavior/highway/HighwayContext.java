@@ -1402,7 +1402,7 @@ public class HighwayContext {
                                 renderBlocksBuilding.put(new BlockPos(blockX, blockY, blockZ), Color.CYAN);
                             } else if (desiredState.getBlock().equals(Blocks.NETHERRACK)) {
                                 renderBlocksBuilding.put(new BlockPos(blockX, blockY, blockZ), Color.RED);
-                            } else if (desiredState.getBlock().equals(Blocks.OBSIDIAN)) {
+                            } else if (desiredState.getBlock().equals(Blocks.OBSIDIAN) || desiredState.getBlock().equals(Blocks.CRYING_OBSIDIAN)) {
                                 renderBlocksBuilding.put(new BlockPos(blockX, blockY, blockZ), Color.BLACK);
                             } else {
                                 renderBlocksBuilding.put(new BlockPos(blockX, blockY, blockZ), Color.GREEN);
@@ -1742,73 +1742,6 @@ public class HighwayContext {
                 pos, Direction.DOWN));
         instantMineDirection = Direction.DOWN;
         instantMineLastBlock = pos;
-    }
-
-    private ArrayList<BlockPos> highwayObsidToPlace() {
-        ArrayList<BlockPos> toPlace = new ArrayList<>();
-
-        Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
-        Vec3 curPlayerPos = new Vec3(playerContext.playerFeet().getX() + (-highwayDirection.getX()), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ() + (-highwayDirection.getZ()));
-        BlockPos startCheckPos = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z), direction, curPlayerPos, LocationType.HighwayBuild);
-        int distanceToCheckAhead = 5;
-        for (int i = 1; i < distanceToCheckAhead; i++) {
-            BlockPos curPos = startCheckPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
-            for (int y = 0; y < schematic.heightY(); y++) {
-                for (int z = 0; z < schematic.lengthZ(); z++) {
-                    for (int x = 0; x < schematic.widthX(); x++) {
-                        int blockX = x + curPos.getX();
-                        int blockY = y + curPos.getY();
-                        int blockZ = z + curPos.getZ();
-                        BlockState current = playerContext.world().getBlockState(new BlockPos(blockX, blockY, blockZ));
-
-                        if (!schematic.inSchematic(x, y, z, current)) {
-                            continue;
-                        }
-
-                        if (baritone.bsi.worldContainsLoadedChunk(blockX, blockZ)) { // check if its in render distance, not if its in cache
-                            // we can directly observe this block, it is in render distance
-
-                            ISchematic ourSchem = schematic.getSchematic(x, y, z, current).schematic;
-                            if (ourSchem instanceof WhiteBlackSchematic && ((WhiteBlackSchematic) ourSchem).isValidIfUnder() &&
-                                    MovementHelper.isBlockNormalCube(playerContext.world().getBlockState(new BlockPos(blockX, blockY + 1, blockZ)))) {
-                                continue;
-                            }
-
-                            BlockState desiredState = schematic.desiredState(x, y, z, current, this.approxPlaceable);
-                            if (!desiredState.equals(current)) {
-                                // If liquids we have nothing to place so bot can remove the liquids
-                                if (current.getBlock() instanceof LiquidBlock) {
-                                    return new ArrayList<>();
-                                } else if (desiredState.is(Blocks.OBSIDIAN)) {
-                                    toPlace.add(new BlockPos(blockX, blockY, blockZ));
-                                }
-                            }
-                        }
-
-                    }
-                }
-            }
-        }
-        return toPlace;
-    }
-
-    private boolean isLiquidCoveredAllSides(BlockPos blockPos) {
-        if (getIssueType(blockPos.north()) != HighwayBlockState.Blocks) {
-            return false;
-        }
-        if (getIssueType(blockPos.east()) != HighwayBlockState.Blocks) {
-            return false;
-        }
-        if (getIssueType(blockPos.south()) != HighwayBlockState.Blocks) {
-            return false;
-        }
-        if (getIssueType(blockPos.west()) != HighwayBlockState.Blocks) {
-            return false;
-        }
-        if (getIssueType(blockPos.above()) != HighwayBlockState.Blocks) {
-            return false;
-        }
-        return getIssueType(blockPos.below()) == HighwayBlockState.Blocks;
     }
 
     public int timer() {

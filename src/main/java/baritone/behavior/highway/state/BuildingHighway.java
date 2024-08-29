@@ -56,7 +56,7 @@ public class BuildingHighway extends State {
             }
 
             // TODO: Change shulker threshold from 0 to a customizable value
-            if (context.getItemCountInventory(Item.getId(Blocks.OBSIDIAN.asItem())) <= context.settings().highwayObsidianThreshold.value && context.paving()) {
+            if (getObsidianCountInventory(context) <= context.settings().highwayObsidianThreshold.value && context.paving()) {
                 if (context.getShulkerCountInventory(ShulkerType.EnderChest) == 0) {
                     if (context.repeatCheck()) {
                         if (!context.enderChestHasEnderShulks()) {
@@ -226,5 +226,9 @@ public class BuildingHighway extends State {
                     return;
                 }
             }
+    }
+
+    private int getObsidianCountInventory(HighwayContext context) {
+        return context.getItemCountInventory(Item.getId(Blocks.OBSIDIAN.asItem())) + context.getItemCountInventory(Item.getId(Blocks.CRYING_OBSIDIAN.asItem()));
     }
 }

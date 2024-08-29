@@ -45,7 +45,8 @@ public class CollectingObsidian extends State {
         for (Entity entity : context.playerContext().entities()) {
             if (entity instanceof ItemEntity) {
                 if (((ItemEntity) entity).getItem().getItem() instanceof BlockItem &&
-                        ((BlockItem) ((ItemEntity) entity).getItem().getItem()).getBlock() == Blocks.OBSIDIAN) {
+                        (((BlockItem) ((ItemEntity) entity).getItem().getItem()).getBlock() == Blocks.OBSIDIAN
+                        || ((BlockItem) ((ItemEntity) entity).getItem().getItem()).getBlock() == Blocks.CRYING_OBSIDIAN)) {
                     double obsidDistance = VecUtils.distanceToCenter(context.playerContext().playerFeet(), (int) entity.getX(), (int) entity.getY(), (int) entity.getZ());
                     if (obsidDistance <= context.settings().highwayObsidianMaxSearchDist.value) {
                         if (context.getItemCountInventory(Item.getId(Items.AIR)) == 0) {

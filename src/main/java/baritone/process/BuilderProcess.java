@@ -799,7 +799,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                         for (int z = -zSize; z <= zSize; z++) {
                             for (int y = -ySize; y <= 0; y++) {
                                 BlockState lowerState = bcc.bsi.get0(pos.offset(x, y, z));
-                                if (lowerState.is(Blocks.OBSIDIAN) && !mineObby) {
+                                if ((lowerState.is(Blocks.OBSIDIAN) || lowerState.is(Blocks.CRYING_OBSIDIAN)) && !mineObby) {
                                     continue;
                                 }
                                 if (!(lowerState.getBlock() instanceof AirBlock) && !(lowerState.getBlock() instanceof LiquidBlock)) {

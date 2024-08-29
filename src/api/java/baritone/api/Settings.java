@@ -212,7 +212,8 @@ public final class Settings {
             Blocks.COBBLESTONE.asItem(),
             Blocks.NETHERRACK.asItem(),
             Blocks.STONE.asItem(),
-            Blocks.OBSIDIAN.asItem()
+            Blocks.OBSIDIAN.asItem(),
+            Blocks.CRYING_OBSIDIAN.asItem()
     )));
 
     /**
