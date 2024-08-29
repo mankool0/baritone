@@ -1396,8 +1396,8 @@ public class HighwayContext {
                         if (!schematic.inSchematic(x, y, z, current)) {
                             continue;
                         }
+                        BlockState desiredState = schematic.desiredState(x, y, z, current, this.approxPlaceable);
                         if (i == 1) {
-                            BlockState desiredState = schematic.desiredState(x, y, z, current, this.approxPlaceable);
                             if (desiredState.getBlock() instanceof AirBlock) {
                                 renderBlocksBuilding.put(new BlockPos(blockX, blockY, blockZ), Color.CYAN);
                             } else if (desiredState.getBlock().equals(Blocks.NETHERRACK)) {
@@ -1417,7 +1417,7 @@ public class HighwayContext {
                                 continue;
                             }
 
-                            if (!schematic.desiredState(x, y, z, current, this.approxPlaceable).equals(current)) {
+                            if (!desiredState.equals(current)) {
                                 if (!baritone.getBuilderProcess().checkNoEntityCollision(new AABB(new BlockPos(blockX, blockY, blockZ)), playerContext.player())) {
                                     List<Entity> entityList = playerContext.world().getEntities(null, new AABB(new BlockPos(blockX, blockY, blockZ)));
                                     for (Entity entity : entityList) {
@@ -1430,6 +1430,9 @@ public class HighwayContext {
                                     }
                                 }
 
+                                if (desiredState.getBlock() instanceof AirBlock && Baritone.settings().buildIgnoreBlocks.value.contains(current.getBlock())) {
+                                    continue;
+                                }
                                 // Never should be liquids
                                 if (current.getBlock() instanceof LiquidBlock) {
                                     renderLockBuilding.unlock();
