@@ -709,12 +709,19 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                             observedCompleted.add(BetterBlockPos.longHash(blockX, blockY, blockZ));
                         } else {
                             WhiteBlackSchematic ourSchem = null;
-                            if (schematic instanceof CompositeSchematic) {
-                                if (((CompositeSchematic) schematic).getSchematic(x, y, z, current).schematic instanceof WhiteBlackSchematic) {
-                                    ourSchem = (WhiteBlackSchematic) ((CompositeSchematic) schematic).getSchematic(x, y, z, current).schematic;
+                            ISchematic schematicToCheck = this.schematic;
+                            if (schematicToCheck instanceof MaskSchematic) {
+                                schematicToCheck = ((MaskSchematic) schematicToCheck).getSchematic();
+                            }
+
+                            if (schematicToCheck instanceof CompositeSchematic) {
+                                CompositeSchematic compositeSchematic = (CompositeSchematic) schematicToCheck;
+                                ISchematic innerSchematic = compositeSchematic.getSchematic(x, y, z, current).schematic;
+                                if (innerSchematic instanceof WhiteBlackSchematic) {
+                                    ourSchem = (WhiteBlackSchematic) innerSchematic;
                                 }
                             }
-                            else if (schematic instanceof WhiteBlackSchematic) {
+                            else if (schematicToCheck instanceof WhiteBlackSchematic) {
                                 ourSchem = (WhiteBlackSchematic) schematic;
                             }
                             BlockState tempState = ctx.world().getBlockState(new BlockPos(blockX, blockY + 1, blockZ));
@@ -1215,8 +1222,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         private BlockState getSchematic(int x, int y, int z, BlockState current) {
             if (schematic.inSchematic(x - originX, y - originY, z - originZ, current)) {
                 // Case of special schematic
-                if (schematic instanceof CompositeSchematic) {
-                    ISchematic ourSchem = ((CompositeSchematic)schematic).getSchematic(x - originX, y - originY, z - originZ, current).schematic;
+                if (schematic instanceof MaskSchematic && ((MaskSchematic)schematic).getSchematic() instanceof CompositeSchematic) {
+                    ISchematic ourSchem = ((CompositeSchematic)((MaskSchematic)schematic).getSchematic()).getSchematic(x - originX, y - originY, z - originZ, current).schematic;
                     if (ourSchem instanceof WhiteBlackSchematic && ((WhiteBlackSchematic) ourSchem).isValidIfUnder() &&
                             MovementHelper.isBlockNormalCube(ctx.world().getBlockState(new BlockPos(x, y + 1, z)))) {
                         return current;
