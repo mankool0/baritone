@@ -31,6 +31,10 @@ public abstract class MaskSchematic extends AbstractSchematic {
         this.schematic = schematic;
     }
 
+    public ISchematic getSchematic() {
+        return schematic;
+    }
+
     protected abstract boolean partOfMask(int x, int y, int z, BlockState currentState);
 
     @Override
