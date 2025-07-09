@@ -531,22 +531,31 @@ public class HighwayContext {
     }
 
     public int putPickaxeHotbar() {
-        int itemSlot = getPickaxeSlot();
+        return putPickaxeHotbar(false);
+    }
+
+    public int putPickaxeHotbar(boolean avoidSilkTouch) {
+        int itemSlot = getPickaxeSlot(avoidSilkTouch);
         if (itemSlot >= 9) {
             baritone.getInventoryBehavior().attemptToPutOnHotbar(itemSlot, usefulSlots::contains);
-            itemSlot = getPickaxeSlot();
+            itemSlot = getPickaxeSlot(avoidSilkTouch);
         }
 
         return itemSlot;
     }
 
-    private int getPickaxeSlot() {
+    private int getPickaxeSlot(boolean avoidSilkTouch) {
         for (int i = 0; i < 36; i++) {
             ItemStack stack = playerContext.player().getInventory().items.get(i);
             if (stack.getItem() instanceof PickaxeItem) {
                 if (settings.itemSaver.value && (stack.getDamageValue() + settings.itemSaverThreshold.value) >= stack.getMaxDamage() && stack.getMaxDamage() > 1) {
                     continue;
                 }
+                
+                if (avoidSilkTouch && hasSilkTouch(stack)) {
+                    continue;
+                }
+                
                 return i;
             }
         }
@@ -819,6 +828,16 @@ public class HighwayContext {
         return pickaxeCount;
     }
 
+    private boolean hasSilkTouch(ItemStack itemStack) {
+        ItemEnchantments enchantments = itemStack.getEnchantments();
+        for (Holder<Enchantment> enchant : enchantments.keySet()) {
+            if (enchant.is(Enchantments.SILK_TOUCH) && enchantments.getLevel(enchant) > 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private int isNonSilkPickShulker(ItemStack shulker) {
         NonNullList<ItemStack> contents = getShulkerContents(shulker);
 
@@ -831,12 +850,9 @@ public class HighwayContext {
                 pickaxeCount++;
 
 
-                ItemEnchantments enchantments = curStack.getEnchantments();
-                for (Holder<Enchantment> enchant : enchantments.keySet()) {
-                    if (enchant.is(Enchantments.SILK_TOUCH) && enchantments.getLevel(enchant) > 0) {
-                        // Pickaxe is enchanted with silk touch
-                        return 0;
-                    }
+                if (hasSilkTouch(curStack)) {
+                    // Pickaxe is enchanted with silk touch
+                    return 0;
                 }
             } else if (!(curStack.getItem() instanceof AirItem)) {
                 if (!settings.highwayAllowMixedShulks.value || !(curStack.getItem() instanceof BlockItem) || !(((BlockItem)curStack.getItem()).getBlock() instanceof EnderChestBlock)) {

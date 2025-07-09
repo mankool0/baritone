@@ -54,7 +54,7 @@ public class FarmingEnderChest extends State {
             context.resetTimer();
         }
 
-        int pickSlot = context.putPickaxeHotbar();
+        int pickSlot = context.putPickaxeHotbar(true);
         if (context.playerContext().player().getInventory().selected != pickSlot) {
             context.transitionTo(HighwayState.FarmingEnderChestPrepEchest);
             context.resetTimer();
