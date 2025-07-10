@@ -722,7 +722,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                                 }
                             }
                             else if (schematicToCheck instanceof WhiteBlackSchematic) {
-                                ourSchem = (WhiteBlackSchematic) schematic;
+                                ourSchem = (WhiteBlackSchematic) schematicToCheck;
                             }
                             BlockState tempState = ctx.world().getBlockState(new BlockPos(blockX, blockY + 1, blockZ));
                             if (ourSchem != null && ourSchem.isValidIfUnder() && MovementHelper.isBlockNormalCube(tempState)) {
