@@ -46,6 +46,11 @@ public class FarmingEnderChestClear extends State {
             return;
         }
 
+        // Add extra delay to ensure block entity cleanup before transitioning
+        if (context.timer() < 30) {
+            return;
+        }
+
         context.resetTimer();
         context.transitionTo(HighwayState.CollectingObsidian);
     }

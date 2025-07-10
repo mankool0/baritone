@@ -26,6 +26,7 @@ import baritone.behavior.highway.enums.HighwayState;
 import baritone.behavior.highway.enums.ShulkerType;
 import net.minecraft.world.level.block.AirBlock;
 import net.minecraft.world.level.block.ShulkerBoxBlock;
+import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.Optional;
 
@@ -34,17 +35,26 @@ public class PlacingEnderShulker extends State {
         super(state);
     }
 
+    private boolean placed = false;
+
     @Override
     public void handle(HighwayContext context) {
+        if (placed && context.timer() < 30) {
+            return;
+        }
+
         if (!context.baritone().getBuilderProcess().isPaused() && context.baritone().getBuilderProcess().isActive()) {
             context.resetTimer();
             return; // Wait for build to complete
         }
 
         // No shulker in inventory and not placed
-        if (context.getShulkerSlot(ShulkerType.EnderChest) == -1 && !(context.playerContext().world().getBlockState(context.placeLoc()).getBlock() instanceof ShulkerBoxBlock)) {
+        BlockState testState = context.playerContext().world().getBlockState(context.placeLoc());
+        Helper.HELPER.logDirect("State: " + testState + " @ " + context.placeLoc());
+        if (placed && context.getShulkerSlot(ShulkerType.EnderChest) == -1 && !(context.playerContext().world().getBlockState(context.placeLoc()).getBlock() instanceof ShulkerBoxBlock)) {
             Helper.HELPER.logDirect("Error getting shulker slot at PlacingEnderShulker. Restarting.");
             context.transitionTo(HighwayState.Nothing);
+            placed = false;
             return;
         }
 
@@ -52,15 +62,15 @@ public class PlacingEnderShulker extends State {
         if (!(context.playerContext().world().getBlockState(context.placeLoc()).getBlock() instanceof AirBlock) && !(context.playerContext().world().getBlockState(context.placeLoc()).getBlock() instanceof ShulkerBoxBlock)) {
             context.baritone().getPathingBehavior().cancelEverything();
             context.baritone().getBuilderProcess().clearArea(context.placeLoc(), context.placeLoc());
+            placed = false;
             context.resetTimer();
             return;
         }
 
         Optional<Rotation> shulkerReachable = RotationUtils.reachable(context.playerContext(), context.placeLoc(), context.playerContext().playerController().getBlockReachDistance());
-
         Optional<Rotation> underShulkerReachable = RotationUtils.reachable(context.playerContext(), context.placeLoc().below(), context.playerContext().playerController().getBlockReachDistance());
-
-
         context.transitionTo(context.placeShulkerBox(shulkerReachable.orElse(null), underShulkerReachable.orElse(null), context.placeLoc(), HighwayState.GoingToPlaceLocEnderShulker, this.getState(), HighwayState.OpeningEnderShulker, ShulkerType.EnderChest));
+        placed = true;
+        context.resetTimer();
     }
 }
