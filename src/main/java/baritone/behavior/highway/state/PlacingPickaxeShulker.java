@@ -17,42 +17,32 @@
 
 package baritone.behavior.highway.state;
 
-import baritone.api.utils.Rotation;
-import baritone.api.utils.RotationUtils;
 import baritone.behavior.highway.HighwayContext;
-import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
-import net.minecraft.world.level.block.AirBlock;
-import net.minecraft.world.level.block.ShulkerBoxBlock;
+import baritone.behavior.highway.enums.ShulkerType;
 
-import java.util.Optional;
-
-public class PlacingPickaxeShulker extends State {
+public class PlacingPickaxeShulker extends PlacingShulkerBase {
     public PlacingPickaxeShulker(HighwayState state) {
         super(state);
     }
 
     @Override
+    protected HighwayState getPreviousState() {
+        return HighwayState.GoingToPlaceLocPickaxeShulker;
+    }
+
+    @Override
+    protected HighwayState getNextState() {
+        return HighwayState.OpeningPickaxeShulker;
+    }
+
+    @Override
+    protected ShulkerType getShulkerType() {
+        return ShulkerType.AnyPickaxe; // Default, will be overridden in handle
+    }
+
+    @Override
     public void handle(HighwayContext context) {
-        if (!context.baritone().getBuilderProcess().isPaused() && context.baritone().getBuilderProcess().isActive()) {
-            context.resetTimer();
-            return; // Wait for build to complete
-        }
-
-        // Shulker box spot isn't air or shulker, lets fix that
-        if (!(context.playerContext().world().getBlockState(context.placeLoc()).getBlock() instanceof AirBlock) && !(context.playerContext().world().getBlockState(context.placeLoc()).getBlock() instanceof ShulkerBoxBlock)) {
-            context.baritone().getPathingBehavior().cancelEverything();
-            context.baritone().getBuilderProcess().clearArea(context.placeLoc(), context.placeLoc());
-            context.resetTimer();
-            return;
-        }
-
-
-        Optional<Rotation> shulkerReachable = RotationUtils.reachable(context.playerContext(), context.placeLoc(), context.playerContext().playerController().getBlockReachDistance());
-
-        Optional<Rotation> underShulkerReachable = RotationUtils.reachable(context.playerContext(), context.placeLoc().below(), context.playerContext().playerController().getBlockReachDistance());
-
-
-        context.transitionTo(context.placeShulkerBox(shulkerReachable.orElse(null), underShulkerReachable.orElse(null), context.placeLoc(), HighwayState.GoingToPlaceLocPickaxeShulker, this.state, HighwayState.OpeningPickaxeShulker, context.picksToUse()));
+        handleWithShulkerType(context, context.picksToUse());
     }
 }

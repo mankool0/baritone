@@ -17,43 +17,26 @@
 
 package baritone.behavior.highway.state;
 
-import baritone.api.utils.Rotation;
-import baritone.api.utils.RotationUtils;
-import baritone.behavior.highway.HighwayContext;
-import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
 import baritone.behavior.highway.enums.ShulkerType;
-import net.minecraft.world.level.block.AirBlock;
-import net.minecraft.world.level.block.ShulkerBoxBlock;
 
-import java.util.Optional;
-
-public class PlacingGappleShulker extends State {
+public class PlacingGappleShulker extends PlacingShulkerBase {
     public PlacingGappleShulker(HighwayState state) {
         super(state);
     }
 
     @Override
-    public void handle(HighwayContext context) {
-        if (!context.baritone().getBuilderProcess().isPaused() && context.baritone().getBuilderProcess().isActive()) {
-            context.resetTimer();
-            return; // Wait for build to complete
-        }
+    protected HighwayState getPreviousState() {
+        return HighwayState.GoingToPlaceLocGappleShulker;
+    }
 
-        // Shulker box spot isn't air or shulker, lets fix that
-        if (!(context.playerContext().world().getBlockState(context.placeLoc()).getBlock() instanceof AirBlock) && !(context.playerContext().world().getBlockState(context.placeLoc()).getBlock() instanceof ShulkerBoxBlock)) {
-            context.baritone().getPathingBehavior().cancelEverything();
-            context.baritone().getBuilderProcess().clearArea(context.placeLoc(), context.placeLoc());
-            context.resetTimer();
-            return;
-        }
+    @Override
+    protected HighwayState getNextState() {
+        return HighwayState.OpeningGappleShulker;
+    }
 
-
-        Optional<Rotation> shulkerReachable = RotationUtils.reachable(context.playerContext(), context.placeLoc(), context.playerContext().playerController().getBlockReachDistance());
-
-        Optional<Rotation> underShulkerReachable = RotationUtils.reachable(context.playerContext(), context.placeLoc().below(), context.playerContext().playerController().getBlockReachDistance());
-
-
-        context.transitionTo(context.placeShulkerBox(shulkerReachable.orElse(null), underShulkerReachable.orElse(null), context.placeLoc(), HighwayState.GoingToPlaceLocGappleShulker, this.getState(), HighwayState.OpeningGappleShulker, ShulkerType.Gapple));
+    @Override
+    protected ShulkerType getShulkerType() {
+        return ShulkerType.Gapple;
     }
 }

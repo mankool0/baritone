@@ -45,11 +45,6 @@ public class MiningEnderShulker extends State {
             return;
         }
 
-        // Add extra delay to ensure block entity cleanup before transitioning
-        if (context.timer() < 40) {
-            return;
-        }
-
         context.transitionTo(HighwayState.CollectingEnderShulker);
     }
 }

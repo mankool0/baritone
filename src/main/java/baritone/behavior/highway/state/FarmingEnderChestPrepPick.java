@@ -31,7 +31,7 @@ public class FarmingEnderChestPrepPick extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.timer() < 20) {
+        if (context.timer() < 10) {
             return;
         }
 
