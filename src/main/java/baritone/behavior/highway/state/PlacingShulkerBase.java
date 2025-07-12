@@ -24,6 +24,7 @@ import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
 import baritone.behavior.highway.enums.ShulkerType;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.AirBlock;
 import net.minecraft.world.level.block.ShulkerBoxBlock;
 import net.minecraft.world.level.block.state.BlockState;
@@ -90,10 +91,19 @@ public abstract class PlacingShulkerBase extends State {
             return;
         }
 
-        Optional<Rotation> shulkerReachable = RotationUtils.reachable(context.playerContext(), context.placeLoc(), context.playerContext().playerController().getBlockReachDistance());
-        Optional<Rotation> underShulkerReachable = RotationUtils.reachable(context.playerContext(), context.placeLoc().below(), context.playerContext().playerController().getBlockReachDistance());
-        context.transitionTo(context.placeShulkerBox(shulkerReachable.orElse(null), underShulkerReachable.orElse(null), context.placeLoc(), getPreviousState(), this.getState(), getNextState(), shulkerType));
-        placed = true;
-        context.resetTimer();
+        // Convert to regular BlockPos to avoid BetterBlockPos/BlockPos collision in block entity maps
+        BlockPos placeLoc = new BlockPos(context.placeLoc().getX(), context.placeLoc().getY(), context.placeLoc().getZ());
+        
+        Optional<Rotation> shulkerReachable = RotationUtils.reachable(context.playerContext(), placeLoc, context.playerContext().playerController().getBlockReachDistance());
+        Optional<Rotation> underShulkerReachable = RotationUtils.reachable(context.playerContext(), placeLoc.below(), context.playerContext().playerController().getBlockReachDistance());
+        HighwayState result = context.placeShulkerBox(shulkerReachable.orElse(null), underShulkerReachable.orElse(null), placeLoc, getPreviousState(), this.getState(), getNextState(), shulkerType);
+        
+        if (result == this.getState()) {
+            placed = true;
+            context.resetTimer();
+        } else {
+            // Placement failed, transition to the returned state
+            context.transitionTo(result);
+        }
     }
 }

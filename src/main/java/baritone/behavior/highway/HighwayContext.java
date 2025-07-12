@@ -1014,56 +1014,124 @@ public class HighwayContext {
     }
 
     public HighwayState placeShulkerBox(Rotation shulkerReachable, Rotation underShulkerReachable, BlockPos shulkerPlaceLoc, HighwayState prevHighwayState, HighwayState currentHighwayState, HighwayState nextHighwayState, ShulkerType shulkerType) {
-        if (shulkerReachable != null) {
-            Block shulkerLocBlock = playerContext.world().getBlockState(shulkerPlaceLoc).getBlock();
-            baritone.getLookBehavior().updateTarget(shulkerReachable, true); // Look at shulker spot
-
-            if (shulkerLocBlock instanceof ShulkerBoxBlock) {
-                Helper.HELPER.logDirect("Shulker has been placed successfully");
-                baritone.getInputOverrideHandler().clearAllKeys();
-                return nextHighwayState;
-            }
-            else if (!(shulkerLocBlock instanceof SnowLayerBlock)) {
-                Helper.HELPER.logDirect("Something went wrong at " + currentHighwayState + ". Have " + shulkerLocBlock + " instead of shulker");
-                return prevHighwayState; // Go back a state
-            }
-        }
-        else if (underShulkerReachable != null) {
-            baritone.getLookBehavior().updateTarget(underShulkerReachable, true);
+        // Debug logging to track BlockPos types
+        Helper.HELPER.logDirect("placeShulkerBox called with: " + shulkerPlaceLoc + " (class: " + shulkerPlaceLoc.getClass().getSimpleName() + ")");
+        
+        // Check if we can place at this location
+        if (!canPlaceShulkerAt(shulkerPlaceLoc)) {
+            Helper.HELPER.logDirect("Cannot place shulker at " + shulkerPlaceLoc);
+            return prevHighwayState;
         }
 
-        if (underShulkerReachable == null) {
-            return prevHighwayState; // Something is wrong with where we are trying to place, go back
+        // Get shulker slot and validate
+        int shulkerSlot = putShulkerHotbar(shulkerType);
+        if (shulkerSlot == -1) {
+            Helper.HELPER.logDirect("Error getting shulker slot");
+            return currentHighwayState;
+        }
+        if (shulkerSlot >= 9) {
+            Helper.HELPER.logDirect("Couldn't put shulker to hotbar, waiting");
+            return currentHighwayState;
         }
 
-        if (shulkerPlaceLoc.below().equals(playerContext.getSelectedBlock().orElse(null))) {
-            int shulkerSlot = putShulkerHotbar(shulkerType);
-            if (shulkerSlot == -1) {
-                Helper.HELPER.logDirect("Error getting shulker slot");
-                return currentHighwayState;
-            }
-            if (shulkerSlot >= 9) {
-                Helper.HELPER.logDirect("Couldn't put shulker to hotbar, waiting");
-                return currentHighwayState;
-            }
-            ItemStack stack = playerContext.player().getInventory().items.get(shulkerSlot);
-            if (shulkerItemList.contains(stack.getItem())) {
-                playerContext.player().getInventory().selected = shulkerSlot;
-            }
-
-            //baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
-            double lastX = playerContext.getPlayerEntity().getXLast();
-            double lastY = playerContext.getPlayerEntity().getYLast();
-            double lastZ = playerContext.getPlayerEntity().getZLast();
-            final Vec3 pos = new Vec3(lastX + (playerContext.player().getX() - lastX) * playerContext.minecraft().getTimer().getGameTimeDeltaPartialTick(true),
-                    lastY + (playerContext.player().getY() - lastY) * playerContext.minecraft().getTimer().getGameTimeDeltaPartialTick(true),
-                    lastZ + (playerContext.player().getZ() - lastZ) * playerContext.minecraft().getTimer().getGameTimeDeltaPartialTick(true));
-            BetterBlockPos originPos = new BetterBlockPos(pos.x, pos.y+0.5f, pos.z);
-            double l_Offset = pos.y - originPos.getY();
-            PlaceResult l_Place = place(shulkerPlaceLoc, 5.0f, true, l_Offset == -0.5f, InteractionHand.MAIN_HAND);
+        // Validate we have the right item
+        ItemStack stack = playerContext.player().getInventory().items.get(shulkerSlot);
+        if (!shulkerItemList.contains(stack.getItem())) {
+            Helper.HELPER.logDirect("Invalid shulker item in slot");
+            return currentHighwayState;
         }
 
-        return currentHighwayState;
+        // Determine placement direction and target position
+        Direction placeSide = getShulkerPlaceSide(shulkerPlaceLoc);
+        if (placeSide == null) {
+            Helper.HELPER.logDirect("No valid placement side found");
+            return prevHighwayState;
+        }
+
+        BlockPos neighbor = shulkerPlaceLoc.relative(placeSide);
+        Vec3 hitPos = Vec3.atCenterOf(shulkerPlaceLoc).add(
+            placeSide.getStepX() * 0.5,
+            placeSide.getStepY() * 0.5,
+            placeSide.getStepZ() * 0.5
+        );
+
+        BlockHitResult blockHitResult = new BlockHitResult(hitPos, placeSide.getOpposite(), neighbor, false);
+
+        // Calculate rotation for placement
+        Rotation targetRotation = RotationUtils.calcRotationFromVec3d(
+            RayTraceUtils.inferSneakingEyePosition(playerContext.player()),
+            hitPos,
+            playerContext.playerRotations()
+        );
+
+        // Use look behavior to rotate to target, then place
+        baritone.getLookBehavior().updateTarget(targetRotation, true);
+
+        // Select the shulker slot
+        playerContext.player().getInventory().selected = shulkerSlot;
+
+        // Perform the placement using proper interaction
+        InteractionResult result = playerContext.playerController().processRightClickBlock(
+            playerContext.player(),
+            playerContext.world(),
+            InteractionHand.MAIN_HAND,
+            blockHitResult
+        );
+
+        if (result.consumesAction()) {
+            // Placement attempted successfully - don't check for immediate success
+            Helper.HELPER.logDirect("Shulker placement attempted at " + shulkerPlaceLoc);
+            return currentHighwayState; // Let the calling state handle waiting for confirmation
+        } else {
+            Helper.HELPER.logDirect("Failed to place shulker at " + shulkerPlaceLoc);
+            return prevHighwayState;
+        }
+    }
+
+    private boolean canPlaceShulkerAt(BlockPos pos) {
+        // Check if position is valid
+        if (!playerContext.world().isInWorldBounds(pos)) return false;
+
+        // Check if current block is replaceable
+        BlockState currentState = playerContext.world().getBlockState(pos);
+        
+        if (currentState.getBlock() instanceof ShulkerBoxBlock) {
+            return false;
+        }
+        
+        return currentState.canBeReplaced() || currentState.getBlock() instanceof SnowLayerBlock;
+    }
+
+    private Direction getShulkerPlaceSide(BlockPos pos) {
+        Vec3 eyePos = playerContext.player().getEyePosition();
+        Vec3 blockCenter = Vec3.atCenterOf(pos);
+        Vec3 lookVec = blockCenter.subtract(eyePos);
+
+        double bestRelevancy = -Double.MAX_VALUE;
+        Direction bestSide = null;
+
+        for (Direction side : Direction.values()) {
+            BlockPos neighbor = pos.relative(side);
+            BlockState neighborState = playerContext.world().getBlockState(neighbor);
+
+            // Check if neighbor can be placed against
+            if (neighborState.isAir() || !neighborState.isFaceSturdy(playerContext.world(), neighbor, side.getOpposite())) {
+                continue;
+            }
+
+            // Check if neighbor is a fluid
+            if (!neighborState.getFluidState().isEmpty()) {
+                continue;
+            }
+
+            double relevancy = side.getAxis().choose(lookVec.x, lookVec.y, lookVec.z) * side.getAxisDirection().getStep();
+            if (relevancy > bestRelevancy) {
+                bestRelevancy = relevancy;
+                bestSide = side;
+            }
+        }
+
+        return bestSide;
     }
 
     private int getDepletedPickSlot() {

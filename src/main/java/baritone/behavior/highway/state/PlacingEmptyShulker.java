@@ -24,6 +24,7 @@ import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
 import baritone.behavior.highway.enums.ShulkerType;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.AirBlock;
 import net.minecraft.world.level.block.ShulkerBoxBlock;
 
@@ -55,11 +56,14 @@ public class PlacingEmptyShulker extends State {
         }
 
 
-        Optional<Rotation> shulkerReachable = RotationUtils.reachable(context.playerContext(), context.placeLoc(), context.playerContext().playerController().getBlockReachDistance());
+        // Convert to regular BlockPos to avoid BetterBlockPos/BlockPos collision in block entity maps
+        BlockPos placeLoc = new BlockPos(context.placeLoc().getX(), context.placeLoc().getY(), context.placeLoc().getZ());
+        
+        Optional<Rotation> shulkerReachable = RotationUtils.reachable(context.playerContext(), placeLoc, context.playerContext().playerController().getBlockReachDistance());
 
-        Optional<Rotation> underShulkerReachable = RotationUtils.reachable(context.playerContext(), context.placeLoc().below(), context.playerContext().playerController().getBlockReachDistance());
+        Optional<Rotation> underShulkerReachable = RotationUtils.reachable(context.playerContext(), placeLoc.below(), context.playerContext().playerController().getBlockReachDistance());
 
-        context.transitionTo(context.placeShulkerBox(shulkerReachable.orElse(null), underShulkerReachable.orElse(null), context.placeLoc(), HighwayState.GoingToEmptyShulkerPlaceLoc, this.getState(), HighwayState.Nothing, ShulkerType.Empty));
+        context.transitionTo(context.placeShulkerBox(shulkerReachable.orElse(null), underShulkerReachable.orElse(null), placeLoc, HighwayState.GoingToEmptyShulkerPlaceLoc, this.getState(), HighwayState.Nothing, ShulkerType.Empty));
         if (this.getState() == HighwayState.Nothing) {
             Helper.HELPER.logDirect("Lowering startShulkerCount from " + context.startShulkerCount() + " to " + (context.startShulkerCount() - 1));
             context.setStartShulkerCount(context.startShulkerCount() - 1);
