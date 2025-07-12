@@ -1016,7 +1016,11 @@ public class HighwayContext {
     public HighwayState placeShulkerBox(Rotation shulkerReachable, Rotation underShulkerReachable, BlockPos shulkerPlaceLoc, HighwayState prevHighwayState, HighwayState currentHighwayState, HighwayState nextHighwayState, ShulkerType shulkerType) {
         // Debug logging to track BlockPos types
         Helper.HELPER.logDirect("placeShulkerBox called with: " + shulkerPlaceLoc + " (class: " + shulkerPlaceLoc.getClass().getSimpleName() + ")");
-        
+
+        BlockState currentState = playerContext.world().getBlockState(shulkerPlaceLoc);
+        if (currentState.getBlock() instanceof ShulkerBoxBlock) {
+            return currentHighwayState;
+        }
         // Check if we can place at this location
         if (!canPlaceShulkerAt(shulkerPlaceLoc)) {
             Helper.HELPER.logDirect("Cannot place shulker at " + shulkerPlaceLoc);
@@ -1094,11 +1098,7 @@ public class HighwayContext {
 
         // Check if current block is replaceable
         BlockState currentState = playerContext.world().getBlockState(pos);
-        
-        if (currentState.getBlock() instanceof ShulkerBoxBlock) {
-            return false;
-        }
-        
+
         return currentState.canBeReplaced() || currentState.getBlock() instanceof SnowLayerBlock;
     }
 
