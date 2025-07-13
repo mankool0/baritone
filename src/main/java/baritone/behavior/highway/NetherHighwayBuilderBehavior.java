@@ -156,7 +156,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     highwayContext.setLiqOriginVector(new Vec3(startX, 0, startZ - highwayWidthLiqOffset));
                 }
                 highwayContext.setBackPathOriginVector(new Vec3(startX, 0, startZ - highwayWidthLiqOffsetRail + 1));
-                highwayContext.seteChestEmptyShulkOriginVector(new Vec3(startX, 0, startZ - highwayWidthLiqOffsetRail));
+                highwayContext.seteChestEmptyShulkOriginVector(new Vec3(startX, 0, startZ - highwayWidthOffset - 1));
             }
 
             topAir = new WhiteBlackSchematic(1, highwayHeight - 1, highwayWidth, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
@@ -218,7 +218,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     highwayContext.setLiqOriginVector(new Vec3(startX - highwayWidthLiqOffset, 0, startZ));
                 }
                 highwayContext.setBackPathOriginVector(new Vec3(startX - highwayWidthLiqOffsetRail + 1, 0, startZ));
-                highwayContext.seteChestEmptyShulkOriginVector(new Vec3(startX - highwayWidthLiqOffsetRail, 0, startZ));
+                highwayContext.seteChestEmptyShulkOriginVector(new Vec3(startX - highwayWidthOffset - 1, 0, startZ));
             }
 
             topAir = new WhiteBlackSchematic(highwayWidth, highwayHeight - 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
