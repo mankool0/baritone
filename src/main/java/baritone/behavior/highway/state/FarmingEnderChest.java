@@ -50,6 +50,10 @@ public class FarmingEnderChest extends State {
         if (context.timer() > 120) {
             Optional<Rotation> eChestReachable = RotationUtils.reachable(context.playerContext(), context.placeLoc(), context.playerContext().playerController().getBlockReachDistance());
             eChestReachable.ifPresent(rotation -> context.baritone().getLookBehavior().updateTarget(rotation, true));
+            
+            // Try to clear echest since we're stuck
+            context.baritone().getBuilderProcess().clearArea(context.placeLoc(), context.placeLoc());
+            
             context.setTarget(context.placeLoc());
             context.resetTimer();
         }
