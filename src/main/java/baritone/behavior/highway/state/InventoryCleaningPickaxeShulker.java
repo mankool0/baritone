@@ -22,8 +22,6 @@ import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
 import net.minecraft.world.inventory.ClickType;
-import net.minecraft.world.item.Item;
-import net.minecraft.world.level.block.Blocks;
 
 public class InventoryCleaningPickaxeShulker extends State {
     public InventoryCleaningPickaxeShulker(HighwayState state) {
@@ -36,15 +34,15 @@ public class InventoryCleaningPickaxeShulker extends State {
             return;
         }
 
-        int netherRackSlot = context.getItemSlot(Item.getId(Blocks.NETHERRACK.asItem()));
-        if (netherRackSlot == 8) {
-            netherRackSlot = context.getItemSlotNoHotbar(Item.getId(Blocks.NETHERRACK.asItem()));
+        int throwawaySlot = context.getAcceptableThrowawaySlot();
+        if (throwawaySlot == 8) {
+            throwawaySlot = context.getAcceptableThrowawaySlotNoHotbar();
         }
-        if (netherRackSlot == -1) {
+        if (throwawaySlot == -1) {
             return;
         }
         context.baritone().getLookBehavior().updateTarget(new Rotation(45, 0), true);
-        context.playerContext().playerController().windowClick(context.playerContext().player().inventoryMenu.containerId, netherRackSlot < 9 ? netherRackSlot + 36 : netherRackSlot, 0, ClickType.PICKUP, context.playerContext().player());
+        context.playerContext().playerController().windowClick(context.playerContext().player().inventoryMenu.containerId, throwawaySlot < 9 ? throwawaySlot + 36 : throwawaySlot, 0, ClickType.PICKUP, context.playerContext().player());
         context.playerContext().playerController().windowClick(context.playerContext().player().inventoryMenu.containerId, -999, 0, ClickType.PICKUP, context.playerContext().player());
 
         context.transitionTo(HighwayState.CollectingPickaxeShulker);

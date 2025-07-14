@@ -600,23 +600,23 @@ public class HighwayContext {
                     cursorStackNonEmpty = false;
                     return true;
                 } else {
-                    if (Item.getId(playerContext.player().containerMenu.getCarried().getItem()) == Item.getId(Blocks.NETHERRACK.asItem())) {
+                    if (isAcceptableThrowawayItem(playerContext.player().containerMenu.getCarried().getItem())) {
                         // Netherrack on our cursor, we can just throw it out
                         playerContext.playerController().windowClick(playerContext.player().inventoryMenu.containerId, -999, 0, ClickType.PICKUP, playerContext.player());
                         cursorStackNonEmpty = false;
                         return true;
                     } else {
-                        // We don't have netherrack on our cursor, might be important so swap with netherrack and throw away the netherrack
-                        int netherRackSlot = getItemSlot(Item.getId(Blocks.NETHERRACK.asItem()));
-                        if (netherRackSlot == 8) {
-                            netherRackSlot = getItemSlotNoHotbar(Item.getId(Blocks.NETHERRACK.asItem()));
+                        // We don't have throwaway items on our cursor, might be important so swap with throwaway items and throw away the throwaway
+                        int throwawaySlot = getAcceptableThrowawaySlot();
+                        if (throwawaySlot == 8) {
+                            throwawaySlot = getAcceptableThrowawaySlotNoHotbar();
                         }
-                        if (netherRackSlot != -1) {
-                            if (netherRackSlot <= 8) {
+                        if (throwawaySlot != -1) {
+                            if (throwawaySlot <= 8) {
                                 // Fix slot id if it's a hotbar slot
-                                netherRackSlot += 36;
+                                throwawaySlot += 36;
                             }
-                            playerContext.playerController().windowClick(playerContext.player().inventoryMenu.containerId, netherRackSlot, 0, ClickType.PICKUP, playerContext.player());
+                            playerContext.playerController().windowClick(playerContext.player().inventoryMenu.containerId, throwawaySlot, 0, ClickType.PICKUP, playerContext.player());
                             playerContext.playerController().windowClick(playerContext.player().inventoryMenu.containerId, -999, 0, ClickType.PICKUP, playerContext.player());
                             cursorStackNonEmpty = false;
                             return true;
@@ -1163,17 +1163,17 @@ public class HighwayContext {
                         return 1;
                     }
 
-                    swapSlot = getItemSlot(Item.getId(Blocks.NETHERRACK.asItem()));
+                    swapSlot = getAcceptableThrowawaySlot();
                     if (swapSlot == 8) {
-                        swapSlot = getItemSlotNoHotbar(Item.getId(Blocks.NETHERRACK.asItem()));
+                        swapSlot = getAcceptableThrowawaySlotNoHotbar();
                     }
                     if (swapSlot == -1) {
-                        // Also didn't find any netherrack
+                        // Also didn't find any throwaway items
                         return 0;
                     }
                     playerContext.playerController().windowClick(curContainer.containerId, i, 0, ClickType.PICKUP, playerContext.player());
                     playerContext.playerController().windowClick(curContainer.containerId, swapSlot < 9 ? swapSlot + 54 : swapSlot + 18, 0, ClickType.PICKUP, playerContext.player()); // Have to convert slot id to single chest slot id
-                    playerContext.playerController().windowClick(curContainer.containerId, -999, 0, ClickType.PICKUP, playerContext.player()); // Throw away netherrack
+                    playerContext.playerController().windowClick(curContainer.containerId, -999, 0, ClickType.PICKUP, playerContext.player()); // Throw away throwaway item
                 } else {
                     // Swap new pickaxe with depleted
                     playerContext.playerController().windowClick(curContainer.containerId, i, 0, ClickType.PICKUP, playerContext.player());
@@ -1195,16 +1195,16 @@ public class HighwayContext {
                 count += curContainer.getSlot(i).getItem().getCount();
 
                 if (getItemCountInventory(Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) == 0 && getItemSlot(Item.getId(Items.AIR)) == -1) {
-                    // For some reason we have no gapples and no air slots so we have to throw out some netherrack
-                    int netherRackSlot = getItemSlot(Item.getId(Blocks.NETHERRACK.asItem()));
-                    if (netherRackSlot == 8) {
-                        netherRackSlot = getItemSlotNoHotbar(Item.getId(Blocks.NETHERRACK.asItem()));
+                    // For some reason we have no gapples and no air slots so we have to throw out some throwaway items
+                    int throwawaySlot = getAcceptableThrowawaySlot();
+                    if (throwawaySlot == 8) {
+                        throwawaySlot = getAcceptableThrowawaySlotNoHotbar();
                     }
-                    if (netherRackSlot == -1) {
+                    if (throwawaySlot == -1) {
                         return 0;
                     }
                     playerContext.playerController().windowClick(curContainer.containerId, i, 0, ClickType.PICKUP, playerContext.player());
-                    playerContext.playerController().windowClick(curContainer.containerId, netherRackSlot < 9 ? netherRackSlot + 54 : netherRackSlot + 18, 0, ClickType.PICKUP, playerContext.player()); // Have to convert slot id to single chest slot id
+                    playerContext.playerController().windowClick(curContainer.containerId, throwawaySlot < 9 ? throwawaySlot + 54 : throwawaySlot + 18, 0, ClickType.PICKUP, playerContext.player()); // Have to convert slot id to single chest slot id
                     playerContext.playerController().windowClick(curContainer.containerId, -999, 0, ClickType.PICKUP, playerContext.player());
                 } else {
                     // Gapples exist already or there's an air slot so we can just do a quick move
@@ -1227,16 +1227,16 @@ public class HighwayContext {
                 count += curContainer.getSlot(i).getItem().getCount();
 
                 if (getItemSlot(Item.getId(Items.AIR)) == -1) {
-                    // For some reason we have no air slots so we have to throw out some netherrack
-                    int netherRackSlot = getItemSlot(Item.getId(Blocks.NETHERRACK.asItem()));
-                    if (netherRackSlot == 8) {
-                        netherRackSlot = getItemSlotNoHotbar(Item.getId(Blocks.NETHERRACK.asItem()));
+                    // For some reason we have no air slots so we have to throw out some throwaway items
+                    int throwawaySlot = getAcceptableThrowawaySlot();
+                    if (throwawaySlot == 8) {
+                        throwawaySlot = getAcceptableThrowawaySlotNoHotbar();
                     }
-                    if (netherRackSlot == -1) {
+                    if (throwawaySlot == -1) {
                         return 0;
                     }
                     playerContext.playerController().windowClick(curContainer.containerId, i, 0, ClickType.PICKUP, playerContext.player());
-                    playerContext.playerController().windowClick(curContainer.containerId, netherRackSlot < 9 ? netherRackSlot + 54 : netherRackSlot + 18, 0, ClickType.PICKUP, playerContext.player()); // Have to convert slot id to single chest slot id
+                    playerContext.playerController().windowClick(curContainer.containerId, throwawaySlot < 9 ? throwawaySlot + 54 : throwawaySlot + 18, 0, ClickType.PICKUP, playerContext.player()); // Have to convert slot id to single chest slot id
                     playerContext.playerController().windowClick(curContainer.containerId, -999, 0, ClickType.PICKUP, playerContext.player());
                 } else {
                     // There's an air slot so we can just do a quick move
@@ -1291,16 +1291,16 @@ public class HighwayContext {
                 }
                 if (doLoot) {
                     if (getItemSlot(Item.getId(Items.AIR)) == -1) {
-                        // For some reason we have no air slots so we have to throw out some netherrack
-                        int netherRackSlot = getItemSlot(Item.getId(Blocks.NETHERRACK.asItem()));
-                        if (netherRackSlot == 8) {
-                            netherRackSlot = getItemSlotNoHotbar(Item.getId(Blocks.NETHERRACK.asItem()));
+                        // For some reason we have no air slots so we have to throw out some throwaway items
+                        int throwawaySlot = getAcceptableThrowawaySlot();
+                        if (throwawaySlot == 8) {
+                            throwawaySlot = getAcceptableThrowawaySlotNoHotbar();
                         }
-                        if (netherRackSlot == -1) {
+                        if (throwawaySlot == -1) {
                             return 0;
                         }
                         playerContext.playerController().windowClick(curContainer.containerId, i, 0, ClickType.PICKUP, playerContext.player());
-                        playerContext.playerController().windowClick(curContainer.containerId, netherRackSlot < 9 ? netherRackSlot + 54 : netherRackSlot + 18, 0, ClickType.PICKUP, playerContext.player()); // Have to convert slot id to single chest slot id
+                        playerContext.playerController().windowClick(curContainer.containerId, throwawaySlot < 9 ? throwawaySlot + 54 : throwawaySlot + 18, 0, ClickType.PICKUP, playerContext.player()); // Have to convert slot id to single chest slot id
                         playerContext.playerController().windowClick(curContainer.containerId, -999, 0, ClickType.PICKUP, playerContext.player());
                     } else {
                         // There's an air slot so we can just do a quick move
@@ -1833,5 +1833,29 @@ public class HighwayContext {
 
     public int timer() {
         return timer;
+    }
+    
+    private boolean isAcceptableThrowawayItem(Item item) {
+        return settings.acceptableThrowawayItems.value.contains(item);
+    }
+    
+    public int getAcceptableThrowawaySlot() {
+        for (Item throwawayItem : settings.acceptableThrowawayItems.value) {
+            int slot = getItemSlot(Item.getId(throwawayItem));
+            if (slot != -1) {
+                return slot;
+            }
+        }
+        return -1;
+    }
+    
+    public int getAcceptableThrowawaySlotNoHotbar() {
+        for (Item throwawayItem : settings.acceptableThrowawayItems.value) {
+            int slot = getItemSlotNoHotbar(Item.getId(throwawayItem));
+            if (slot != -1) {
+                return slot;
+            }
+        }
+        return -1;
     }
 }
