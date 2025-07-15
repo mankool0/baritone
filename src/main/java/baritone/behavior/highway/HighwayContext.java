@@ -145,7 +145,7 @@ public class HighwayContext {
     }
 
     public void setPlaceLoc(BlockPos placeLoc) {
-        this.placeLoc = placeLoc;
+        this.placeLoc = new BlockPos(placeLoc.getX(), placeLoc.getY(), placeLoc.getZ());
     }
 
     private BlockPos placeLoc;
