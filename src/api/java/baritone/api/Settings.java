@@ -1674,6 +1674,11 @@ public final class Settings {
     public final Setting<String> highwayQueueExitMessage = new Setting<>("Welcome to Constantiam");
 
     /**
+     * Whether to disconnect when entering queue during highway building
+     */
+    public final Setting<Boolean> highwayQueueDisconnect = new Setting<>(true);
+
+    /**
      * Number of blocks the builder can break per tick
      */
     public final Setting<Integer> multiBreak = new Setting<>(-1);

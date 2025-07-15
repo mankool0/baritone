@@ -1876,6 +1876,11 @@ public class HighwayContext {
             stateBeforeQueue = currentState.getState();
             inQueue = true;
             transitionTo(HighwayState.InQueue);
+            
+            if (settings.highwayQueueDisconnect.value) {
+                Helper.HELPER.logDirect("Disconnecting due to queue detection");
+                playerContext.minecraft().getConnection().getConnection().disconnect(Component.literal("Queue detected - auto disconnect"));
+            }
         }
     }
     
