@@ -1662,6 +1662,18 @@ public final class Settings {
     public final Setting<Integer> highwayEndDistance = new Setting<>(-1);
 
     /**
+     * Message to detect when entering a server queue.
+     * Highway building will pause when this message is detected.
+     */
+    public final Setting<String> highwayQueueEnterMessage = new Setting<>("You are in the queue. Position:");
+
+    /**
+     * Message to detect when exiting a server queue.
+     * Highway building will resume when this message is detected.
+     */
+    public final Setting<String> highwayQueueExitMessage = new Setting<>("Welcome to Constantiam");
+
+    /**
      * Number of blocks the builder can break per tick
      */
     public final Setting<Integer> multiBreak = new Setting<>(-1);

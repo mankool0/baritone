@@ -90,4 +90,6 @@ public enum HighwayState {
     PlacingEmptyShulker,
 
     BoatRemoval,
+    
+    InQueue,
 }

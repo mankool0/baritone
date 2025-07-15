@@ -205,6 +205,9 @@ public class StateFactory {
             case BoatRemoval -> {
                 return new BoatRemoval(highwayState);
             }
+            case InQueue -> {
+                return new InQueue(highwayState);
+            }
         }
         return null;
     }

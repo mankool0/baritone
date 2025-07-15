@@ -254,6 +254,9 @@ public class HighwayContext {
     }
 
     private boolean boatHasPassenger = false;
+    private boolean inQueue = false;
+    private HighwayState stateBeforeQueue = HighwayState.Nothing;
+    
     public HighwayContext(Baritone baritone) {
         this.baritone = baritone;
         this.playerContext = baritone.getPlayerContext();
@@ -634,6 +637,10 @@ public class HighwayContext {
     }
 
     public boolean stuckCheck() {
+        if (currentState.getState() == HighwayState.InQueue) {
+            return false;
+        }
+        
         if (stuckTimer >= settings.highwayStuckCheckTicks.value) {
             if (playerContext.player().hasContainerOpen()) {
                 playerContext.player().closeContainer(); // Close chest gui so we can actually build
@@ -1857,5 +1864,28 @@ public class HighwayContext {
             }
         }
         return -1;
+    }
+    
+    public boolean isInQueue() {
+        return inQueue;
+    }
+
+    public void enterQueue() {
+        if (!inQueue) {
+            Helper.HELPER.logDirect("Detected queue, pausing highway builder");
+            stateBeforeQueue = currentState.getState();
+            inQueue = true;
+            transitionTo(HighwayState.InQueue);
+        }
+    }
+    
+    public void exitQueue() {
+        if (inQueue) {
+            Helper.HELPER.logDirect("Exited queue, resuming highway builder");
+            inQueue = false;
+            stuckTimer = 0;
+            transitionTo(stateBeforeQueue);
+            stateBeforeQueue = HighwayState.Nothing;
+        }
     }
 }

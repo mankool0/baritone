@@ -20,8 +20,10 @@ package baritone.behavior.highway;
 import baritone.Baritone;
 import baritone.api.BaritoneAPI;
 import baritone.api.behavior.INetherHighwayBuilderBehavior;
+import baritone.api.event.events.PacketEvent;
 import baritone.api.event.events.RenderEvent;
 import baritone.api.event.events.TickEvent;
+import baritone.api.event.events.type.EventState;
 import baritone.api.pathing.goals.*;
 import baritone.api.schematic.CompositeSchematic;
 import baritone.api.schematic.FillSchematic;
@@ -46,6 +48,7 @@ import net.minecraft.core.*;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundSystemChatPacket;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
@@ -391,8 +394,19 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         }
     }
 
-
-
-
+    @Override
+    public void onReceivePacket(PacketEvent event) {
+        if (event.getPacket() instanceof ClientboundSystemChatPacket packet && event.getState() == EventState.POST) {
+            String message = packet.content().getString();
+            
+            if (message.contains(settings.highwayQueueEnterMessage.value)) {
+                Helper.HELPER.logDirect("Queue detected: " + message);
+                highwayContext.enterQueue();
+            } else if (highwayContext.isInQueue() && message.contains(settings.highwayQueueExitMessage.value)) {
+                Helper.HELPER.logDirect("Queue exit detected: " + message);
+                highwayContext.exitQueue();
+            }
+        }
+    }
 
 }
