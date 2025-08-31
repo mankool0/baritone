@@ -104,6 +104,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         highwayContext.setHighwayDirection(direct);
         highwayContext.setPaving(pave);
         highwayContext.setCachedHealth(ctx.player().getHealth());
+        highwayContext.setCachedAbsorption(ctx.player().getAbsorptionAmount());
 
         if (!highwayContext.paving()) {
             // Only digging so any pickaxe works

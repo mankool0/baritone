@@ -44,6 +44,7 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.ContainerHelper;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.vehicle.Boat;
@@ -188,6 +189,7 @@ public class HighwayContext {
     private int checkBackTimer = 0;
     private int stuckTimer = 0;
     private float cachedHealth = 0.0f;
+    private float cachedAbsorption = 0.0f;
 
     public boolean instantMineActivated() {
         return instantMineActivated;
@@ -377,6 +379,14 @@ public class HighwayContext {
 
     public void setCachedHealth(float cachedHealth) {
         this.cachedHealth = cachedHealth;
+    }
+    
+    public float cachedAbsorption() {
+        return cachedAbsorption;
+    }
+    
+    public void setCachedAbsorption(float cachedAbsorption) {
+        this.cachedAbsorption = cachedAbsorption;
     }
 
     public void transitionTo(HighwayState nextState) {
@@ -692,9 +702,21 @@ public class HighwayContext {
             Helper.HELPER.logDirect(dcMsg);
             playerContext.player().connection.getConnection().disconnect(dcMsg);
             cachedHealth = playerContext.player().getHealth();
+            cachedAbsorption = playerContext.player().getAbsorptionAmount();
             return true;
         }
+        
+        if (settings.highwayAbsorptionDc.value && playerContext.player().getAbsorptionAmount() < cachedAbsorption && playerContext.player().hasEffect(MobEffects.ABSORPTION)) {
+            Component dcMsg = Component.literal("Lost " + (cachedAbsorption - playerContext.player().getAbsorptionAmount()) + " absorption. Reconnect");
+            Helper.HELPER.logDirect(dcMsg);
+            playerContext.player().connection.getConnection().disconnect(dcMsg);
+            cachedHealth = playerContext.player().getHealth();
+            cachedAbsorption = playerContext.player().getAbsorptionAmount();
+            return true;
+        }
+        
         cachedHealth = playerContext.player().getHealth(); // Get new HP value
+        cachedAbsorption = playerContext.player().getAbsorptionAmount();
         return false;
     }
 

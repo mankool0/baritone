@@ -1606,6 +1606,11 @@ public final class Settings {
     public final Setting<Boolean> highwayDcOnHealthLoss = new Setting<>(true);
 
     /**
+     * Disconnect from the server if lost absorption hearts
+     */
+    public final Setting<Boolean> highwayAbsorptionDc = new Setting<>(false);
+
+    /**
      * If true will treat shulkers with pickaxes and ender chests mixed as valid
      */
     public final Setting<Boolean> highwayAllowMixedShulks = new Setting<>(true);
