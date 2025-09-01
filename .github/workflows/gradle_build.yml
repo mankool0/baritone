@@ -7,6 +7,16 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Create a release with artifacts'
+        required: false
+        default: false
+        type: boolean
+      release_tag:
+        description: 'Release tag name (e.g., v1.0.0)'
+        required: false
+        type: string
 
 jobs:
   build:
@@ -42,3 +52,55 @@ jobs:
       with:
         name: Mappings
         path: mapping/
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true'
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Download Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: Artifacts
+        path: ./artifacts
+    
+    - name: Download Mappings
+      uses: actions/download-artifact@v4
+      with:
+        name: Mappings
+        path: ./mappings
+    
+    - name: Determine Release Tag
+      id: tag
+      run: |
+        if [ -n "${{ github.event.inputs.release_tag }}" ]; then
+          echo "tag=${{ github.event.inputs.release_tag }}" >> $GITHUB_OUTPUT
+        else
+          echo "tag=$(git describe --always --tags --first-parent)" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ steps.tag.outputs.tag }}
+        name: Release ${{ steps.tag.outputs.tag }}
+        draft: false
+        prerelease: false
+        files: |
+          artifacts/*
+          mappings/*
+        body: |
+          ## Release ${{ steps.tag.outputs.tag }}
+          
+          ### Artifacts
+          - Built JAR files available in artifacts
+          - Mapping files available for debugging
+          
+          ### Build Information
+          - Commit: ${{ github.sha }}
+        token: ${{ secrets.GITHUB_TOKEN }}
