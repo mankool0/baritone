@@ -155,7 +155,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             } else {
                 highwayContext.setOriginVector(new Vec3(startX, 0, startZ - highwayWidthOffset));
                 if (highwayRail) {
-                    highwayContext.setLiqOriginVector(new Vec3(startX, 0, startZ - highwayWidthLiqOffsetRail));
+                    highwayContext.setLiqOriginVector(new Vec3(startX, 0, startZ - highwayWidthLiqOffsetRail - 2));
                 } else {
                     highwayContext.setLiqOriginVector(new Vec3(startX, 0, startZ - highwayWidthLiqOffset));
                 }
@@ -217,7 +217,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             } else {
                 highwayContext.setOriginVector(new Vec3(startX - highwayWidthOffset, 0, startZ));
                 if (highwayRail) {
-                    highwayContext.setLiqOriginVector(new Vec3(startX - highwayWidthLiqOffsetRail, 0, startZ));
+                    highwayContext.setLiqOriginVector(new Vec3(startX - highwayWidthLiqOffsetRail - 2, 0, startZ));
                 } else {
                     highwayContext.setLiqOriginVector(new Vec3(startX - highwayWidthLiqOffset, 0, startZ));
                 }
