@@ -79,26 +79,30 @@ public class LiquidRemovalPathing extends State {
         }
 
         boolean supportNeeded = false;
-        if (context.getIssueType(context.sourceBlocks().getFirst().north()) != HighwayBlockState.Blocks &&
-                context.getIssueType(context.sourceBlocks().getFirst().east()) != HighwayBlockState.Blocks &&
-                context.getIssueType(context.sourceBlocks().getFirst().south()) != HighwayBlockState.Blocks &&
-                context.getIssueType(context.sourceBlocks().getFirst().west()) != HighwayBlockState.Blocks &&
-                context.getIssueType(context.sourceBlocks().getFirst().below()) != HighwayBlockState.Blocks) {
-            // Location to place against are not blocks so lets find the closest surrounding block
-            BlockPos tempSourcePos = context.closestAirBlockWithSideBlock(context.sourceBlocks().getFirst(), 5, true);
-            if (tempSourcePos == null) {
-                Helper.HELPER.logDirect("Error finding support block during lava removal. Restarting.");
+        BlockPos firstSourceBlock = context.sourceBlocks().getFirst();
+        if (context.getIssueType(firstSourceBlock.north()) != HighwayBlockState.Blocks &&
+                context.getIssueType(firstSourceBlock.east()) != HighwayBlockState.Blocks &&
+                context.getIssueType(firstSourceBlock.south()) != HighwayBlockState.Blocks &&
+                context.getIssueType(firstSourceBlock.west()) != HighwayBlockState.Blocks &&
+                context.getIssueType(firstSourceBlock.below()) != HighwayBlockState.Blocks) {
+            BlockPos playerPos = context.playerContext().playerFeet();
+
+            // Calculate direction from player to lava for non-blocking checks
+            int dx = firstSourceBlock.getX() - playerPos.getX();
+            int dz = firstSourceBlock.getZ() - playerPos.getZ();
+            BlockPos supportPos = findSupportBlockRecursive(context, firstSourceBlock, playerPos, dx, dz, 0, 5);
+            
+            if (supportPos != null) {
+                // Clear source blocks and add the support position to place
+                context.clearSourceBlocks();
+                context.sourceBlocks().add(supportPos);
+                supportNeeded = true;
+                Helper.HELPER.logDirect("Can't place around lava, placing support block at " + supportPos);
+            } else {
+                Helper.HELPER.logDirect("Cannot find valid support block position for lava removal");
                 context.transitionTo(HighwayState.Nothing);
                 return;
             }
-            context.clearSourceBlocks();
-            context.sourceBlocks().add(tempSourcePos);
-            supportNeeded = true;
-            Helper.HELPER.logDirect("Can't place around lava, placing support block at " + tempSourcePos);
-            //if (sourceBlocks.isEmpty()) {
-            //    currentState = State.Nothing;
-            //    return;
-            //}
         }
         Optional<Rotation> lavaReachable = Optional.empty();
 
@@ -185,7 +189,6 @@ public class LiquidRemovalPathing extends State {
             //ArrayList<Rotation> belowFeetReachableList = new ArrayList<>();
             //Optional<Rotation> belowFeetReachable = Optional.empty();
             for (BlockPos placeAt : placeAtList) {
-                //if (placeAt != null) {
                 // From MovementHelper.attemptToPlaceABlock
                 for (int i = 0; i < 5; i++) {
                     BlockPos against1 = placeAt.relative(HORIZONTALS_BUT_ALSO_DOWN_____SO_EVERY_DIRECTION_EXCEPT_UP[i]);
@@ -195,7 +198,11 @@ public class LiquidRemovalPathing extends State {
                         double faceZ = (placeAt.getZ() + against1.getZ() + 1.0D) * 0.5D;
                         Rotation place = RotationUtils.calcRotationFromVec3d(context.playerContext().playerHead(), new Vec3(faceX, faceY, faceZ), context.playerContext().playerRotations());
                         HitResult res = RayTraceUtils.rayTraceTowards(context.playerContext().player(), place, context.playerContext().playerController().getBlockReachDistance(), false);
-                        if (res.getType() == HitResult.Type.BLOCK && ((BlockHitResult) res).getBlockPos().equals(against1) && ((BlockHitResult) res).getBlockPos().relative(((BlockHitResult) res).getDirection()).equals(placeAt)) {
+                        
+                        if (res.getType() == HitResult.Type.BLOCK &&
+                            ((BlockHitResult) res).getBlockPos().equals(against1) && 
+                            ((BlockHitResult) res).getBlockPos().relative(((BlockHitResult) res).getDirection()).equals(placeAt)) {
+                            
                             context.baritone().getLookBehavior().updateTarget(place, true);
                             context.baritone().getInputOverrideHandler().clearAllKeys();
                             int netherRackSlot = context.putItemHotbar(Item.getId(Blocks.NETHERRACK.asItem()));
@@ -221,10 +228,6 @@ public class LiquidRemovalPathing extends State {
                                 context.baritone().getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
                                 return;
                             }
-
-                            //belowFeetReachable = Optional.ofNullable(place);
-                            //belowFeetReachableList.add(place);
-                            //break;
                         }
                     }
                 }
@@ -268,23 +271,210 @@ public class LiquidRemovalPathing extends State {
                 return;
             }
 
-            context.baritone().getLookBehavior().updateTarget(lavaRot, true);
-            context.baritone().getInputOverrideHandler().clearAllKeys();
-
-            outerLoop:
-            for (int x = -1; x <= 1; x++) {
-                for (int z = -1; z <= 1; z++) {
-                    BlockPos tempLoc = new BlockPos(context.playerContext().playerFeet().x + x, context.playerContext().playerFeet().y - 1, context.playerContext().playerFeet().z + z);
-                    if (context.getIssueType(tempLoc) != HighwayBlockState.Blocks) {
-                        context.baritone().getInputOverrideHandler().setInputForceState(Input.SNEAK, true); // No blocks under feet to walk to
-                        break outerLoop;
-                    }
+            // Check if player is under any lava source block and can't reach
+            BlockPos playerPos = context.playerContext().playerFeet();
+            double reachDistance = context.playerContext().playerController().getBlockReachDistance();
+            for (BlockPos lavaPos : context.sourceBlocks()) {
+                int xDiff = Math.abs(playerPos.getX() - lavaPos.getX());
+                int zDiff = Math.abs(playerPos.getZ() - lavaPos.getZ());
+                int yDiff = lavaPos.getY() - playerPos.getY();
+                
+                if (xDiff <= 1 && zDiff <= 1 && yDiff > 0 && yDiff > reachDistance) {
+                    Helper.HELPER.logDirect("Player under lava and can't reach, backing up");
+                    context.baritone().getInputOverrideHandler().clearAllKeys();
+                    context.transitionTo(HighwayState.LiquidRemovalPathingBack);
+                    context.resetTimer();
+                    return;
                 }
             }
 
-            context.baritone().getInputOverrideHandler().setInputForceState(Input.MOVE_FORWARD, true);
+            context.baritone().getInputOverrideHandler().clearAllKeys();
+
+            // Check for blocks that might be obstructing our path
+            BlockPos feetPos = context.playerContext().playerFeet();
+            Direction playerDirection = context.playerContext().player().getDirection();
+            BlockPos frontPos = feetPos.relative(playerDirection);
+            BlockPos frontHeadPos = frontPos.above(); // Block at head level
+            BlockPos bridgePos = frontPos.below();
+            
+            // Also check left and right sides in case player is between blocks
+            Direction leftDir = playerDirection.getCounterClockWise();
+            Direction rightDir = playerDirection.getClockWise();
+            BlockPos leftPos = feetPos.relative(leftDir);
+            BlockPos leftHeadPos = leftPos.above();
+            BlockPos rightPos = feetPos.relative(rightDir);
+            BlockPos rightHeadPos = rightPos.above();
+            
+            // Check all potential obstructing positions
+            BlockPos[] checkPositions = {frontPos, frontHeadPos, leftPos, leftHeadPos, rightPos, rightHeadPos};
+            BlockPos blockToBreak = null;
+            
+            // Find the first obstructing block we can break
+            for (BlockPos checkPos : checkPositions) {
+                if (context.getIssueType(checkPos) == HighwayBlockState.Blocks) {
+                    Optional<Rotation> breakRotation = RotationUtils.reachable(context.playerContext(), checkPos, context.playerContext().playerController().getBlockReachDistance());
+                    if (breakRotation.isPresent()) {
+                        blockToBreak = checkPos;
+                        break;
+                    }
+                }
+            }
+            
+            // If we found an obstructing block, break it
+            if (blockToBreak != null) {
+                Optional<Rotation> breakRotation = RotationUtils.reachable(context.playerContext(), blockToBreak, context.playerContext().playerController().getBlockReachDistance());
+                if (breakRotation.isPresent()) {
+                    // Make sure we have a pickaxe selected
+                    int breakPickSlot = context.putPickaxeHotbar();
+                    if (breakPickSlot != -1) {
+                        ItemStack breakStack = context.playerContext().player().getInventory().items.get(breakPickSlot);
+                        if (HighwayContext.validPicksList.contains(breakStack.getItem())) {
+                            context.playerContext().player().getInventory().selected = breakPickSlot;
+                        }
+                        
+                        // Look at the block and break it
+                        context.baritone().getLookBehavior().updateTarget(breakRotation.get(), true);
+                        context.baritone().getInputOverrideHandler().setInputForceState(Input.CLICK_LEFT, true);
+                        Helper.HELPER.logDirect("Breaking obstructing block at " + blockToBreak);
+                        return;
+                    }
+                }
+            }
+            
+            // Check if we need to bridge (no block directly in front below feet)
+            if (context.getIssueType(bridgePos) != HighwayBlockState.Blocks) {
+                double edgeDistance = Math.max(
+                    Math.abs(context.playerContext().player().getX() - (feetPos.getX() + 0.5)),
+                    Math.abs(context.playerContext().player().getZ() - (feetPos.getZ() + 0.5))
+                );
+                
+                if (edgeDistance < 0.1) {
+                    // Look at the edge face between current position and bridge position
+                    double edgeFaceX = (feetPos.getX() + bridgePos.getX() + 1.0D) * 0.5D;
+                    double edgeFaceY = bridgePos.getY() + 0.5D;
+                    double edgeFaceZ = (feetPos.getZ() + bridgePos.getZ() + 1.0D) * 0.5D;
+
+                    Rotation edgeRotation = RotationUtils.calcRotationFromVec3d(
+                            context.playerContext().playerHead(),
+                            new Vec3(edgeFaceX, edgeFaceY, edgeFaceZ),
+                            context.playerContext().playerRotations()
+                    );
+                    context.baritone().getLookBehavior().updateTarget(edgeRotation, true);
+                }
+
+                context.baritone().getInputOverrideHandler().setInputForceState(Input.MOVE_FORWARD, true);
+                context.baritone().getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
+            } else {
+                // Safe to walk forward
+                context.baritone().getLookBehavior().updateTarget(lavaRot, true);
+                context.baritone().getInputOverrideHandler().setInputForceState(Input.MOVE_FORWARD, true);
+            }
         }
 
         //timer = 0;
+    }
+
+    private BlockPos findSupportBlockRecursive(HighwayContext context, BlockPos targetPos, 
+                                                BlockPos playerPos, int dx, int dz, 
+                                                int depth, int maxDepth) {
+        if (depth >= maxDepth) {
+            return null; // Max recursion depth reached
+        }
+        
+        BlockPos bestPos = null;
+        double bestScore = Double.MAX_VALUE;
+        
+        // First check all directions around the target position
+        // Prioritize horizontal directions over vertical to avoid building columns
+        Direction[] directions = {Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST, Direction.UP, Direction.DOWN};
+        for (Direction dir : directions) {
+            BlockPos checkPos = targetPos.relative(dir);
+            
+            if (context.getIssueType(checkPos) == HighwayBlockState.Blocks) {
+                continue;
+            }
+            
+            // If this is below the target and at depth 0 (original lava position),
+            // only accept it if it's directly adjacent to the lava
+            if (dir == Direction.DOWN && depth == 0) {
+                // Check if placing here would create a pillar situation
+                // We only want to place below if we can immediately place against the lava from there
+                boolean directlyUseful = false;
+                for (Direction sideDir : Direction.Plane.HORIZONTAL) {
+                    BlockPos sideOfBelow = checkPos.relative(sideDir);
+                    if (sideOfBelow.equals(targetPos)) {
+                        directlyUseful = true;
+                        break;
+                    }
+                }
+                if (!directlyUseful) {
+                    continue; // Skip positions below lava that aren't directly useful
+                }
+            }
+            
+            // Check if we can place at this position
+            boolean canPlace = false;
+            for (Direction placeDir : Direction.values()) {
+                BlockPos against = checkPos.relative(placeDir);
+                // Don't count the target position itself as something to place against
+                if (!against.equals(targetPos) && MovementHelper.canPlaceAgainst(context.playerContext(), against)) {
+                    canPlace = true;
+                    break;
+                }
+            }
+            
+            if (canPlace) {
+                // Check if this position would block the player's path
+                int checkDx = checkPos.getX() - playerPos.getX();
+                int checkDz = checkPos.getZ() - playerPos.getZ();
+                boolean notBlocking = (Math.abs(checkDx) >= Math.abs(dx) || Math.abs(checkDz) >= Math.abs(dz));
+                
+                // Calculate a score based on distance and blocking status
+                // Lower score is better
+                double distance = Math.sqrt(checkDx * checkDx + checkDz * checkDz);
+                double score = getScore(dir, notBlocking, distance);
+
+                // At depth 0, only consider non-blocking positions
+                // At higher depths, accept any position but prefer non-blocking ones
+                if ((notBlocking || depth > 0) && score < bestScore) {
+                    bestPos = checkPos;
+                    bestScore = score;
+                }
+            }
+        }
+        
+        if (bestPos != null) {
+            return bestPos;
+        }
+        
+        // If we couldn't find a direct placement position, recurse to find positions
+        // that we can build from to eventually reach the target
+        for (Direction dir : directions) {
+            BlockPos checkPos = targetPos.relative(dir);
+            
+            if (context.getIssueType(checkPos) == HighwayBlockState.Blocks) {
+                continue;
+            }
+            
+            BlockPos result = findSupportBlockRecursive(context, checkPos, playerPos, dx, dz, depth + 1, maxDepth);
+            if (result != null) {
+                return result;
+            }
+        }
+        
+        return null; // No valid position found
+    }
+
+    private static double getScore(Direction dir, boolean notBlocking, double distance) {
+        double score = notBlocking ? distance : distance + 1000; // Penalize blocking positions
+
+        // Penalize positions below that would require pillaring up
+        // But placing from above is fine and even preferred
+        if (dir == Direction.DOWN) {
+            score += 500; // Make below positions less preferred as they require pillaring
+        } else if (dir == Direction.UP) {
+            score -= 50; // Slightly prefer above positions as they're easy to place from
+        }
+        return score;
     }
 }

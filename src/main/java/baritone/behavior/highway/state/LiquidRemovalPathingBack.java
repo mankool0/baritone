@@ -44,7 +44,7 @@ public class LiquidRemovalPathingBack extends State {
         }
 
         BlockState tempState = context.playerContext().world().getBlockState(context.playerContext().playerFeet());
-        if (tempState.getBlock() instanceof LiquidBlock) {
+        if (tempState.getBlock() instanceof LiquidBlock && fireRest.getDuration() < context.settings().highwayFireRestMinDuration.value) {
             Helper.HELPER.logDirect("We are stuck in lava, going directly to gapple eating.");
             context.transitionTo(HighwayState.LiquidRemovalGapplePrep);
         }
