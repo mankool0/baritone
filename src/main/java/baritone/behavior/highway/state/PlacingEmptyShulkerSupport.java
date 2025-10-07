@@ -27,6 +27,8 @@ import net.minecraft.world.level.block.AirBlock;
 import net.minecraft.world.level.block.Blocks;
 
 public class PlacingEmptyShulkerSupport extends State {
+    private boolean supportBlockNeeded = false;
+
     public PlacingEmptyShulkerSupport(HighwayState state) {
         super(state);
     }
@@ -37,6 +39,12 @@ public class PlacingEmptyShulkerSupport extends State {
             return; // Wait for build to complete
         }
 
+        // If build just completed and support was needed, go back to placement location
+        if (supportBlockNeeded) {
+            context.transitionTo(HighwayState.GoingToEmptyShulkerPlaceLoc);
+            return;
+        }
+
         if (context.getShulkerSlot(ShulkerType.Empty) == -1) {
             context.transitionTo(HighwayState.Nothing);
             return;
@@ -45,6 +53,7 @@ public class PlacingEmptyShulkerSupport extends State {
         context.baritone().getPathingBehavior().cancelEverything();
         context.settings().buildRepeat.value = new Vec3i(0, 0, 0);
         if (context.playerContext().world().getBlockState(context.placeLoc().below()).getBlock() instanceof AirBlock) {
+            supportBlockNeeded = true;
             context.baritone().getBuilderProcess().build("supportBlock", new WhiteBlackSchematic(1, 1, 1, context.blackListBlocks(), Blocks.NETHERRACK.defaultBlockState(), false, false, true), context.placeLoc().below());
             return;
         }

@@ -18,7 +18,6 @@
 package baritone.behavior.highway.state;
 
 import baritone.api.pathing.goals.GoalBlock;
-import baritone.api.utils.VecUtils;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
@@ -34,13 +33,13 @@ public class GoingToLootEnderChestPlaceLoc extends State {
             return; // Wait to get there
         }
 
-        if (VecUtils.distanceToCenter(context.playerContext().playerFeet(), context.placeLoc().getX(), context.placeLoc().getY(), context.placeLoc().getZ()) <= (context.playerContext().playerController().getBlockReachDistance() - 1)) {
+        if (context.playerContext().playerFeet().equals(context.placeLoc().offset(context.highwayDirection().getX(), 0, context.highwayDirection().getZ()))) {
             // We have arrived
             context.baritone().getPathingBehavior().cancelEverything();
             context.transitionTo(HighwayState.PlacingLootEnderChestSupport);
         } else {
             // Keep trying to get there
-            context.baritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(context.placeLoc().getX(), context.placeLoc().getY(), context.placeLoc().getZ() + 1));
+            context.baritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(context.placeLoc().offset(context.highwayDirection().getX(), 0, context.highwayDirection().getZ())));
         }
     }
 }
