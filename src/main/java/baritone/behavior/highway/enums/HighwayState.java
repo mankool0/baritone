@@ -36,6 +36,7 @@ public enum HighwayState {
 
     PickaxeShulkerPlaceLocPrep,
     GoingToPlaceLocPickaxeShulker,
+    PlacingPickaxeShulkerSupport,
     PlacingPickaxeShulker,
     OpeningPickaxeShulker,
     LootingPickaxeShulker,
@@ -45,6 +46,7 @@ public enum HighwayState {
 
     GappleShulkerPlaceLocPrep,
     GoingToPlaceLocGappleShulker,
+    PlacingGappleShulkerSupport,
     PlacingGappleShulker,
     OpeningGappleShulker,
     LootingGappleShulker,
@@ -69,6 +71,7 @@ public enum HighwayState {
 
     EchestMiningPlaceLocPrep,
     GoingToPlaceLocEnderShulker,
+    PlacingEnderShulkerSupport,
     PlacingEnderShulker,
     OpeningEnderShulker,
     LootingEnderShulker,

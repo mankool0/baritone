@@ -42,7 +42,7 @@ public class GoingToPlaceLocPickaxeShulker extends State {
         //if (ctx.playerFeet().getX() == placeLoc.getX() && ctx.playerFeet().getY() == placeLoc.getY() && ctx.playerFeet().getZ() == (placeLoc.getZ() - 1)) {
         if (context.playerContext().playerFeet().equals(context.placeLoc().offset(context.highwayDirection().getX(), 0, context.highwayDirection().getZ()))) {
             // We have arrived
-            context.transitionTo(HighwayState.PlacingPickaxeShulker);
+            context.transitionTo(HighwayState.PlacingPickaxeShulkerSupport);
             context.resetTimer();
         } else {
             // Keep trying to get there

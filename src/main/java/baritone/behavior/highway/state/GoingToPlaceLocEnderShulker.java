@@ -35,7 +35,7 @@ public class GoingToPlaceLocEnderShulker extends State {
 
         if (context.playerContext().playerFeet().getX() == context.placeLoc().getX() && context.playerContext().playerFeet().getY() == context.placeLoc().getY() && context.playerContext().playerFeet().getZ() == (context.placeLoc().getZ() - 2)) {
             // We have arrived
-            context.transitionTo(HighwayState.PlacingEnderShulker);
+            context.transitionTo(HighwayState.PlacingEnderShulkerSupport);
         } else {
             // Keep trying to get there
             context.baritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(context.placeLoc().getX(), context.placeLoc().getY(), context.placeLoc().getZ() - 2));

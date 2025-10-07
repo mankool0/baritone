@@ -390,6 +390,7 @@ public class HighwayContext {
     }
 
     public void transitionTo(HighwayState nextState) {
+        Helper.HELPER.logDebug(currentState + " -> " + nextState);
         currentState = StateFactory.getState(nextState);
     }
 

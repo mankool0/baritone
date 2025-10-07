@@ -17,6 +17,7 @@
 
 package baritone.behavior.highway.state;
 
+import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
@@ -40,6 +41,7 @@ public class LiquidRemovalPrep extends State {
         BlockPos liquidPos = context.findFirstLiquidGround(startCheckPos, 18, false);
 
         if (liquidPos == null) {
+            Helper.HELPER.logDebug("findFirstLiquidGround Failed. Going back to state Nothing");
             context.transitionTo(HighwayState.Nothing); // Nothing found for some reason, shouldn't happen lol
             return;
         }
@@ -53,7 +55,7 @@ public class LiquidRemovalPrep extends State {
         if (context.sourceBlocks().isEmpty()) {
             for (BlockPos flowingPos : flowingBlocks) {
                 if (flowingPos.getY() == 123) {
-                    //Helper.HELPER.logDirect("Lava source Y position too high, ignoring and adding " + flowingPos + " to list");
+                    Helper.HELPER.logDebug("Lava source Y position too high, ignoring and adding " + flowingPos + " to list");
                     context.sourceBlocks().add(flowingPos);
                 }
             }

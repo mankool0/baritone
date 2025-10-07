@@ -44,7 +44,7 @@ public class GoingToPlaceLocGappleShulker extends State {
 
         if (context.playerContext().playerFeet().equals(context.placeLoc().offset(context.highwayDirection().getX(), 0, context.highwayDirection().getZ()))) {
             // We have arrived
-            context.transitionTo(HighwayState.PlacingGappleShulker);
+            context.transitionTo(HighwayState.PlacingGappleShulkerSupport);
             context.resetTimer();
         } else {
             // Keep trying to get there

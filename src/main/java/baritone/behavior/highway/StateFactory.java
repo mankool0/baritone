@@ -64,6 +64,9 @@ public class StateFactory {
             case GoingToPlaceLocPickaxeShulker -> {
                 return new GoingToPlaceLocPickaxeShulker(highwayState);
             }
+            case PlacingPickaxeShulkerSupport -> {
+                return new PlacingShulkerSupport(highwayState);
+            }
             case PlacingPickaxeShulker -> {
                 return new PlacingPickaxeShulker(highwayState);
             }
@@ -87,6 +90,9 @@ public class StateFactory {
             }
             case GoingToPlaceLocGappleShulker -> {
                 return new GoingToPlaceLocGappleShulker(highwayState);
+            }
+            case PlacingGappleShulkerSupport -> {
+                return new PlacingShulkerSupport(highwayState);
             }
             case PlacingGappleShulker -> {
                 return new PlacingGappleShulker(highwayState);
@@ -125,7 +131,7 @@ public class StateFactory {
                 return new GoingToLootEnderChestPlaceLoc(highwayState);
             }
             case PlacingLootEnderChestSupport -> {
-                return new PlacingLootEnderChestSupport(highwayState);
+                return new PlacingShulkerSupport(highwayState);
             }
             case PlacingLootEnderChest -> {
                 return new PlacingLootEnderChest(highwayState);
@@ -147,6 +153,9 @@ public class StateFactory {
             }
             case GoingToPlaceLocEnderShulker -> {
                 return new GoingToPlaceLocEnderShulker(highwayState);
+            }
+            case PlacingEnderShulkerSupport -> {
+                return new PlacingShulkerSupport(highwayState);
             }
             case PlacingEnderShulker -> {
                 return new PlacingEnderShulker(highwayState);
@@ -197,7 +206,7 @@ public class StateFactory {
                 return new GoingToEmptyShulkerPlaceLoc(highwayState);
             }
             case PlacingEmptyShulkerSupport -> {
-                return new PlacingEmptyShulkerSupport(highwayState);
+                return new PlacingShulkerSupport(highwayState);
             }
             case PlacingEmptyShulker -> {
                 return new PlacingEmptyShulker(highwayState);
