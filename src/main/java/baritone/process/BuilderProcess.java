@@ -311,9 +311,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                     }
                     BlockState curr = bcc.bsi.get0(x, y, z);
                     if (!(curr.getBlock() instanceof AirBlock) && !(curr.getBlock() == Blocks.WATER || curr.getBlock() == Blocks.LAVA) && !valid(curr, desired, false)) {
-                        BetterBlockPos pos = new BetterBlockPos(x, y, z);
-                        Optional<Rotation> rot = RotationUtils.reachable(ctx, pos, ctx.playerController().getBlockReachDistance());
-                        rot.ifPresent(rotation -> toReturn.add(Optional.of(new Tuple<>(pos, rotation))));
+                        Optional<Rotation> rot = RotationUtils.reachable(ctx, new BlockPos(x, y, z), ctx.playerController().getBlockReachDistance());
+                        rot.ifPresent(rotation -> toReturn.add(Optional.of(new Tuple<>(new BetterBlockPos(x, y, z), rotation))));
                     }
                 }
             }
