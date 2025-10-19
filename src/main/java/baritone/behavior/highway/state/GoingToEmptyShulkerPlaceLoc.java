@@ -18,9 +18,12 @@
 package baritone.behavior.highway.state;
 
 import baritone.api.pathing.goals.GoalBlock;
+import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.AABB;
 
 public class GoingToEmptyShulkerPlaceLoc extends State {
     public GoingToEmptyShulkerPlaceLoc(HighwayState state) {
@@ -33,13 +36,24 @@ public class GoingToEmptyShulkerPlaceLoc extends State {
             return; // Wait to get there
         }
 
-        if (context.playerContext().playerFeet().equals(context.placeLoc().offset(context.highwayDirection().getX(), 0, context.highwayDirection().getZ()))) {
-            // We have arrived
+        BlockPos oneBlockAway = context.placeLoc().offset(context.highwayDirection().getX(), 0, context.highwayDirection().getZ());
+        BlockPos twoBlocksAway = context.placeLoc().offset(context.highwayDirection().getX() * 2, 0, context.highwayDirection().getZ() * 2);
+
+        if (context.playerContext().playerFeet().equals(twoBlocksAway)) {
             context.baritone().getPathingBehavior().cancelEverything();
             context.transitionTo(HighwayState.PlacingEmptyShulkerSupport);
+        } else if (context.playerContext().playerFeet().equals(oneBlockAway)) {
+            if (!context.baritone().getBuilderProcess().checkNoEntityCollision(new AABB(context.placeLoc()), null)) {
+                // We're blocking, move to 2 blocks away
+                Helper.HELPER.logDirect("Player blocking shulker placement, moving to 2 blocks away");
+                context.baritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(twoBlocksAway));
+            } else {
+                context.baritone().getPathingBehavior().cancelEverything();
+                context.transitionTo(HighwayState.PlacingEmptyShulkerSupport);
+            }
         } else {
-            // Keep trying to get there
-            context.baritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(context.placeLoc().offset(context.highwayDirection().getX(), 0, context.highwayDirection().getZ())));
+            // Not at either position, path to 1 block away first
+            context.baritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(oneBlockAway));
         }
     }
 }
