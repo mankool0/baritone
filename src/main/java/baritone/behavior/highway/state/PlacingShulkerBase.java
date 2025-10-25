@@ -83,9 +83,10 @@ public abstract class PlacingShulkerBase extends State {
         }
 
         // Shulker box spot isn't air or shulker, lets fix that
-        if (!(testState.getBlock() instanceof AirBlock) && !(testState.getBlock() instanceof ShulkerBoxBlock)) {
+        BlockState testStateAbove = context.playerContext().world().getBlockState(context.placeLoc().above());
+        if (!(testState.getBlock() instanceof AirBlock) && !(testStateAbove.getBlock() instanceof AirBlock) && !(testState.getBlock() instanceof ShulkerBoxBlock)) {
             context.baritone().getPathingBehavior().cancelEverything();
-            context.baritone().getBuilderProcess().clearArea(context.placeLoc(), context.placeLoc());
+            context.baritone().getBuilderProcess().clearArea(context.placeLoc(), context.placeLoc().above());
             placed = false;
             context.resetTimer();
             return;
