@@ -55,7 +55,7 @@ public class BuildingHighway extends State {
             }
         }
 
-        if (context.getPickCountInventory() <= context.settings().highwayPicksThreshold.value) {
+        if (context.getPickCountInventory() < context.settings().highwayPicksThreshold.value) {
             if (context.getShulkerCountInventory(context.picksToUse()) == 0) {
                 if (context.repeatCheck()) {
                     if (!context.enderChestHasPickShulks()) {
