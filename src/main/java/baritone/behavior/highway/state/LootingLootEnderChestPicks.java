@@ -43,17 +43,11 @@ public class LootingLootEnderChestPicks extends State {
             int picksShulksLooted = context.lootShulkerChestSlot(context.picksToUse());
             if (picksShulksLooted > 0) {
                 Helper.HELPER.logDirect("Looted " + picksShulksLooted + " pickaxe shulker");
-                context.setRepeatCheck(false);
             } else {
                 Helper.HELPER.logDirect("No more pickaxe shulkers. Rolling with what we have.");
                 context.transitionTo(HighwayState.LootingLootEnderChestEnderChests);
                 context.setEnderChestHasPickShulks(false);
             }
-
-            //if (getItemCountInventory(Item.getId(Items.AIR)) == 0) {
-            //    Helper.HELPER.logDirect("No space for pickaxe shulkers. Rolling with what we have.");
-            //    currentState = State.LootingLootEnderChestEnderChests;
-            //}
 
             context.resetTimer();
         } else {

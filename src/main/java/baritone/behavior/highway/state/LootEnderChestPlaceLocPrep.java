@@ -40,6 +40,9 @@ public class LootEnderChestPlaceLocPrep extends State {
             return;
         }
 
+        context.setRepeatCheck(false);
+        context.resetTimer();
+
         Vec3 curPos = new Vec3(context.playerContext().playerFeet().getX() + (7 * -context.highwayDirection().getX()), context.playerContext().playerFeet().getY(), context.playerContext().playerFeet().getZ() + (7 * -context.highwayDirection().getZ())); // Go back a bit just in case
         Vec3 direction = new Vec3(context.highwayDirection().getX(), context.highwayDirection().getY(), context.highwayDirection().getZ());
 

@@ -43,24 +43,15 @@ public class LootingLootEnderChestEnderChests extends State {
             int enderShulksLooted = context.lootShulkerChestSlot(ShulkerType.EnderChest);
             if (enderShulksLooted > 0) {
                 Helper.HELPER.logDirect("Looted " + enderShulksLooted + " ender chest shulker");
-                context.setRepeatCheck(false);
             } else {
                 Helper.HELPER.logDirect("No more ender chest shulkers. Rolling with what we have.");
                 context.transitionTo(HighwayState.LootingLootEnderChestGapples);
                 context.setEnderChestHasEnderShulks(false);
-                context.playerContext().player().closeContainer();
             }
-
-            //if (getItemCountInventory(Item.getId(Items.AIR)) == 0) {
-            //    Helper.HELPER.logDirect("No space for ender chest shulkers. Rolling with what we have.");
-            //    currentState = State.LootingLootEnderChestGapples;
-            //    ctx.player().closeContainer();
-            //}
 
             context.resetTimer();
         } else {
             context.transitionTo(HighwayState.LootingLootEnderChestGapples);
-            context.playerContext().player().closeContainer();
         }
     }
 }

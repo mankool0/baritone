@@ -17,9 +17,13 @@
 
 package baritone.behavior.highway.state;
 
+import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
+import net.minecraft.client.gui.screens.inventory.ContainerScreen;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
 
 public class LootingLootEnderChestGapples extends State {
     public LootingLootEnderChestGapples(HighwayState state) {
@@ -28,7 +32,29 @@ public class LootingLootEnderChestGapples extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        // TODO: Finish this
-        context.transitionTo(HighwayState.Nothing);
+        if (context.timer() < 40) {
+            return;
+        }
+
+        if (!(context.playerContext().minecraft().screen instanceof ContainerScreen)) {
+            context.transitionTo(HighwayState.OpeningLootEnderChest);
+            return;
+        }
+
+        if (context.getItemCountInventory(Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) < context.settings().highwayGapplesToHave.value) {
+            int gapplesLooted = context.lootGappleChestSlot();
+            if (gapplesLooted > 0) {
+                Helper.HELPER.logDirect("Looted " + gapplesLooted + " gapples");
+            } else {
+                Helper.HELPER.logDirect("No more gapples. Rolling with what we have.");
+                context.transitionTo(HighwayState.Nothing);
+                context.playerContext().player().closeContainer();
+            }
+
+            context.resetTimer();
+        } else {
+            context.transitionTo(HighwayState.Nothing);
+            context.playerContext().player().closeContainer();
+        }
     }
 }
