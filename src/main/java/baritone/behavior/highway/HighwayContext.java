@@ -794,7 +794,7 @@ public class HighwayContext {
             // going diagonal.
             for (Direction side : Direction.values())
             {
-                BlockPos neighbour = blockPos.offset(side.getNormal());
+                BlockPos neighbour = blockPos.offset(side.getUnitVec3i());
                 if (hasNeighbour(neighbour))
                 {
                     return true;
@@ -809,7 +809,7 @@ public class HighwayContext {
     {
         for (Direction side : Direction.values())
         {
-            BlockPos neighbour = blockPos.offset(side.getNormal());
+            BlockPos neighbour = blockPos.offset(side.getUnitVec3i());
             if (!playerContext.world().getBlockState(neighbour).canBeReplaced())
             {
                 return true;
@@ -1725,7 +1725,7 @@ public class HighwayContext {
 
         for (final Direction side : Direction.values())
         {
-            final BlockPos neighbor = pos.offset(side.getNormal());
+            final BlockPos neighbor = pos.offset(side.getUnitVec3i());
             final Direction side2 = side.getOpposite();
 
             if (!playerContext.world().getBlockState(neighbor).getFluidState().isEmpty())
@@ -1803,7 +1803,7 @@ public class HighwayContext {
 
                 for (final Direction side : Direction.values())
                 {
-                    final BlockPos neighbor = pos.offset(side.getNormal());
+                    final BlockPos neighbor = pos.offset(side.getUnitVec3i());
 
                     boolean l_IsWater = playerContext.world().getBlockState(neighbor).getBlock() == Blocks.WATER;
 
@@ -1847,7 +1847,7 @@ public class HighwayContext {
     private void faceVectorPacketInstant(Vec3 vec) {
         float[] rotations = getLegitRotations(vec);
 
-        playerContext.player().connection.send(new ServerboundMovePlayerPacket.Rot(rotations[0], rotations[1], playerContext.player().onGround()));
+        playerContext.player().connection.send(new ServerboundMovePlayerPacket.Rot(rotations[0], rotations[1], playerContext.player().onGround(), false));
     }
 
     public void setTarget(BlockPos pos) {

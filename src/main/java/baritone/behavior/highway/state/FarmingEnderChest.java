@@ -92,9 +92,9 @@ public class FarmingEnderChest extends State {
             double lastX = context.playerContext().getPlayerEntity().getXLast();
             double lastY = context.playerContext().getPlayerEntity().getYLast();
             double lastZ = context.playerContext().getPlayerEntity().getZLast();
-            final Vec3 pos = new Vec3(lastX + (context.playerContext().player().getX() - lastX) * context.playerContext().minecraft().getTimer().getGameTimeDeltaPartialTick(true),
-                    lastY + (context.playerContext().player().getY() - lastY) * context.playerContext().minecraft().getTimer().getGameTimeDeltaPartialTick(true),
-                    lastZ + (context.playerContext().player().getZ() - lastZ) * context.playerContext().minecraft().getTimer().getGameTimeDeltaPartialTick(true));
+            final Vec3 pos = new Vec3(lastX + (context.playerContext().player().getX() - lastX) * context.playerContext().minecraft().getDeltaTracker().getGameTimeDeltaPartialTick(true),
+                    lastY + (context.playerContext().player().getY() - lastY) * context.playerContext().minecraft().getDeltaTracker().getGameTimeDeltaPartialTick(true),
+                    lastZ + (context.playerContext().player().getZ() - lastZ) * context.playerContext().minecraft().getDeltaTracker().getGameTimeDeltaPartialTick(true));
             BlockPos originPos = new BetterBlockPos(pos.x, pos.y+0.5f, pos.z);
             double l_Offset = pos.y - originPos.getY();
             HighwayContext.PlaceResult l_Place = context.place(context.placeLoc(), 5.0f, false, l_Offset == -0.5f, InteractionHand.OFF_HAND);

@@ -108,7 +108,7 @@ public class LiquidRemovalPathing extends State {
 
         // From MovementHelper.attemptToPlaceABlock
         for (Direction side : Direction.values()) {//(int i = 0; i < 5; i++) {
-            BlockPos against1 = context.sourceBlocks().getFirst().offset(side.getNormal()); //sourceBlocks.get(0).offset(HORIZONTALS_BUT_ALSO_DOWN_____SO_EVERY_DIRECTION_EXCEPT_UP[i]);
+            BlockPos against1 = context.sourceBlocks().getFirst().offset(side.getUnitVec3i()); //sourceBlocks.get(0).offset(HORIZONTALS_BUT_ALSO_DOWN_____SO_EVERY_DIRECTION_EXCEPT_UP[i]);
             if (MovementHelper.canPlaceAgainst(context.playerContext(), against1)) {
                 double faceX = (context.sourceBlocks().getFirst().getX() + against1.getX() + 1.0D) * 0.5D;
                 double faceY = (context.sourceBlocks().getFirst().getY() + against1.getY() + 0.5D) * 0.5D;
@@ -218,9 +218,9 @@ public class LiquidRemovalPathing extends State {
                             double lastX = context.playerContext().getPlayerEntity().getXLast();
                             double lastY = context.playerContext().getPlayerEntity().getYLast();
                             double lastZ = context.playerContext().getPlayerEntity().getZLast();
-                            final Vec3 pos = new Vec3(lastX + (context.playerContext().player().getX() - lastX) * context.playerContext().minecraft().getTimer().getGameTimeDeltaPartialTick(true),
-                                    lastY + (context.playerContext().player().getY() - lastY) * context.playerContext().minecraft().getTimer().getGameTimeDeltaPartialTick(true),
-                                    lastZ + (context.playerContext().player().getZ() - lastZ) * context.playerContext().minecraft().getTimer().getGameTimeDeltaPartialTick(true));
+                            final Vec3 pos = new Vec3(lastX + (context.playerContext().player().getX() - lastX) * context.playerContext().minecraft().getDeltaTracker().getGameTimeDeltaPartialTick(true),
+                                    lastY + (context.playerContext().player().getY() - lastY) * context.playerContext().minecraft().getDeltaTracker().getGameTimeDeltaPartialTick(true),
+                                    lastZ + (context.playerContext().player().getZ() - lastZ) * context.playerContext().minecraft().getDeltaTracker().getGameTimeDeltaPartialTick(true));
                             BetterBlockPos originPos = new BetterBlockPos(pos.x, pos.y+0.5f, pos.z);
                             double l_Offset = pos.y - originPos.getY();
                             if (context.place(placeAt, (float) context.playerContext().playerController().getBlockReachDistance(), true, l_Offset == -0.5f, InteractionHand.MAIN_HAND) == HighwayContext.PlaceResult.Placed) {
