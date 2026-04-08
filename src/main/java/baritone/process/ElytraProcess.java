@@ -254,7 +254,8 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
 
         if (this.state == State.GET_TO_JUMP) {
             final IPathExecutor executor = baritone.getPathingBehavior().getCurrent();
-            final boolean canStartFlying = ctx.player().fallDistance > 1.0f
+            // TODO 1.21.5: replace `ctx.player().getDeltaMovement().y < -0.377` with `ctx.player().fallDistance > 1.0f`
+            final boolean canStartFlying = ctx.player().getDeltaMovement().y < -0.377
                     && !isSafeToCancel
                     && executor != null
                     && executor.getPath().movements().get(executor.getPosition()) instanceof MovementFall;
@@ -272,7 +273,8 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
                 baritone.getPathingBehavior().secretInternalSegmentCancel();
             }
             baritone.getInputOverrideHandler().clearAllKeys();
-            if (ctx.player().fallDistance > 1.0f) {
+            // TODO 1.21.5: replace `ctx.player().getDeltaMovement().y < -0.377` with `ctx.player().fallDistance > 1.0f`
+            if (ctx.player().getDeltaMovement().y < -0.377) {
                 baritone.getInputOverrideHandler().setInputForceState(Input.JUMP, true);
             }
         }

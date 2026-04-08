@@ -21,27 +21,24 @@ import baritone.api.utils.accessor.IItemStack;
 import baritone.api.utils.accessor.ILootTable;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
-import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
-import net.minecraft.commands.Commands;
+import net.minecraft.core.HolderLookup;
 import net.minecraft.core.LayeredRegistryAccess;
+import net.minecraft.core.Registry;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.RegistryDataLoader;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.RegistryLayer;
 import net.minecraft.server.ReloadableServerRegistries;
-import net.minecraft.server.ReloadableServerResources;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.progress.ChunkProgressListener;
 import net.minecraft.server.packs.PackType;
 import net.minecraft.server.packs.VanillaPackResources;
-import net.minecraft.server.packs.repository.PackRepository;
 import net.minecraft.server.packs.repository.ServerPacksSource;
 import net.minecraft.server.packs.resources.CloseableResourceManager;
 import net.minecraft.server.packs.resources.MultiPackResourceManager;
-import net.minecraft.server.packs.resources.ResourceManager;
+import net.minecraft.tags.TagLoader;
 import net.minecraft.world.RandomSequences;
 import net.minecraft.world.flag.FeatureFlagSet;
 import net.minecraft.world.item.Item;
@@ -49,14 +46,12 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.CustomSpawner;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.WorldDataConfiguration;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraft.world.level.dimension.LevelStem;
 import net.minecraft.world.level.storage.LevelStorageSource;
 import net.minecraft.world.level.storage.ServerLevelData;
-import net.minecraft.world.level.storage.loot.BuiltInLootTables;
 import net.minecraft.world.level.storage.loot.LootContext;
 import net.minecraft.world.level.storage.loot.LootParams;
 import net.minecraft.world.level.storage.loot.LootTable;
@@ -229,8 +224,8 @@ public final class BlockOptionalMeta {
 
     private static synchronized List<Item> drops(Block b) {
         return drops.computeIfAbsent(b, block -> {
-            ResourceLocation lootTableLocation = block.getLootTable().location();
-            if (lootTableLocation.equals(BuiltInLootTables.EMPTY.location())) {
+            Optional<ResourceKey<LootTable>> optionalLootTableKey = block.getLootTable();
+            if (optionalLootTableKey.isEmpty()) {
                 return Collections.emptyList();
             } else {
                 List<Item> items = new ArrayList<>();
@@ -251,13 +246,13 @@ public final class BlockOptionalMeta {
     }
 
     private static List<ItemStack> getDrops(Block state, LootParams.Builder params) {
-        ResourceKey<LootTable> lv = state.getLootTable();
-        if (lv == BuiltInLootTables.EMPTY) {
+        Optional<ResourceKey<LootTable>> lv = state.getLootTable();
+        if (lv.isEmpty()) {
             return Collections.emptyList();
         } else {
             LootParams lv2 = params.withParameter(LootContextParams.BLOCK_STATE, state.defaultBlockState()).create(LootContextParamSets.BLOCK);
             ServerLevelStub lv3 = (ServerLevelStub) lv2.getLevel();
-            LootTable lv4 = lv3.holder().getLootTable(lv);
+            LootTable lv4 = lv3.holder().getLootTable(lv.get());
             return((ILootTable) lv4).invokeGetRandomItems(new LootContext.Builder(lv2).withOptionalRandomSeed(1).create(null));
         }
     }
@@ -305,41 +300,33 @@ public final class BlockOptionalMeta {
         }
 
         public static CompletableFuture<RegistryAccess> load() {
-            PackRepository packRepository = Minecraft.getInstance().getResourcePackRepository();
-            CloseableResourceManager closeableResourceManager = new MultiPackResourceManager(PackType.SERVER_DATA, packRepository.openAllSelected());
-            LayeredRegistryAccess<RegistryLayer> layeredRegistryAccess = loadAndReplaceLayer(
-                closeableResourceManager, RegistryLayer.createRegistryAccess(), RegistryLayer.WORLDGEN, RegistryDataLoader.WORLDGEN_REGISTRIES
+            // Simplified from {@link net.minecraft.server.WorldLoader#load()}
+            CloseableResourceManager closeableResourceManager = new MultiPackResourceManager(
+                PackType.SERVER_DATA,
+                List.of(ServerPacksSource.createVanillaPackSource())
             );
-            return ReloadableServerResources.loadResources(
-                closeableResourceManager,
+            LayeredRegistryAccess<RegistryLayer> baseLayeredRegistry = RegistryLayer.createRegistryAccess();
+            List<Registry.PendingTags<?>> pendingTags = TagLoader.loadTagsForExistingRegistries(
+                closeableResourceManager, baseLayeredRegistry.getLayer(RegistryLayer.STATIC)
+            );
+            List<HolderLookup.RegistryLookup<?>> worldGenRegistryLookupList = TagLoader.buildUpdatedLookups(
+                baseLayeredRegistry.getAccessForLoading(RegistryLayer.WORLDGEN),
+                pendingTags
+            );
+            LayeredRegistryAccess<RegistryLayer> layeredRegistryAccess = baseLayeredRegistry.replaceFrom(
+                RegistryLayer.WORLDGEN,
+                RegistryDataLoader.load(
+                    closeableResourceManager,
+                    worldGenRegistryLookupList,
+                    RegistryDataLoader.WORLDGEN_REGISTRIES
+                )
+            );
+            return ReloadableServerRegistries.reload(
                 layeredRegistryAccess,
-                WorldDataConfiguration.DEFAULT.enabledFeatures(),
-                Commands.CommandSelection.INTEGRATED,
-                2,
-                Runnable::run,
+                pendingTags,
+                closeableResourceManager,
                 Minecraft.getInstance()
-            ).thenApply(reloadableServerResources -> reloadableServerResources.fullRegistries().get());
+            ).thenApply(r -> r.layers().compositeAccess());
         }
-
-        private static LayeredRegistryAccess<RegistryLayer> loadAndReplaceLayer(
-            ResourceManager resourceManager,
-            LayeredRegistryAccess<RegistryLayer> registryAccess,
-            RegistryLayer registryLayer,
-            List<RegistryDataLoader.RegistryData<?>> registryData
-        ) {
-            RegistryAccess.Frozen frozen = loadLayer(resourceManager, registryAccess, registryLayer, registryData);
-            return registryAccess.replaceFrom(registryLayer, frozen);
-        }
-
-        private static RegistryAccess.Frozen loadLayer(
-            ResourceManager resourceManager,
-            LayeredRegistryAccess<RegistryLayer> registryAccess,
-            RegistryLayer registryLayer,
-            List<RegistryDataLoader.RegistryData<?>> registryData
-        ) {
-            RegistryAccess.Frozen frozen = registryAccess.getAccessForLoading(registryLayer);
-            return RegistryDataLoader.load(resourceManager, frozen, registryData);
-        }
-
     }
 }

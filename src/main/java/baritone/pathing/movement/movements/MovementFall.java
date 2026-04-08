@@ -94,6 +94,11 @@ public class MovementFall extends Movement {
         Rotation targetRotation = null;
         BlockState destState = ctx.world().getBlockState(dest);
         Block destBlock = destState.getBlock();
+
+        if (ctx.world().getBlockState(dest.below()).is(Blocks.MAGMA_BLOCK) && MovementHelper.steppingOnBlocks(ctx).stream().allMatch(block -> MovementHelper.canWalkThrough(ctx, block))) {
+            state.setInput(Input.SNEAK, true);
+        }
+
         boolean isWater = destState.getFluidState().getType() instanceof WaterFluid;
         if (!isWater && willPlaceBucket() && !playerFeet.equals(dest)) {
             if (!Inventory.isHotbarSlot(ctx.player().getInventory().findSlotMatchingItem(STACK_BUCKET_WATER)) || ctx.world().dimension() == Level.NETHER) {
@@ -140,7 +145,7 @@ public class MovementFall extends Movement {
             }
             state.setInput(Input.MOVE_FORWARD, true);
         }
-        Vec3i avoid = Optional.ofNullable(avoid()).map(Direction::getNormal).orElse(null);
+        Vec3i avoid = Optional.ofNullable(avoid()).map(Direction::getUnitVec3i).orElse(null);
         if (avoid == null) {
             avoid = src.subtract(dest);
         } else {

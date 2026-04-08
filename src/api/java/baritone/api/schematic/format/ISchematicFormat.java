@@ -23,6 +23,7 @@ import baritone.api.schematic.IStaticSchematic;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.List;
 
 /**
  * The base of a {@link ISchematic} file format
@@ -42,4 +43,9 @@ public interface ISchematicFormat {
      * @return Whether or not the specified file matches this schematic format
      */
     boolean isFileType(File file);
+
+    /**
+     * @return A list of file extensions used by this format
+     */
+    List<String> getFileExtensions();
 }

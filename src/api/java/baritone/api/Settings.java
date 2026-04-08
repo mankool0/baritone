@@ -29,6 +29,9 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.Mirror;
+import net.minecraft.world.level.block.Rotation;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -73,6 +76,16 @@ public final class Settings {
      * Allow Baritone to place blocks
      */
     public final Setting<Boolean> allowPlace = new Setting<>(true);
+
+    /**
+     * Allow Baritone to place blocks in fluid source blocks
+     */
+    public final Setting<Boolean> allowPlaceInFluidsSource = new Setting<>(true);
+
+    /**
+     * Allow Baritone to place blocks in flowing fluid
+     */
+    public final Setting<Boolean> allowPlaceInFluidsFlow = new Setting<>(true);
 
     /**
      * Allow Baritone to move items in your inventory to your hotbar
@@ -172,6 +185,13 @@ public final class Settings {
      * <p>
      * Defaults to false because this fails on constantiam. Please let me know if this is ever disabled. Please.
      */
+    public final Setting<Boolean> allowJumpAtBuildLimit = new Setting<>(false);
+
+    /**
+     * Just here so mods that use the API don't break. Does nothing.
+     */
+    @Deprecated
+    @JavaOnly
     public final Setting<Boolean> allowJumpAt256 = new Setting<>(false);
 
     /**
@@ -219,9 +239,9 @@ public final class Settings {
     /**
      * Blocks that Baritone will attempt to avoid (Used in avoidance)
      */
-    public final Setting<List<Block>> blocksToAvoid = new Setting<>(new ArrayList<>(
-            // Leave Empty by Default
-    ));
+    public final Setting<List<Block>> blocksToAvoid = new Setting<>(new ArrayList<>(List.of(
+            Blocks.TRIPWIRE
+    )));
 
     /**
      * Blocks that Baritone is not allowed to break
@@ -654,13 +674,6 @@ public final class Settings {
      * Shows popup message in the upper right corner, similarly to when you make an advancement
      */
     public final Setting<Boolean> logAsToast = new Setting<>(false);
-
-    /**
-     * The time of how long the message in the pop-up will display
-     * <p>
-     * If below 1000L (1sec), it's better to disable this
-     */
-    public final Setting<Long> toastTimer = new Setting<>(5000L);
 
     /**
      * Print all the debug messages to chat
@@ -1102,6 +1115,28 @@ public final class Settings {
     public final Setting<Boolean> schematicOrientationZ = new Setting<>(false);
 
     /**
+     * Rotates the schematic before building it.
+     * Possible values are
+     * <ul>
+     *  <li> NONE - No rotation </li>
+     *  <li> CLOCKWISE_90 - Rotate 90° clockwise </li>
+     *  <li> CLOCKWISE_180 - Rotate 180° clockwise </li>
+     *  <li> COUNTERCLOCKWISE_90 - Rotate 270° clockwise </li>
+     * </ul>
+     */
+    public final Setting<Rotation> buildSchematicRotation = new Setting<>(Rotation.NONE);
+
+    /**
+     * Mirrors the schematic before building it.
+     * Possible values are
+     * <ul>
+     *  <li> FRONT_BACK - mirror the schematic along its local x axis </li>
+     *  <li> LEFT_RIGHT - mirror the schematic along its local z axis </li>
+     * </ul>
+     */
+    public final Setting<Mirror> buildSchematicMirror = new Setting<>(Mirror.NONE);
+
+    /**
      * The fallback used by the build command when no extension is specified. This may be useful if schematics of a
      * particular format are used often, and the user does not wish to have to specify the extension with every usage.
      */
@@ -1211,6 +1246,11 @@ public final class Settings {
      * The radius (for the GoalNear) of how close to your target position you actually have to be
      */
     public final Setting<Integer> followRadius = new Setting<>(3);
+
+    /**
+     * The maximum distance to the entity you're following
+     */
+    public final Setting<Integer> followTargetMaxDistance = new Setting<>(0);
 
     /**
      * Turn this on if your exploration filter is enormous, you don't want it to check if it's done,
@@ -1514,6 +1554,11 @@ public final class Settings {
      * Verbose chat logging in elytra mode
      */
     public final Setting<Boolean> elytraChatSpam = new Setting<>(false);
+
+    /**
+     * Sneak when magma blocks are under feet
+     */
+    public final Setting<Boolean> allowWalkOnMagmaBlocks = new Setting<>(false);
 
     /**
      * In ticks the minimum duration of fire resistance to have before going into lava

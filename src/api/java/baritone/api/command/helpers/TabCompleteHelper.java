@@ -212,7 +212,12 @@ public class TabCompleteHelper {
      * @return This {@link TabCompleteHelper}
      */
     public TabCompleteHelper filterPrefixNamespaced(String prefix) {
-        return filterPrefix(ResourceLocation.parse(prefix).toString());
+        ResourceLocation loc = ResourceLocation.tryParse(prefix);
+        if (loc == null) {
+            stream = Stream.empty();
+            return this;
+        }
+        return filterPrefix(loc.toString());
     }
 
     /**

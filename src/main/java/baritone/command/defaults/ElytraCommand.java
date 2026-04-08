@@ -216,7 +216,7 @@ public class ElytraCommand extends Command {
         final String osArch = System.getProperty("os.arch");
         final String osName = System.getProperty("os.name");
         return String.format(
-                "Legacy architectures are not supported. Your CPU is %s and your operating system is %s. " +
+                "Failed loading native library. Your CPU is %s and your operating system is %s. " +
                         "Supported architectures are 64 bit x86, and 64 bit ARM. Supported operating systems are Windows, " +
                         "Linux, and Mac",
                 osArch, osName

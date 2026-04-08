@@ -26,7 +26,7 @@ archivesBaseName = archivesBaseName + "-neoforge"
 
 unimined.minecraft {
 
-    neoForged {
+    neoForge {
         loader project.neoforge_version
         mixinConfig ["mixins.baritone.json"]
     }

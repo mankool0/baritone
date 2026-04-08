@@ -21,12 +21,16 @@ import baritone.api.BaritoneAPI;
 import baritone.api.Settings;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.Direction;
+import net.minecraft.core.Holder;
 import net.minecraft.core.Registry;
 import net.minecraft.core.Vec3i;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Mirror;
+import net.minecraft.world.level.block.Rotation;
+
 import java.awt.*;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -80,6 +84,10 @@ public class SettingsUtil {
 
                 String settingName = matcher.group("setting").toLowerCase();
                 String settingValue = matcher.group("value");
+                // TODO remove soonish
+                if ("allowjumpat256".equals(settingName)) {
+                    settingName = "allowjumpatbuildlimit";
+                }
                 try {
                     parseAndApply(settings, settingName, settingValue);
                 } catch (Exception ex) {
@@ -220,7 +228,8 @@ public class SettingsUtil {
         FLOAT(Float.class, Float::parseFloat),
         LONG(Long.class, Long::parseLong),
         STRING(String.class, String::new),
-        DIRECTION(Direction.class, Direction::byName),
+        MIRROR(Mirror.class, Mirror::valueOf, Mirror::name),
+        ROTATION(Rotation.class, Rotation::valueOf, Rotation::name),
         COLOR(
                 Color.class,
                 str -> new Color(Integer.parseInt(str.split(",")[0]), Integer.parseInt(str.split(",")[1]), Integer.parseInt(str.split(",")[2])),
@@ -237,8 +246,8 @@ public class SettingsUtil {
                 BlockUtils::blockToString
         ),
         ITEM(
-                Item.class,
-                str -> BuiltInRegistries.ITEM.get(ResourceLocation.parse(str.trim())), // TODO this now returns AIR on failure instead of null, is that an issue?
+            Item.class,
+                str -> BuiltInRegistries.ITEM.get(ResourceLocation.parse(str.trim())).map(Holder.Reference::value).orElse(null),
                 item -> BuiltInRegistries.ITEM.getKey(item).toString()
         ),
         LIST() {
