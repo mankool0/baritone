@@ -165,7 +165,7 @@ public abstract class MixinClientPlayerEntity implements IClientPlayerEntity {
     @Override
     public abstract double getXLast();
 
-    @Accessor("yLast1")
+    @Accessor("yLast")
     @Override
     public abstract double getYLast();
 
