@@ -73,20 +73,22 @@ jobs:
     
     - name: Determine Release Tag
       id: tag
-      run: echo "tag=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-    
+      run: |
+        echo "tag=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        echo "branch=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.tag.outputs.tag }}
-        name: Release ${{ steps.tag.outputs.tag }}
+        name: Release ${{ steps.tag.outputs.tag }} ${{ steps.tag.outputs.branch }}
         draft: false
         prerelease: false
         files: |
           artifacts/*
           mappings/*
         body: |
-          ## Release ${{ steps.tag.outputs.tag }}
+          ## Release ${{ steps.tag.outputs.tag }} ${{ steps.tag.outputs.branch }}
           
           ### Artifacts
           - Built JAR files available in artifacts
