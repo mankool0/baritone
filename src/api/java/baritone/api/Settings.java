@@ -1646,6 +1646,21 @@ public final class Settings {
     public final Setting<Integer> highwayStuckDistance = new Setting<>(5);
 
     /**
+     * Eat a gapple when health drops below this value. Set to 0 to disable.
+     */
+    public final Setting<Float> highwayGappleEatHealthThreshold = new Setting<>(0f);
+
+    /**
+     * Eat a gapple when food level drops to or below this value. Set to 0 to disable.
+     */
+    public final Setting<Integer> highwayGappleEatFoodThreshold = new Setting<>(0);
+
+    /**
+     * Allow emergency gapple eating to interrupt MobCombat when health/food thresholds are met.
+     */
+    public final Setting<Boolean> highwayEmergencyEatDuringCombat = new Setting<>(false);
+
+    /**
      * Disconnect from the server if lost some health
      */
     public final Setting<Boolean> highwayDcOnHealthLoss = new Setting<>(true);

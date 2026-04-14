@@ -94,6 +94,10 @@ public enum HighwayState {
 
     BoatRemoval,
 
+    EmergencyGapplePrep,
+    EmergencyGapplePreEat,
+    EmergencyGappleEat,
+
     MobCombat,
     MobCombatReturn,
 

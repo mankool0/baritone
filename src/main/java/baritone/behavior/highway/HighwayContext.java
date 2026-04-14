@@ -55,9 +55,12 @@ import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.*;
 import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.item.component.ItemContainerContents;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.item.enchantment.Enchantment;
+import net.minecraft.world.item.enchantment.EnchantmentEffectComponents;
 import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.item.enchantment.ItemEnchantments;
+import net.minecraft.world.item.enchantment.effects.EnchantmentAttributeEffect;
 import net.minecraft.world.level.ItemLike;
 import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.state.BlockState;
@@ -131,6 +134,7 @@ public class HighwayContext {
     private Settings settings = BaritoneAPI.getSettings();
     private State currentState;
     private HighwayState previousState = HighwayState.Nothing;
+    private HighwayState emergencyEatReturnState = HighwayState.Nothing;
     private Entity currentMobTarget = null;
     private BetterBlockPos combatReturnPos = null;
     private CompositeSchematic schematic;
@@ -407,6 +411,14 @@ public class HighwayContext {
         this.previousState = state;
     }
 
+    public HighwayState emergencyEatReturnState() {
+        return emergencyEatReturnState;
+    }
+
+    public void setEmergencyEatReturnState(HighwayState state) {
+        this.emergencyEatReturnState = state;
+    }
+
     public Entity currentMobTarget() {
         return currentMobTarget;
     }
@@ -435,7 +447,10 @@ public class HighwayContext {
 
     public void handle() {
         HighwayState currentStateEnum = currentState.getState();
-        if (currentStateEnum != HighwayState.MobCombat && currentStateEnum != HighwayState.MobCombatReturn && currentStateEnum != HighwayState.Nothing) {
+        boolean inEmergencyEat = currentStateEnum == HighwayState.EmergencyGapplePrep || currentStateEnum == HighwayState.EmergencyGapplePreEat || currentStateEnum == HighwayState.EmergencyGappleEat;
+        boolean inCombat = currentStateEnum == HighwayState.MobCombat || currentStateEnum == HighwayState.MobCombatReturn;
+
+        if (!inEmergencyEat && !inCombat && currentStateEnum != HighwayState.Nothing) {
             java.util.Optional<Entity> mob = findMobTargetingPlayer();
             if (mob.isPresent()) {
                 setPreviousState(currentStateEnum);
@@ -443,6 +458,23 @@ public class HighwayContext {
                 setCombatReturnPos(playerContext.playerFeet());
                 transitionTo(HighwayState.MobCombat);
                 return;
+            }
+        }
+        boolean inLiquidEat = currentStateEnum == HighwayState.LiquidRemovalGapplePrep || currentStateEnum == HighwayState.LiquidRemovalGapplePreEat || currentStateEnum == HighwayState.LiquidRemovalGappleEat;
+        if (!inEmergencyEat && !inLiquidEat && (!inCombat || settings.highwayEmergencyEatDuringCombat.value)) {
+            if (currentStateEnum != HighwayState.Nothing) {
+                float healthThreshold = settings.highwayGappleEatHealthThreshold.value;
+                int foodThreshold = settings.highwayGappleEatFoodThreshold.value;
+                boolean healthTrigger = healthThreshold > 0 && playerContext.player().getHealth() < healthThreshold;
+                boolean foodTrigger = foodThreshold > 0 && playerContext.player().getFoodData().getFoodLevel() <= foodThreshold;
+                if (healthTrigger || foodTrigger) {
+                    Helper.HELPER.logDirect("Emergency gapple eat triggered (health=" + playerContext.player().getHealth() + ", food=" + playerContext.player().getFoodData().getFoodLevel() + ").");
+                    setEmergencyEatReturnState(currentStateEnum);
+                    baritone.getInputOverrideHandler().clearAllKeys();
+                    baritone.getPathingBehavior().cancelEverything();
+                    transitionTo(HighwayState.EmergencyGapplePrep);
+                    return;
+                }
             }
         }
         currentState.handle(this);
@@ -627,6 +659,53 @@ public class HighwayContext {
         return -1;
     }
 
+    public int putBestSwordHotbar() {
+        int itemSlot = getBestSwordSlot();
+        if (itemSlot == -1) return -1;
+        if (itemSlot >= 9) {
+            baritone.getInventoryBehavior().attemptToPutOnHotbar(itemSlot, usefulSlots::contains);
+            itemSlot = getBestSwordSlot();
+        }
+        return itemSlot;
+    }
+
+    // Ordered from highest to lowest priority
+    private static final List<Item> SWORD_PRIORITY = List.of(
+            Items.NETHERITE_SWORD, Items.DIAMOND_SWORD, Items.IRON_SWORD,
+            Items.STONE_SWORD, Items.GOLDEN_SWORD, Items.WOODEN_SWORD
+    );
+
+    private int getBestSwordSlot() {
+        for (Item swordType : SWORD_PRIORITY) {
+            int bestSlot = -1;
+            double bestEnchantBonus = -1;
+            for (int i = 0; i < 36; i++) {
+                ItemStack stack = playerContext.player().getInventory().items.get(i);
+                if (Item.getId(stack.getItem()) != Item.getId(swordType)) continue;
+                double bonus = getSwordAttackEnchantBonus(stack);
+                if (bonus > bestEnchantBonus) {
+                    bestEnchantBonus = bonus;
+                    bestSlot = i;
+                }
+            }
+            if (bestSlot != -1) return bestSlot;
+        }
+        return -1;
+    }
+
+    private double getSwordAttackEnchantBonus(ItemStack stack) {
+        double bonus = 0;
+        ItemEnchantments enchantments = stack.getEnchantments();
+        for (Holder<Enchantment> enchant : enchantments.keySet()) {
+            for (EnchantmentAttributeEffect e : enchant.value().getEffects(EnchantmentEffectComponents.ATTRIBUTES)) {
+                if (e.attribute().is(Attributes.ATTACK_DAMAGE.unwrapKey().get())) {
+                    bonus += e.amount().calculate(enchantments.getLevel(enchant));
+                }
+            }
+        }
+        return bonus;
+    }
+
     public void swapOffhand(int slot) {
         playerContext.playerController().windowClick(0, 45, 0, ClickType.PICKUP, playerContext.player());
         playerContext.playerController().windowClick(0, slot < 9 ? slot + 36 : slot, 0, ClickType.PICKUP, playerContext.player());
@@ -748,7 +827,8 @@ public class HighwayContext {
 
     public boolean healthCheck() {
         if (settings.highwayDcOnHealthLoss.value && playerContext.player().getHealth() < cachedHealth &&
-                currentState.getState() != HighwayState.LiquidRemovalGapplePrep && currentState.getState() != HighwayState.LiquidRemovalGapplePreEat && currentState.getState() != HighwayState.LiquidRemovalGappleEat) {
+                currentState.getState() != HighwayState.LiquidRemovalGapplePrep && currentState.getState() != HighwayState.LiquidRemovalGapplePreEat && currentState.getState() != HighwayState.LiquidRemovalGappleEat &&
+                currentState.getState() != HighwayState.EmergencyGapplePrep && currentState.getState() != HighwayState.EmergencyGapplePreEat && currentState.getState() != HighwayState.EmergencyGappleEat) {
             Component dcMsg = Component.literal("Lost " + (cachedHealth - playerContext.player().getHealth()) + " health. Reconnect");
             Helper.HELPER.logDirect(dcMsg);
             playerContext.player().connection.getConnection().disconnect(dcMsg);

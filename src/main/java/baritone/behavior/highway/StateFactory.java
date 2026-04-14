@@ -214,6 +214,15 @@ public class StateFactory {
             case BoatRemoval -> {
                 return new BoatRemoval(highwayState);
             }
+            case EmergencyGapplePrep -> {
+                return new EmergencyGapplePrep(highwayState);
+            }
+            case EmergencyGapplePreEat -> {
+                return new EmergencyGapplePreEat(highwayState);
+            }
+            case EmergencyGappleEat -> {
+                return new EmergencyGappleEat(highwayState);
+            }
             case MobCombat -> {
                 return new MobCombat(highwayState);
             }
