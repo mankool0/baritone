@@ -36,7 +36,9 @@ import net.minecraft.core.*;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
+import baritone.utils.accessor.IPlayerControllerMP;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
 import net.minecraft.network.protocol.game.ServerboundSwingPacket;
@@ -1852,11 +1854,11 @@ public class HighwayContext {
 
     public void setTarget(BlockPos pos) {
         instantMinePacketCancel = false;
-        playerContext.player().connection.send(new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK,
-                pos, Direction.DOWN));
+        ((IPlayerControllerMP) playerContext.minecraft().gameMode).startPrediction((ClientLevel) playerContext.world(),
+                seq -> new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, pos, Direction.DOWN, seq));
         instantMinePacketCancel = true;
-        playerContext.player().connection.send(new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK,
-                pos, Direction.DOWN));
+        ((IPlayerControllerMP) playerContext.minecraft().gameMode).startPrediction((ClientLevel) playerContext.world(),
+                seq -> new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, pos, Direction.DOWN, seq));
         instantMineDirection = Direction.DOWN;
         instantMineLastBlock = pos;
     }

@@ -18,7 +18,9 @@
 package baritone.launch.mixins;
 
 import baritone.utils.accessor.IPlayerControllerMP;
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.MultiPlayerGameMode;
+import net.minecraft.client.multiplayer.prediction.PredictiveAction;
 import net.minecraft.core.BlockPos;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.gen.Accessor;
@@ -46,4 +48,8 @@ public abstract class MixinPlayerController implements IPlayerControllerMP {
     @Accessor("destroyDelay")
     @Override
     public abstract void setDestroyDelay(int destroyDelay);
+
+    @Invoker("startPrediction")
+    @Override
+    public abstract void startPrediction(ClientLevel level, PredictiveAction action);
 }
