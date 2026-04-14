@@ -33,5 +33,5 @@ public interface IPlayerControllerMP {
 
     void setDestroyDelay(int destroyDelay);
 
-    void startPrediction(ClientLevel level, PredictiveAction action);
+    void callStartPrediction(ClientLevel level, PredictiveAction action);
 }

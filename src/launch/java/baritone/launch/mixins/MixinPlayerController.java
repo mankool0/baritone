@@ -51,5 +51,5 @@ public abstract class MixinPlayerController implements IPlayerControllerMP {
 
     @Invoker("startPrediction")
     @Override
-    public abstract void startPrediction(ClientLevel level, PredictiveAction action);
+    public abstract void callStartPrediction(ClientLevel level, PredictiveAction action);
 }

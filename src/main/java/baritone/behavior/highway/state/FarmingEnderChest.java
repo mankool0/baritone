@@ -114,7 +114,7 @@ public class FarmingEnderChest extends State {
         }
         if (context.instantMineLastBlock() != null) {
             if (HighwayContext.validPicksList.contains(context.playerContext().player().getItemInHand(InteractionHand.MAIN_HAND).getItem())) {
-                ((IPlayerControllerMP) context.playerContext().minecraft().gameMode).startPrediction((ClientLevel) context.playerContext().world(),
+                ((IPlayerControllerMP) context.playerContext().minecraft().gameMode).callStartPrediction((ClientLevel) context.playerContext().world(),
                         seq -> new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, context.instantMineLastBlock(), context.instantMineDirection(), seq));
             }
         }

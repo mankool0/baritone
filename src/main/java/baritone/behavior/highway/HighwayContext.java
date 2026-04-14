@@ -1854,10 +1854,10 @@ public class HighwayContext {
 
     public void setTarget(BlockPos pos) {
         instantMinePacketCancel = false;
-        ((IPlayerControllerMP) playerContext.minecraft().gameMode).startPrediction((ClientLevel) playerContext.world(),
+        ((IPlayerControllerMP) playerContext.minecraft().gameMode).callStartPrediction((ClientLevel) playerContext.world(),
                 seq -> new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, pos, Direction.DOWN, seq));
         instantMinePacketCancel = true;
-        ((IPlayerControllerMP) playerContext.minecraft().gameMode).startPrediction((ClientLevel) playerContext.world(),
+        ((IPlayerControllerMP) playerContext.minecraft().gameMode).callStartPrediction((ClientLevel) playerContext.world(),
                 seq -> new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, pos, Direction.DOWN, seq));
         instantMineDirection = Direction.DOWN;
         instantMineLastBlock = pos;
