@@ -93,6 +93,9 @@ public enum HighwayState {
     PlacingEmptyShulker,
 
     BoatRemoval,
-    
+
+    MobCombat,
+    MobCombatReturn,
+
     InQueue,
 }

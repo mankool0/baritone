@@ -214,6 +214,12 @@ public class StateFactory {
             case BoatRemoval -> {
                 return new BoatRemoval(highwayState);
             }
+            case MobCombat -> {
+                return new MobCombat(highwayState);
+            }
+            case MobCombatReturn -> {
+                return new MobCombatReturn(highwayState);
+            }
             case InQueue -> {
                 return new InQueue(highwayState);
             }

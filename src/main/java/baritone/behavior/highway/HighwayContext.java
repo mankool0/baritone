@@ -36,9 +36,9 @@ import net.minecraft.core.*;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
+import baritone.utils.accessor.IPlayerControllerMP;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
-import baritone.utils.accessor.IPlayerControllerMP;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
 import net.minecraft.network.protocol.game.ServerboundSwingPacket;
@@ -130,6 +130,9 @@ public class HighwayContext {
     private final List<BlockState> blackListBlocks = Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.LAVA.defaultBlockState(), Blocks.FIRE.defaultBlockState(), Blocks.BROWN_MUSHROOM.defaultBlockState(), Blocks.RED_MUSHROOM.defaultBlockState(), Blocks.MAGMA_BLOCK.defaultBlockState(), Blocks.SOUL_SAND.defaultBlockState(), Blocks.SOUL_SOIL.defaultBlockState());
     private Settings settings = BaritoneAPI.getSettings();
     private State currentState;
+    private HighwayState previousState = HighwayState.Nothing;
+    private Entity currentMobTarget = null;
+    private BetterBlockPos combatReturnPos = null;
     private CompositeSchematic schematic;
     private WhiteBlackSchematic liqCheckSchem;
     private BetterBlockPos originBuild;
@@ -396,7 +399,52 @@ public class HighwayContext {
         currentState = StateFactory.getState(nextState);
     }
 
+    public HighwayState previousState() {
+        return previousState;
+    }
+
+    public void setPreviousState(HighwayState state) {
+        this.previousState = state;
+    }
+
+    public Entity currentMobTarget() {
+        return currentMobTarget;
+    }
+
+    public void setCurrentMobTarget(Entity entity) {
+        this.currentMobTarget = entity;
+    }
+
+    public BetterBlockPos combatReturnPos() {
+        return combatReturnPos;
+    }
+
+    public void setCombatReturnPos(BetterBlockPos pos) {
+        this.combatReturnPos = pos;
+    }
+
+    public java.util.Optional<Entity> findMobTargetingPlayer() {
+        net.minecraft.world.entity.player.Player player = playerContext.player();
+        return playerContext.entitiesStream()
+                .filter(e -> e instanceof net.minecraft.world.entity.LivingEntity && e.isAlive())
+                .filter(e -> !(e instanceof net.minecraft.world.entity.player.Player))
+                .filter(e -> ((net.minecraft.world.entity.LivingEntity) e).getLastHurtMob() == player)
+                .filter(e -> e.distanceToSqr(player) <= 24.0 * 24.0)
+                .min(java.util.Comparator.comparingDouble(e -> e.distanceToSqr(player)));
+    }
+
     public void handle() {
+        HighwayState currentStateEnum = currentState.getState();
+        if (currentStateEnum != HighwayState.MobCombat && currentStateEnum != HighwayState.MobCombatReturn && currentStateEnum != HighwayState.Nothing) {
+            java.util.Optional<Entity> mob = findMobTargetingPlayer();
+            if (mob.isPresent()) {
+                setPreviousState(currentStateEnum);
+                setCurrentMobTarget(mob.get());
+                setCombatReturnPos(playerContext.playerFeet());
+                transitionTo(HighwayState.MobCombat);
+                return;
+            }
+        }
         currentState.handle(this);
     }
 
