@@ -437,11 +437,31 @@ public class HighwayContext {
 
     public java.util.Optional<Entity> findMobTargetingPlayer() {
         net.minecraft.world.entity.player.Player player = playerContext.player();
+
+        // Collect ghasts that own a nearby fireball
+        java.util.Set<Entity> ghastsThreatening = playerContext.entitiesStream()
+                .filter(e -> e instanceof net.minecraft.world.entity.projectile.LargeFireball && e.isAlive())
+                .filter(e -> e.distanceToSqr(player) <= 8.0 * 8.0)
+                .map(e -> ((net.minecraft.world.entity.projectile.LargeFireball) e).getOwner())
+                .filter(owner -> owner instanceof net.minecraft.world.entity.monster.Ghast)
+                .collect(java.util.stream.Collectors.toSet());
+
+        // Sticky ghast: if we're already tracking a ghast, keep it as a threat while it's alive and within 40 blocks
+        if (currentMobTarget instanceof net.minecraft.world.entity.monster.Ghast
+                && currentMobTarget.isAlive()
+                && currentMobTarget.distanceToSqr(player) <= 40.0 * 40.0) {
+            ghastsThreatening.add(currentMobTarget);
+        }
+
         return playerContext.entitiesStream()
                 .filter(e -> e instanceof net.minecraft.world.entity.LivingEntity && e.isAlive())
                 .filter(e -> !(e instanceof net.minecraft.world.entity.player.Player))
-                .filter(e -> ((net.minecraft.world.entity.LivingEntity) e).getLastHurtMob() == player)
-                .filter(e -> e.distanceToSqr(player) <= 24.0 * 24.0)
+                .filter(e -> ((net.minecraft.world.entity.LivingEntity) e).getLastHurtMob() == player
+                        || ((e instanceof net.minecraft.world.entity.monster.Zoglin || e instanceof net.minecraft.world.entity.monster.hoglin.Hoglin) && e.distanceToSqr(player) <= 4.0 * 4.0)
+                        || ghastsThreatening.contains(e))
+                .filter(e -> !(e instanceof net.minecraft.world.entity.monster.Ghast) || e.distanceToSqr(player) <= 40.0 * 40.0)
+                .filter(e -> !(e instanceof net.minecraft.world.entity.monster.Ghast) || ghastsThreatening.contains(e))
+                .filter(e -> e.distanceToSqr(player) <= 24.0 * 24.0 || e instanceof net.minecraft.world.entity.monster.Ghast)
                 .min(java.util.Comparator.comparingDouble(e -> e.distanceToSqr(player)));
     }
 
