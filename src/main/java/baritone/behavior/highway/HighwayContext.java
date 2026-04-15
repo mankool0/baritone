@@ -435,8 +435,17 @@ public class HighwayContext {
         this.combatReturnPos = pos;
     }
 
+    private boolean isPlayerWearingGoldArmor(net.minecraft.world.entity.player.Player player) {
+        return player.getInventory().armor.stream().anyMatch(stack ->
+                stack.is(net.minecraft.world.item.Items.GOLDEN_HELMET)
+                || stack.is(net.minecraft.world.item.Items.GOLDEN_CHESTPLATE)
+                || stack.is(net.minecraft.world.item.Items.GOLDEN_LEGGINGS)
+                || stack.is(net.minecraft.world.item.Items.GOLDEN_BOOTS));
+    }
+
     public java.util.Optional<Entity> findMobTargetingPlayer() {
         net.minecraft.world.entity.player.Player player = playerContext.player();
+        boolean wearingGold = isPlayerWearingGoldArmor(player);
 
         // Collect ghasts that own a nearby fireball
         java.util.Set<Entity> ghastsThreatening = playerContext.entitiesStream()
@@ -458,6 +467,8 @@ public class HighwayContext {
                 .filter(e -> !(e instanceof net.minecraft.world.entity.player.Player))
                 .filter(e -> ((net.minecraft.world.entity.LivingEntity) e).getLastHurtMob() == player
                         || ((e instanceof net.minecraft.world.entity.monster.Zoglin || e instanceof net.minecraft.world.entity.monster.hoglin.Hoglin) && e.distanceToSqr(player) <= 4.0 * 4.0)
+                        || (e instanceof net.minecraft.world.entity.monster.piglin.Piglin && !wearingGold && e.distanceToSqr(player) <= 16.0 * 16.0)
+                        || (e instanceof net.minecraft.world.entity.monster.piglin.PiglinBrute && e.distanceToSqr(player) <= 16.0 * 16.0)
                         || ghastsThreatening.contains(e))
                 .filter(e -> !(e instanceof net.minecraft.world.entity.monster.Ghast) || e.distanceToSqr(player) <= 40.0 * 40.0)
                 .filter(e -> !(e instanceof net.minecraft.world.entity.monster.Ghast) || ghastsThreatening.contains(e))
