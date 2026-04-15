@@ -86,6 +86,13 @@ import static baritone.pathing.movement.Movement.HORIZONTALS_BUT_ALSO_DOWN_____S
 
 public final class NetherHighwayBuilderBehavior extends Behavior implements INetherHighwayBuilderBehavior, IRenderer {
 
+    /**
+     * When true, the MixinMinecraft hitResult redirect returns null inside startUseItem(),
+     * preventing block/container interaction while eating gapples (echest in offhand would
+     * otherwise be placed on blocks, or containers would be opened).
+     */
+    public static boolean suppressHitResult = false;
+
     private final HighwayContext highwayContext;
 
 

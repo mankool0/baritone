@@ -23,11 +23,13 @@ import baritone.api.event.events.PlayerUpdateEvent;
 import baritone.api.event.events.TickEvent;
 import baritone.api.event.events.WorldEvent;
 import baritone.api.event.events.type.EventState;
+import baritone.behavior.highway.NetherHighwayBuilderBehavior;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ReceivingLevelScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.phys.HitResult;
 import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -187,6 +189,29 @@ public class MixinMinecraft {
             return null;
         }
         return instance.screen;
+    }
+
+    /**
+     * When suppressHitResult is set, return null for the hitResult field read inside
+     * startUseItem() that determines block/entity interaction (ordinal=1, the type-switch read).
+     * A null hitResult causes startUseItem() to skip block and entity interaction entirely and
+     * fall through to direct item use, preventing offhand echest placement or container opening
+     * while eating gapples during emergency eat states.
+     */
+    @Redirect(
+            method = "startUseItem",
+            at = @At(
+                    value = "FIELD",
+                    opcode = Opcodes.GETFIELD,
+                    target = "Lnet/minecraft/client/Minecraft;hitResult:Lnet/minecraft/world/phys/HitResult;",
+                    ordinal = 1
+            )
+    )
+    private HitResult redirectHitResultForEating(Minecraft instance) {
+        if (NetherHighwayBuilderBehavior.suppressHitResult) {
+            return null;
+        }
+        return instance.hitResult;
     }
 
     // TODO

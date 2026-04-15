@@ -19,6 +19,7 @@ package baritone.behavior.highway.state;
 
 import baritone.api.utils.input.Input;
 import baritone.behavior.highway.HighwayContext;
+import baritone.behavior.highway.NetherHighwayBuilderBehavior;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
 
@@ -38,6 +39,7 @@ public class EmergencyGappleEat extends State {
         boolean foodOk = foodThreshold <= 0 || food > foodThreshold;
 
         if (healthOk && foodOk) {
+            NetherHighwayBuilderBehavior.suppressHitResult = false;
             context.playerContext().minecraft().options.keyUse.setDown(false);
             context.baritone().getInputOverrideHandler().clearAllKeys();
             context.baritone().getPathingBehavior().cancelEverything();
@@ -46,12 +48,16 @@ public class EmergencyGappleEat extends State {
         }
 
         if (context.timer() <= 120) {
+            // suppressHitResult nulls the hitResult inside startUseItem() via a mixin redirect, preventing
+            // block/container interaction (offhand echest placement, container opening) while keyUse is held.
+            NetherHighwayBuilderBehavior.suppressHitResult = true;
             if (context.playerContext().minecraft().screen == null) {
                 context.playerContext().minecraft().options.keyUse.setDown(true);
             } else {
                 context.baritone().getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
             }
         } else {
+            NetherHighwayBuilderBehavior.suppressHitResult = false;
             context.playerContext().minecraft().options.keyUse.setDown(false);
             context.baritone().getInputOverrideHandler().clearAllKeys();
             context.transitionTo(HighwayState.EmergencyGapplePrep); // Check if thresholds are met now
