@@ -2012,6 +2012,7 @@ public class HighwayContext {
     }
 
     public void setTarget(BlockPos pos) {
+        if (playerContext.minecraft().gameMode == null) return;
         instantMinePacketCancel = false;
         ((IPlayerControllerMP) playerContext.minecraft().gameMode).callStartPrediction((ClientLevel) playerContext.world(),
                 seq -> new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, pos, Direction.DOWN, seq));

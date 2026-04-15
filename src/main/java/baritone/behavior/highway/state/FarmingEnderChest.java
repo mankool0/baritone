@@ -27,6 +27,7 @@ import baritone.utils.accessor.IPlayerControllerMP;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
+import net.minecraft.network.protocol.game.ServerboundSwingPacket;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
@@ -111,11 +112,13 @@ public class FarmingEnderChest extends State {
 
         if (!context.instantMineActivated()) {
             context.transitionTo(HighwayState.FarmingEnderChestPrepPick);
+            return;
         }
         if (context.instantMineLastBlock() != null) {
             if (HighwayContext.validPicksList.contains(context.playerContext().player().getItemInHand(InteractionHand.MAIN_HAND).getItem())) {
                 ((IPlayerControllerMP) context.playerContext().minecraft().gameMode).callStartPrediction((ClientLevel) context.playerContext().world(),
                         seq -> new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, context.instantMineLastBlock(), context.instantMineDirection(), seq));
+                context.playerContext().player().connection.send(new ServerboundSwingPacket(InteractionHand.MAIN_HAND));
             }
         }
 
