@@ -469,6 +469,11 @@ public class HighwayContext {
                         || ((e instanceof net.minecraft.world.entity.monster.Zoglin || e instanceof net.minecraft.world.entity.monster.hoglin.Hoglin) && e.distanceToSqr(player) <= 4.0 * 4.0)
                         || (e instanceof net.minecraft.world.entity.monster.piglin.Piglin && !wearingGold && e.distanceToSqr(player) <= 16.0 * 16.0)
                         || (e instanceof net.minecraft.world.entity.monster.piglin.PiglinBrute && e.distanceToSqr(player) <= 16.0 * 16.0)
+                        || (e instanceof net.minecraft.world.entity.monster.MagmaCube && e.distanceToSqr(player) <= 4.0 * 4.0)
+                        || (e instanceof net.minecraft.world.entity.monster.EnderMan
+                            && (((net.minecraft.world.entity.monster.EnderMan) e).isCreepy()
+                                || ((net.minecraft.world.entity.Mob) e).getTarget() == player)
+                            && e.distanceToSqr(player) <= 16.0 * 16.0)
                         || ghastsThreatening.contains(e))
                 .filter(e -> !(e instanceof net.minecraft.world.entity.monster.Ghast) || e.distanceToSqr(player) <= 40.0 * 40.0)
                 .filter(e -> !(e instanceof net.minecraft.world.entity.monster.Ghast) || ghastsThreatening.contains(e))
@@ -480,6 +485,13 @@ public class HighwayContext {
         HighwayState currentStateEnum = currentState.getState();
         boolean inEmergencyEat = currentStateEnum == HighwayState.EmergencyGapplePrep || currentStateEnum == HighwayState.EmergencyGapplePreEat || currentStateEnum == HighwayState.EmergencyGappleEat;
         boolean inCombat = currentStateEnum == HighwayState.MobCombat || currentStateEnum == HighwayState.MobCombatReturn;
+
+        if (inCombat) {
+            int swordSlot = putBestSwordHotbar();
+            if (swordSlot != -1) {
+                playerContext.player().getInventory().selected = swordSlot;
+            }
+        }
 
         if (!inEmergencyEat && !inCombat && currentStateEnum != HighwayState.Nothing) {
             java.util.Optional<Entity> mob = findMobTargetingPlayer();
