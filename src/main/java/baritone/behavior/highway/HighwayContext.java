@@ -443,6 +443,20 @@ public class HighwayContext {
                 || stack.is(net.minecraft.world.item.Items.GOLDEN_BOOTS));
     }
 
+    private boolean isEntityInHighwayCorridor(Entity entity) {
+        if (schematic == null) return false;
+        Vec3 dir = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
+        if (dir.lengthSqr() == 0) return true;
+        BetterBlockPos closest = getClosestPoint(originVector, dir, entity.position(), LocationType.HighwayBuild);
+        BlockPos ep = entity.blockPosition();
+        // widthX/lengthZ == 1 means that's the along-highway axis; getClosestPoint rounds to the nearest block
+        // so we skip the size-1 dimension to avoid off-by-one failures at block boundaries
+        boolean xOk = schematic.widthX() == 1 || (ep.getX() >= closest.getX() && ep.getX() < closest.getX() + schematic.widthX());
+        boolean zOk = schematic.lengthZ() == 1 || (ep.getZ() >= closest.getZ() && ep.getZ() < closest.getZ() + schematic.lengthZ());
+        boolean yOk = ep.getY() >= closest.getY() && ep.getY() < closest.getY() + schematic.heightY();
+        return xOk && yOk && zOk;
+    }
+
     public java.util.Optional<Entity> findMobTargetingPlayer() {
         net.minecraft.world.entity.player.Player player = playerContext.player();
         boolean wearingGold = isPlayerWearingGoldArmor(player);
@@ -469,15 +483,18 @@ public class HighwayContext {
                         || ((e instanceof net.minecraft.world.entity.monster.Zoglin || e instanceof net.minecraft.world.entity.monster.hoglin.Hoglin) && e.distanceToSqr(player) <= 4.0 * 4.0)
                         || (e instanceof net.minecraft.world.entity.monster.piglin.Piglin && !wearingGold && e.distanceToSqr(player) <= 16.0 * 16.0)
                         || (e instanceof net.minecraft.world.entity.monster.piglin.PiglinBrute && e.distanceToSqr(player) <= 16.0 * 16.0)
-                        || (e instanceof net.minecraft.world.entity.monster.MagmaCube && e.distanceToSqr(player) <= 4.0 * 4.0)
+                        || (e instanceof net.minecraft.world.entity.monster.MagmaCube
+                            && e.distanceToSqr(player) <= 8 * 8)
                         || (e instanceof net.minecraft.world.entity.monster.EnderMan
                             && (((net.minecraft.world.entity.monster.EnderMan) e).isCreepy()
                                 || ((net.minecraft.world.entity.Mob) e).getTarget() == player)
                             && e.distanceToSqr(player) <= 16.0 * 16.0)
                         || ghastsThreatening.contains(e))
-                .filter(e -> !(e instanceof net.minecraft.world.entity.monster.Ghast) || e.distanceToSqr(player) <= 40.0 * 40.0)
                 .filter(e -> !(e instanceof net.minecraft.world.entity.monster.Ghast) || ghastsThreatening.contains(e))
                 .filter(e -> e.distanceToSqr(player) <= 24.0 * 24.0 || e instanceof net.minecraft.world.entity.monster.Ghast)
+                .filter(e -> ((net.minecraft.world.entity.LivingEntity) e).getLastHurtMob() == player
+                        || ghastsThreatening.contains(e)
+                        || isEntityInHighwayCorridor(e))
                 .min(java.util.Comparator.comparingDouble(e -> e.distanceToSqr(player)));
     }
 
