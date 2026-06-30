@@ -303,6 +303,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
         highwayContext.setPaused(true);
         highwayContext.setRepeatCheck(false);
+        highwayContext.resetRecovery(); // restore any settings (e.g. allowSwimThroughLava) overridden during recovery
         highwayContext.transitionTo(HighwayState.Nothing);
         baritone.getPathingBehavior().cancelEverything();
         highwayContext.setFirstStartingPos(null);

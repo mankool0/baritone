@@ -77,10 +77,10 @@ public class MovementPillar extends Movement {
             return COST_INF;
         }
         BlockState srcUp = null;
-        if (MovementHelper.isWater(toBreak) && MovementHelper.isWater(fromState)) { // TODO should this also be allowed if toBreakBlock is air?
+        if (MovementHelper.isSwimmableLiquid(toBreak) && MovementHelper.isSwimmableLiquid(fromState)) { // TODO should this also be allowed if toBreakBlock is air?
             srcUp = context.get(x, y + 1, z);
-            if (MovementHelper.isWater(srcUp)) {
-                return LADDER_UP_ONE_COST; // allow ascending pillars of water, but only if we're already in one
+            if (MovementHelper.isSwimmableLiquid(srcUp)) {
+                return LADDER_UP_ONE_COST; // allow ascending pillars of water (or lava when allowSwimThroughLava), but only if we're already in one
             }
         }
         double placeCost = 0;
@@ -173,8 +173,8 @@ public class MovementPillar extends Movement {
         }
 
         BlockState fromDown = BlockStateInterface.get(ctx, src);
-        if (MovementHelper.isWater(fromDown) && MovementHelper.isWater(ctx, dest)) {
-            // stay centered while swimming up a water column
+        if (MovementHelper.isSwimmableLiquid(fromDown) && MovementHelper.isSwimmableLiquid(ctx, dest)) {
+            // stay centered while swimming up a water (or lava) column
             state.setTarget(new MovementState.MovementTarget(RotationUtils.calcRotationFromVec3d(ctx.playerHead(), VecUtils.getBlockPosCenter(dest), ctx.playerRotations()), false));
             Vec3 destCenter = VecUtils.getBlockPosCenter(dest);
             if (Math.abs(ctx.player().position().x - destCenter.x) > 0.2 || Math.abs(ctx.player().position().z - destCenter.z) > 0.2) {
@@ -277,7 +277,7 @@ public class MovementPillar extends Movement {
                 state.setInput(Input.SNEAK, true);
             }
         }
-        if (MovementHelper.isWater(ctx, dest.above())) {
+        if (MovementHelper.isSwimmableLiquid(ctx, dest.above())) {
             return true;
         }
         return super.prepared(state);

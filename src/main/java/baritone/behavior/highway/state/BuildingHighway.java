@@ -188,10 +188,21 @@ public class BuildingHighway extends State {
 
             curState = context.isHighwayCorrect(startCheckPos, startCheckPosLiq, tempCheckBackDist, false); // Don't check front for blocks as we are probably just mining
             if (curState == HighwayBlockState.Blocks) {
-                Helper.HELPER.logDirect("Fixing invalid blocks.");
-                context.transitionTo(HighwayState.Nothing);
-                context.resetTimer();
-                return;
+                if (!context.invalidBlockFixActive()) {
+                    Helper.HELPER.logDirect("Fixing invalid blocks.");
+                    context.startInvalidBlockFix();
+                    context.transitionTo(HighwayState.Nothing);
+                    context.resetTimer();
+                    return;
+                } else if (context.invalidBlockFixStalled()) {
+                    Helper.HELPER.logDirect("Invalid block fix stalled, restarting builder.");
+                    context.startInvalidBlockFix();
+                    context.transitionTo(HighwayState.Nothing);
+                    context.resetTimer();
+                    return;
+                }
+            } else {
+                context.clearInvalidBlockFix();
             }
 
             // No case for Air because that's what it should be

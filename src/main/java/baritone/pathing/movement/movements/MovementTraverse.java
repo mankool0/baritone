@@ -86,7 +86,7 @@ public class MovementTraverse extends Movement {
             double WC = WALK_ONE_BLOCK_COST;
             boolean water = false;
             boolean sneaking = false;
-            if (MovementHelper.isWater(pb0) || MovementHelper.isWater(pb1)) {
+            if (MovementHelper.isSwimmableLiquid(pb0) || MovementHelper.isSwimmableLiquid(pb1)) {
                 WC = context.waterWalkSpeed;
                 water = true;
             } else {

@@ -167,6 +167,12 @@ public final class Settings {
     public final Setting<Boolean> assumeWalkOnLava = new Setting<>(false);
 
     /**
+     * Treat lava as a swimmable fluid (like water) instead of an impassable hazard, so Baritone can
+     * swim through and up out of it. Only safe with Fire Resistance; used by highway fall recovery.
+     */
+    public final Setting<Boolean> allowSwimThroughLava = new Setting<>(false);
+
+    /**
      * Assume step functionality; don't jump on an Ascend.
      */
     public final Setting<Boolean> assumeStep = new Setting<>(false);
@@ -1725,6 +1731,37 @@ public final class Settings {
      * Useful for digging small tunnels quicker
      */
     public final Setting<Integer> highwayEndDistance = new Setting<>(-1);
+
+    /**
+     * If enabled, when the bot falls below the highway it will recover by pathing back to an
+     * already-built spot behind it
+     */
+    public final Setting<Boolean> highwayFallRecovery = new Setting<>(true);
+
+    /**
+     * How many blocks below the highway walking level the player must be to count
+     * as having fallen off the highway and trigger fall recovery.
+     */
+    public final Setting<Integer> highwayFallDetectThreshold = new Setting<>(5);
+
+    /**
+     * How many blocks behind the fall location to start looking for a standable, already-built spot
+     * to path back to. Grows automatically (up to {@link #highwayRecoveryMaxSearch}) if no standable
+     * spot is found or the chosen one can't be reached.
+     */
+    public final Setting<Integer> highwayRecoveryBackDistance = new Setting<>(4);
+
+    /**
+     * Maximum number of blocks behind the fall location to search for a standable built spot during
+     * fall recovery before giving up.
+     */
+    public final Setting<Integer> highwayRecoveryMaxSearch = new Setting<>(64);
+
+    /**
+     * While fixing invalid blocks, how many ticks the bot may go without an active path before the
+     * builder is restarted.
+     */
+    public final Setting<Integer> highwayInvalidBlockFixTimeout = new Setting<>(100);
 
     /**
      * Message to detect when entering a server queue.

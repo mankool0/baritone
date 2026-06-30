@@ -229,6 +229,9 @@ public class StateFactory {
             case MobCombatReturn -> {
                 return new MobCombatReturn(highwayState);
             }
+            case FallRecovery -> {
+                return new FallRecovery(highwayState);
+            }
             case InQueue -> {
                 return new InQueue(highwayState);
             }

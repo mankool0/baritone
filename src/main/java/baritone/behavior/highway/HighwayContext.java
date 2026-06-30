@@ -137,6 +137,11 @@ public class HighwayContext {
     private HighwayState emergencyEatReturnState = HighwayState.Nothing;
     private Entity currentMobTarget = null;
     private BetterBlockPos combatReturnPos = null;
+    private BetterBlockPos recoveryTarget = null;
+    private int recoveryExtraBack = 0;
+    private Boolean recoverySwimThroughLavaSaved = null; // non-null while we've overridden allowSwimThroughLava for recovery
+    private boolean invalidBlockFixActive = false;
+    private int invalidBlockFixNoPathTicks = 0;
     private CompositeSchematic schematic;
     private WhiteBlackSchematic liqCheckSchem;
     private BetterBlockPos originBuild;
@@ -431,6 +436,108 @@ public class HighwayContext {
         this.combatReturnPos = pos;
     }
 
+    public BetterBlockPos recoveryTarget() {
+        return recoveryTarget;
+    }
+
+    public void setRecoveryTarget(BetterBlockPos pos) {
+        this.recoveryTarget = pos;
+    }
+
+    /**
+     * Temporarily treat lava as a swimmable fluid so a fall recovery can swim up and out of a lava lake
+     * (we have fire resistance during recovery). Saves the user's original {@code allowSwimThroughLava}
+     * value so it can be restored afterwards.
+     */
+    public void enableLavaSwimmingForRecovery() {
+        if (recoverySwimThroughLavaSaved == null) {
+            recoverySwimThroughLavaSaved = settings.allowSwimThroughLava.value;
+            settings.allowSwimThroughLava.value = true;
+        }
+    }
+
+    public void restoreLavaSwimming() {
+        if (recoverySwimThroughLavaSaved != null) {
+            settings.allowSwimThroughLava.value = recoverySwimThroughLavaSaved;
+            recoverySwimThroughLavaSaved = null;
+        }
+    }
+
+    /** Clears all fall-recovery state, releases the keys we may have held, and restores overridden settings. */
+    public void resetRecovery() {
+        restoreLavaSwimming();
+        recoveryTarget = null;
+        recoveryExtraBack = 0;
+        NetherHighwayBuilderBehavior.suppressHitResult = false;
+        if (playerContext.minecraft() != null) {
+            playerContext.minecraft().options.keyJump.setDown(false);
+            playerContext.minecraft().options.keyUse.setDown(false);
+        }
+    }
+
+    /** Search a bit further back next time we look for a spot to return to. */
+    public void growRecoveryBack() {
+        int step = Math.max(1, settings.highwayRecoveryBackDistance.value);
+        recoveryExtraBack = Math.min(recoveryExtraBack + step, settings.highwayRecoveryMaxSearch.value);
+    }
+
+    /**
+     * Find a standable, already-built spot on the highway behind the player to path back to after a fall.
+     * Starts {@code highwayRecoveryBackDistance} (+ any grown offset) blocks back and searches further
+     * until a column with solid footing and clear feet/head is found, up to {@code highwayRecoveryMaxSearch}.
+     *
+     * @return the feet position to stand at, or null if nothing suitable was found
+     */
+    public BetterBlockPos computeRecoveryTarget() {
+        int dirX = highwayDirection.getX();
+        int dirZ = highwayDirection.getZ();
+        // perpendicular to the highway in the XZ plane
+        int perpX = dirZ;
+        int perpZ = -dirX;
+        int floorY = settings.highwayLowestY.value + (paving ? 1 : 0);
+        BetterBlockPos feet = playerContext.playerFeet();
+        int maxLateral = settings.highwayWidth.value + 2;
+        int start = Math.max(1, settings.highwayRecoveryBackDistance.value) + recoveryExtraBack;
+        int max = Math.max(start, settings.highwayRecoveryMaxSearch.value);
+        for (int d = start; d <= max; d++) {
+            int baseX = feet.x - dirX * d;
+            int baseZ = feet.z - dirZ * d;
+            // scan laterally outward from our column to snap onto a built part of the highway
+            for (int w = 0; w <= maxLateral; w++) {
+                for (int sign = (w == 0 ? 1 : -1); sign <= 1; sign += 2) {
+                    int fx = baseX + perpX * w * sign;
+                    int fz = baseZ + perpZ * w * sign;
+                    if (MovementHelper.canWalkOn(baritone.bsi, fx, floorY, fz)
+                            && MovementHelper.canWalkThrough(baritone.bsi, fx, floorY + 1, fz)
+                            && MovementHelper.canWalkThrough(baritone.bsi, fx, floorY + 2, fz)) {
+                        return new BetterBlockPos(fx, floorY + 1, fz);
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    public boolean invalidBlockFixActive() {
+        return invalidBlockFixActive;
+    }
+
+    /** Mark that we've dispatched the builder to clear invalid blocks and (re)start the stall timer. */
+    public void startInvalidBlockFix() {
+        invalidBlockFixActive = true;
+        invalidBlockFixNoPathTicks = 0;
+    }
+
+    public void clearInvalidBlockFix() {
+        invalidBlockFixActive = false;
+        invalidBlockFixNoPathTicks = 0;
+    }
+
+    /** True if the dispatched invalid-block fix has gone too long without an active path (it's stuck). */
+    public boolean invalidBlockFixStalled() {
+        return invalidBlockFixNoPathTicks > settings.highwayInvalidBlockFixTimeout.value;
+    }
+
     private boolean isPlayerWearingGoldArmor(net.minecraft.world.entity.player.Player player) {
         return player.getInventory().armor.stream().anyMatch(stack ->
                 stack.is(net.minecraft.world.item.Items.GOLDEN_HELMET)
@@ -498,6 +605,7 @@ public class HighwayContext {
         HighwayState currentStateEnum = currentState.getState();
         boolean inEmergencyEat = currentStateEnum == HighwayState.EmergencyGapplePrep || currentStateEnum == HighwayState.EmergencyGapplePreEat || currentStateEnum == HighwayState.EmergencyGappleEat;
         boolean inCombat = currentStateEnum == HighwayState.MobCombat || currentStateEnum == HighwayState.MobCombatReturn;
+        boolean inRecovery = currentStateEnum == HighwayState.FallRecovery;
 
         if (inCombat) {
             int swordSlot = putBestSwordHotbar();
@@ -506,7 +614,7 @@ public class HighwayContext {
             }
         }
 
-        if (!inEmergencyEat && !inCombat && currentStateEnum != HighwayState.Nothing) {
+        if (!inEmergencyEat && !inCombat && !inRecovery && currentStateEnum != HighwayState.Nothing) {
             java.util.Optional<Entity> mob = findMobTargetingPlayer();
             if (mob.isPresent()) {
                 setPreviousState(currentStateEnum);
@@ -517,7 +625,7 @@ public class HighwayContext {
             }
         }
         boolean inLiquidEat = currentStateEnum == HighwayState.LiquidRemovalGapplePrep || currentStateEnum == HighwayState.LiquidRemovalGapplePreEat || currentStateEnum == HighwayState.LiquidRemovalGappleEat;
-        if (!inEmergencyEat && !inLiquidEat && (!inCombat || settings.highwayEmergencyEatDuringCombat.value)) {
+        if (!inEmergencyEat && !inLiquidEat && !inRecovery && (!inCombat || settings.highwayEmergencyEatDuringCombat.value)) {
             if (currentStateEnum != HighwayState.Nothing) {
                 float healthThreshold = settings.highwayGappleEatHealthThreshold.value;
                 int foodThreshold = settings.highwayGappleEatFoodThreshold.value;
@@ -533,6 +641,19 @@ public class HighwayContext {
                 }
             }
         }
+
+        // Fell off the highway: recover by pathing back to a built spot behind us
+        int highwayFeetY = settings.highwayMainY.value + (paving ? 1 : 0);
+        if (settings.highwayFallRecovery.value && currentStateEnum == HighwayState.BuildingHighway
+                && playerContext.playerFeet().y <= highwayFeetY - settings.highwayFallDetectThreshold.value) {
+            Helper.HELPER.logDirect("Fell off the highway (y=" + playerContext.playerFeet().y + "). Recovering.");
+            setPreviousState(currentStateEnum);
+            resetRecovery();
+            baritone.getInputOverrideHandler().clearAllKeys();
+            baritone.getPathingBehavior().cancelEverything();
+            transitionTo(HighwayState.FallRecovery);
+            return;
+        }
         currentState.handle(this);
     }
 
@@ -541,6 +662,14 @@ public class HighwayContext {
         walkBackTimer++;
         checkBackTimer++;
         stuckTimer++;
+
+        if (invalidBlockFixActive) {
+            if (baritone.getPathingBehavior().isPathing()) {
+                invalidBlockFixNoPathTicks = 0;
+            } else {
+                invalidBlockFixNoPathTicks++;
+            }
+        }
     }
 
     public void resetTimer() {
@@ -833,7 +962,7 @@ public class HighwayContext {
     }
 
     public boolean stuckCheck() {
-        if (currentState.getState() == HighwayState.InQueue) {
+        if (currentState.getState() == HighwayState.InQueue || currentState.getState() == HighwayState.FallRecovery) {
             return false;
         }
         
@@ -884,7 +1013,8 @@ public class HighwayContext {
     public boolean healthCheck() {
         if (settings.highwayDcOnHealthLoss.value && playerContext.player().getHealth() < cachedHealth &&
                 currentState.getState() != HighwayState.LiquidRemovalGapplePrep && currentState.getState() != HighwayState.LiquidRemovalGapplePreEat && currentState.getState() != HighwayState.LiquidRemovalGappleEat &&
-                currentState.getState() != HighwayState.EmergencyGapplePrep && currentState.getState() != HighwayState.EmergencyGapplePreEat && currentState.getState() != HighwayState.EmergencyGappleEat) {
+                currentState.getState() != HighwayState.EmergencyGapplePrep && currentState.getState() != HighwayState.EmergencyGapplePreEat && currentState.getState() != HighwayState.EmergencyGappleEat &&
+                currentState.getState() != HighwayState.FallRecovery) {
             Component dcMsg = Component.literal("Lost " + (cachedHealth - playerContext.player().getHealth()) + " health. Reconnect");
             Helper.HELPER.logDirect(dcMsg);
             playerContext.player().connection.getConnection().disconnect(dcMsg);

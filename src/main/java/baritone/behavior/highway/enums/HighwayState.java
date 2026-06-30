@@ -101,5 +101,7 @@ public enum HighwayState {
     MobCombat,
     MobCombatReturn,
 
+    FallRecovery,
+
     InQueue,
 }

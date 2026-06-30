@@ -225,7 +225,7 @@ public interface MovementHelper extends ActionCosts, Helper {
             if (!up.getFluidState().isEmpty() || up.getBlock() instanceof WaterlilyBlock) {
                 return false;
             }
-            return fluidState.getType() instanceof WaterFluid;
+            return isSwimmableLiquid(state);
         }
 
         return state.isPathfindable(PathComputationType.LAND);
@@ -437,7 +437,7 @@ public interface MovementHelper extends ActionCosts, Helper {
         if (isWater(state)) {
             return MAYBE;
         }
-        if (MovementHelper.isLava(state) && Baritone.settings().assumeWalkOnLava.value) {
+        if (MovementHelper.isLava(state) && (Baritone.settings().assumeWalkOnLava.value || Baritone.settings().allowSwimThroughLava.value)) {
             return MAYBE;
         }
         if (block instanceof SlabBlock) {
@@ -471,8 +471,15 @@ public interface MovementHelper extends ActionCosts, Helper {
             return isWater(upState) ^ Baritone.settings().assumeWalkOnWater.value;
         }
 
-        if (MovementHelper.isLava(state) && !MovementHelper.isFlowing(x, y, z, state, bsi) && Baritone.settings().assumeWalkOnLava.value) { // if we get here it means that assumeWalkOnLava must be true, so put it last
-            return true;
+        if (MovementHelper.isLava(state) && !MovementHelper.isFlowing(x, y, z, state, bsi)) {
+            if (Baritone.settings().assumeWalkOnLava.value) {
+                return true;
+            }
+            if (Baritone.settings().allowSwimThroughLava.value) {
+                // swim model (mirrors water): we can 'stand' (swim) on lava only while submerged, i.e. with
+                // lava above us. At the surface this is false so we step out instead of standing on top.
+                return MovementHelper.isLava(bsi.get0(x, y + 1, z));
+            }
         }
 
         return false; // If we don't recognise it then we want to just return false to be safe.
@@ -728,6 +735,14 @@ public interface MovementHelper extends ActionCosts, Helper {
     static boolean isLava(BlockState state) {
         Fluid f = state.getFluidState().getType();
         return f == Fluids.LAVA || f == Fluids.FLOWING_LAVA;
+    }
+
+    static boolean isSwimmableLiquid(BlockState state) {
+        return isWater(state) || (isLava(state) && Baritone.settings().allowSwimThroughLava.value);
+    }
+
+    static boolean isSwimmableLiquid(IPlayerContext ctx, BlockPos bp) {
+        return isSwimmableLiquid(BlockStateInterface.get(ctx, bp));
     }
 
     /**
