@@ -38,13 +38,14 @@ public class FarmingEnderChest extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        // If we've been stuck on this spot too long, clear it and re-prime the break target.
+        // Stuck too long on this spot: clear it and force a fresh calibration break.
         if (context.timer() > 120) {
             context.baritone().getBuilderProcess().clearArea(context.placeLoc(), context.placeLoc());
-            context.setTarget(context.placeLoc());
+            context.setInstantMineCalibrated(false);
             context.resetTimer();
         }
 
+        // Keep a non-silk-touch pickaxe selected so the eChest drops obsidian when broken.
         int pickSlot = context.putPickaxeHotbar(true);
         if (context.playerContext().player().getInventory().selected != pickSlot) {
             context.transitionTo(HighwayState.FarmingEnderChestPrepEchest);
@@ -56,7 +57,7 @@ public class FarmingEnderChest extends State {
         if ((context.getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) + context.playerContext().player().getOffhandItem().getCount()) <= context.settings().highwayEnderChestsToKeep.value) {
             // Out of ender chests to farm, swap the offhand back and move on.
             context.baritone().getInputOverrideHandler().clearAllKeys();
-            context.setInstantMineActivated(false);
+            context.setInstantMineCalibrated(false);
             context.transitionTo(HighwayState.FarmingEnderChestSwapBack);
             context.resetTimer();
             return;
@@ -68,6 +69,7 @@ public class FarmingEnderChest extends State {
 
         BlockState state = context.playerContext().world().getBlockState(context.placeLoc());
 
+        // Nothing placed yet: face the support block and drop a fresh ender chest from the offhand.
         if (state.getBlock() instanceof AirBlock) {
             Optional<Rotation> support = RotationUtils.reachable(context.playerContext(), context.placeLoc().below(), context.playerContext().playerController().getBlockReachDistance());
             support.ifPresent(rotation -> context.baritone().getLookBehavior().updateTarget(rotation, true));
@@ -78,13 +80,21 @@ public class FarmingEnderChest extends State {
             return;
         }
 
-        if (!context.instantMineActivated()) {
-            context.transitionTo(HighwayState.FarmingEnderChestPrepPick);
+        if (!HighwayContext.validPicksList.contains(context.playerContext().player().getItemInHand(InteractionHand.MAIN_HAND).getItem())) {
             return;
         }
 
-        if (HighwayContext.validPicksList.contains(context.playerContext().player().getItemInHand(InteractionHand.MAIN_HAND).getItem())) {
-            context.instantMineTick(context.placeLoc());
+        // First chest of the session so break it the legitimate way (real client mining) so
+        // the server's destroy target is set
+        if (!context.instantMineCalibrated()) {
+            if (context.calibrationBreakTick(context.placeLoc())) {
+                context.setInstantMineCalibrated(true);
+            }
+            return;
         }
+
+        // Calibrated: instant-rebreak the chest like Meteor's InstantRebreak - face it and fire
+        // STOP_DESTROY_BLOCK + swing every tick.
+        context.instantMineTick(context.placeLoc());
     }
 }

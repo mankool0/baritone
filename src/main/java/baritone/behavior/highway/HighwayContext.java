@@ -200,15 +200,21 @@ public class HighwayContext {
     private float cachedHealth = 0.0f;
     private float cachedAbsorption = 0.0f;
 
-    public boolean instantMineActivated() {
-        return instantMineActivated;
+    public boolean instantMineCalibrated() {
+        return instantMineCalibrated;
     }
 
-    public void setInstantMineActivated(boolean instantMineActivated) {
-        this.instantMineActivated = instantMineActivated;
+    public void setInstantMineCalibrated(boolean instantMineCalibrated) {
+        this.instantMineCalibrated = instantMineCalibrated;
+        if (!instantMineCalibrated) {
+            this.instantMineCalibrationHitting = false;
+        }
     }
 
-    private boolean instantMineActivated = false;
+    private boolean instantMineCalibrated = false;
+    // Whether we were mid-break last tick during the legit calibration break. The client-side
+    // isDestroying flag must be saved/restored each tick since we never actually hold the attack key.
+    private boolean instantMineCalibrationHitting = false;
 
     public BlockPos instantMineLastBlock() {
         return instantMineLastBlock;
@@ -2030,13 +2036,31 @@ public class HighwayContext {
         playerContext.player().connection.send(new ServerboundMovePlayerPacket.Rot(rotations[0], rotations[1], playerContext.player().onGround(), false));
     }
 
-    public void setTarget(BlockPos pos) {
-        if (playerContext.minecraft().gameMode == null) return;
+    public boolean calibrationBreakTick(BlockPos pos) {
+        if (playerContext.minecraft().gameMode == null) return false;
         Direction face = faceMineTarget(pos);
         instantMineDirection = face;
         instantMineLastBlock = pos;
-        playerContext.player().connection.send(new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, pos, face));
-        playerContext.player().connection.send(new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, pos, face));
+
+        IPlayerController controller = playerContext.playerController();
+        controller.setHittingBlock(instantMineCalibrationHitting);
+        if (controller.hasBrokenBlock()) {
+            controller.syncHeldItem();
+            controller.clickBlock(pos, face);
+            playerContext.player().swing(InteractionHand.MAIN_HAND);
+        } else if (controller.onPlayerDamageBlock(pos, face)) {
+            playerContext.player().swing(InteractionHand.MAIN_HAND);
+        }
+
+        boolean broken = controller.hasBrokenBlock();
+        if (broken) {
+            try {
+                controller.setDestroyDelay(0);
+            } catch (Exception ignored) {}
+        }
+        instantMineCalibrationHitting = !broken;
+        controller.setHittingBlock(false);
+        return broken;
     }
 
     public void instantMineTick(BlockPos pos) {

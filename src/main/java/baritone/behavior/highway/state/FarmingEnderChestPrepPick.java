@@ -22,7 +22,6 @@ import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.block.AirBlock;
 
 public class FarmingEnderChestPrepPick extends State {
     public FarmingEnderChestPrepPick(HighwayState state) {
@@ -44,12 +43,6 @@ public class FarmingEnderChestPrepPick extends State {
         ItemStack stack = context.playerContext().player().getInventory().items.get(pickSlot);
         if (HighwayContext.validPicksList.contains(stack.getItem())) {
             context.playerContext().player().getInventory().selected = pickSlot;
-        }
-
-        // TODO: Debug and confirm this works
-        if (!(context.playerContext().world().getBlockState(context.placeLoc()).getBlock() instanceof AirBlock)) {
-            context.setTarget(context.placeLoc());
-            context.setInstantMineActivated(true);
         }
 
         context.transitionTo(HighwayState.FarmingEnderChest);

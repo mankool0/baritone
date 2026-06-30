@@ -40,6 +40,7 @@ public class GoingToPlaceLocEnderChest extends State {
             context.settings().buildRepeat.value = new Vec3i(0, 0, 0);
             context.resetTimer();
             context.setInstantMineOriginalOffhandItem(context.playerContext().player().getOffhandItem().getItem());
+            context.setInstantMineCalibrated(false);
             context.transitionTo(HighwayState.FarmingEnderChestPrepEchest);
         } else {
             // Keep trying to get there
