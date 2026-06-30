@@ -1677,6 +1677,24 @@ public class HighwayContext {
         return 0;
     }
 
+    public boolean canWalkOnFloorAhead() {
+        BetterBlockPos feet = playerContext.playerFeet();
+        int dirX = highwayDirection.getX();
+        int dirZ = highwayDirection.getZ();
+        int floorY = feet.y - 1;
+
+        // Block we'll be standing on after stepping forward
+        if (!MovementHelper.canWalkOn(baritone.bsi, feet.x + dirX, floorY, feet.z + dirZ)) {
+            return false;
+        }
+        // For diagonals also check the two orthogonally-adjacent floor cells
+        if (dirX != 0 && dirZ != 0) {
+            return MovementHelper.canWalkOn(baritone.bsi, feet.x + dirX, floorY, feet.z)
+                    && MovementHelper.canWalkOn(baritone.bsi, feet.x, floorY, feet.z + dirZ);
+        }
+        return true;
+    }
+
 
     public HighwayBlockState isHighwayCorrect(BlockPos startPos, BlockPos startPosLiq, int distanceToCheck, boolean renderLiquidScan) {
         // startPos needs to be in center of highway

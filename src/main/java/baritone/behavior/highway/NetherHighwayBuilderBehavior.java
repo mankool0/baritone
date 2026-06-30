@@ -333,7 +333,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
         // Handle distance to keep from end of highway
         if (settings.highwayEndDistance.value != -1) {
-            ctx.minecraft().options.keyUp.setDown(highwayContext.getHighwayLengthFront() >= settings.highwayEndDistance.value && highwayContext.currentState().getState() == HighwayState.BuildingHighway);
+            ctx.minecraft().options.keyUp.setDown(highwayContext.getHighwayLengthFront() >= settings.highwayEndDistance.value
+                    && highwayContext.currentState().getState() == HighwayState.BuildingHighway
+                    && highwayContext.canWalkOnFloorAhead());
         }
 
         highwayContext.handle();
