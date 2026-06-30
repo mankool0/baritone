@@ -17,23 +17,17 @@
 
 package baritone.behavior.highway.state;
 
-import baritone.api.utils.BetterBlockPos;
 import baritone.api.utils.Rotation;
 import baritone.api.utils.RotationUtils;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
-import baritone.utils.accessor.IPlayerControllerMP;
-import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.core.BlockPos;
-import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
-import net.minecraft.network.protocol.game.ServerboundSwingPacket;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.AirBlock;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.Optional;
 
@@ -44,19 +38,9 @@ public class FarmingEnderChest extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        //if (timer < 1) {
-        //    return;
-        //}
-
-
-        //baritone.getInputOverrideHandler().clearAllKeys();
+        // If we've been stuck on this spot too long, clear it and re-prime the break target.
         if (context.timer() > 120) {
-            Optional<Rotation> eChestReachable = RotationUtils.reachable(context.playerContext(), context.placeLoc(), context.playerContext().playerController().getBlockReachDistance());
-            eChestReachable.ifPresent(rotation -> context.baritone().getLookBehavior().updateTarget(rotation, true));
-            
-            // Try to clear echest since we're stuck
             context.baritone().getBuilderProcess().clearArea(context.placeLoc(), context.placeLoc());
-            
             context.setTarget(context.placeLoc());
             context.resetTimer();
         }
@@ -68,64 +52,39 @@ public class FarmingEnderChest extends State {
             return;
         }
 
-
         Item origItem = context.playerContext().player().getOffhandItem().getItem();
         if ((context.getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) + context.playerContext().player().getOffhandItem().getCount()) <= context.settings().highwayEnderChestsToKeep.value) {
+            // Out of ender chests to farm, swap the offhand back and move on.
             context.baritone().getInputOverrideHandler().clearAllKeys();
-            context.setInstantMinePlace(true);
             context.setInstantMineActivated(false);
             context.transitionTo(HighwayState.FarmingEnderChestSwapBack);
             context.resetTimer();
             return;
-        }
-        else if (!(origItem instanceof BlockItem) || !(((BlockItem) origItem).getBlock().equals(Blocks.ENDER_CHEST))) {
+        } else if (!(origItem instanceof BlockItem) || !(((BlockItem) origItem).getBlock().equals(Blocks.ENDER_CHEST))) {
             context.transitionTo(HighwayState.FarmingEnderChestPrepEchest);
             context.resetTimer();
             return;
         }
 
-        // Force look at location
-        if (context.playerContext().world().getBlockState(context.placeLoc()).getBlock() instanceof AirBlock) {
-            Optional<Rotation> shulkerReachable = RotationUtils.reachable(context.playerContext(), context.placeLoc().below(), context.playerContext().playerController().getBlockReachDistance());
-            shulkerReachable.ifPresent(rotation -> context.baritone().getLookBehavior().updateTarget(rotation, true));
-        }
+        BlockState state = context.playerContext().world().getBlockState(context.placeLoc());
 
+        if (state.getBlock() instanceof AirBlock) {
+            Optional<Rotation> support = RotationUtils.reachable(context.playerContext(), context.placeLoc().below(), context.playerContext().playerController().getBlockReachDistance());
+            support.ifPresent(rotation -> context.baritone().getLookBehavior().updateTarget(rotation, true));
 
-        if (context.instantMinePlace()) {
-            double lastX = context.playerContext().getPlayerEntity().getXLast();
-            double lastY = context.playerContext().getPlayerEntity().getYLast();
-            double lastZ = context.playerContext().getPlayerEntity().getZLast();
-            final Vec3 pos = new Vec3(lastX + (context.playerContext().player().getX() - lastX) * context.playerContext().minecraft().getDeltaTracker().getGameTimeDeltaPartialTick(true),
-                    lastY + (context.playerContext().player().getY() - lastY) * context.playerContext().minecraft().getDeltaTracker().getGameTimeDeltaPartialTick(true),
-                    lastZ + (context.playerContext().player().getZ() - lastZ) * context.playerContext().minecraft().getDeltaTracker().getGameTimeDeltaPartialTick(true));
-            BlockPos originPos = new BetterBlockPos(pos.x, pos.y+0.5f, pos.z);
-            double l_Offset = pos.y - originPos.getY();
-            HighwayContext.PlaceResult l_Place = context.place(context.placeLoc(), 5.0f, false, l_Offset == -0.5f, InteractionHand.OFF_HAND);
-
-            if (l_Place != HighwayContext.PlaceResult.Placed)
-                return;
-            context.setInstantMinePlace(false);
-            context.resetTimer();
+            if (context.place(context.placeLoc(), 5.0f, false, false, InteractionHand.OFF_HAND) == HighwayContext.PlaceResult.Placed) {
+                context.resetTimer();
+            }
             return;
         }
-
 
         if (!context.instantMineActivated()) {
             context.transitionTo(HighwayState.FarmingEnderChestPrepPick);
             return;
         }
-        if (context.instantMineLastBlock() != null) {
-            if (HighwayContext.validPicksList.contains(context.playerContext().player().getItemInHand(InteractionHand.MAIN_HAND).getItem())) {
-                ((IPlayerControllerMP) context.playerContext().minecraft().gameMode).callStartPrediction((ClientLevel) context.playerContext().world(),
-                        seq -> new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, context.instantMineLastBlock(), context.instantMineDirection(), seq));
-                context.playerContext().player().connection.send(new ServerboundSwingPacket(InteractionHand.MAIN_HAND));
-            }
+
+        if (HighwayContext.validPicksList.contains(context.playerContext().player().getItemInHand(InteractionHand.MAIN_HAND).getItem())) {
+            context.instantMineTick(context.placeLoc());
         }
-
-        try {
-            context.playerContext().playerController().setDestroyDelay(0);
-        } catch (Exception ignored) {}
-
-        context.setInstantMinePlace(true);
     }
 }

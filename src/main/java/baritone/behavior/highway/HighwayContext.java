@@ -36,8 +36,6 @@ import net.minecraft.core.*;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
-import baritone.utils.accessor.IPlayerControllerMP;
-import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
@@ -66,6 +64,7 @@ import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
@@ -75,6 +74,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -208,16 +208,7 @@ public class HighwayContext {
         this.instantMineActivated = instantMineActivated;
     }
 
-    public boolean instantMinePlace() {
-        return instantMinePlace;
-    }
-
-    public void setInstantMinePlace(boolean instantMinePlace) {
-        this.instantMinePlace = instantMinePlace;
-    }
-
     private boolean instantMineActivated = false;
-    private boolean instantMinePacketCancel = false;
 
     public BlockPos instantMineLastBlock() {
         return instantMineLastBlock;
@@ -248,7 +239,6 @@ public class HighwayContext {
     }
 
     private Item instantMineOriginalOffhandItem;
-    private boolean instantMinePlace = true;
 
     public void setBoatLocation(BlockPos boatLocation) {
         this.boatLocation = boatLocation;
@@ -2042,14 +2032,36 @@ public class HighwayContext {
 
     public void setTarget(BlockPos pos) {
         if (playerContext.minecraft().gameMode == null) return;
-        instantMinePacketCancel = false;
-        ((IPlayerControllerMP) playerContext.minecraft().gameMode).callStartPrediction((ClientLevel) playerContext.world(),
-                seq -> new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, pos, Direction.DOWN, seq));
-        instantMinePacketCancel = true;
-        ((IPlayerControllerMP) playerContext.minecraft().gameMode).callStartPrediction((ClientLevel) playerContext.world(),
-                seq -> new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, pos, Direction.DOWN, seq));
-        instantMineDirection = Direction.DOWN;
+        Direction face = faceMineTarget(pos);
+        instantMineDirection = face;
         instantMineLastBlock = pos;
+        playerContext.player().connection.send(new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, pos, face));
+        playerContext.player().connection.send(new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, pos, face));
+    }
+
+    public void instantMineTick(BlockPos pos) {
+        if (playerContext.minecraft().gameMode == null) return;
+        Direction face = faceMineTarget(pos);
+        instantMineDirection = face;
+        instantMineLastBlock = pos;
+        playerContext.player().connection.send(new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, pos, face));
+        playerContext.player().connection.send(new ServerboundSwingPacket(InteractionHand.MAIN_HAND));
+        try {
+            playerContext.playerController().setDestroyDelay(0);
+        } catch (Exception ignored) {}
+    }
+
+    private Direction faceMineTarget(BlockPos pos) {
+        double reach = playerContext.playerController().getBlockReachDistance();
+        Optional<Rotation> rotation = RotationUtils.reachable(playerContext, pos, reach);
+        if (rotation.isPresent()) {
+            baritone.getLookBehavior().updateTarget(rotation.get(), true);
+            HitResult hit = RayTraceUtils.rayTraceTowards(playerContext.player(), rotation.get(), reach);
+            if (hit instanceof BlockHitResult blockHit && blockHit.getBlockPos().equals(pos)) {
+                return blockHit.getDirection();
+            }
+        }
+        return instantMineDirection != null ? instantMineDirection : Direction.UP;
     }
 
     public int timer() {
