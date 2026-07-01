@@ -579,23 +579,41 @@ public class HighwayContext {
             ghastsThreatening.add(currentMobTarget);
         }
 
+        net.minecraft.world.damagesource.DamageSource lastDamage = player.getLastDamageSource();
+        final Entity lastAttacker = lastDamage != null ? lastDamage.getEntity() : null;
+
+        double aggroRangeSq = settings.highwayMobAggroRange.value * settings.highwayMobAggroRange.value;
+        double magmaRangeSq = settings.highwayMagmaCubeAggroRange.value * settings.highwayMagmaCubeAggroRange.value;
+        double maxRangeSq = settings.highwayMobMaxAggroRange.value * settings.highwayMobMaxAggroRange.value;
+
         return playerContext.entitiesStream()
                 .filter(e -> e instanceof net.minecraft.world.entity.LivingEntity && e.isAlive())
                 .filter(e -> !(e instanceof net.minecraft.world.entity.player.Player))
-                .filter(e -> ((net.minecraft.world.entity.LivingEntity) e).getLastHurtMob() == player
-                        || ((e instanceof net.minecraft.world.entity.monster.Zoglin || e instanceof net.minecraft.world.entity.monster.hoglin.Hoglin) && e.distanceToSqr(player) <= 4.0 * 4.0)
-                        || (e instanceof net.minecraft.world.entity.monster.piglin.Piglin && !wearingGold && e.distanceToSqr(player) <= 16.0 * 16.0)
-                        || (e instanceof net.minecraft.world.entity.monster.piglin.PiglinBrute && e.distanceToSqr(player) <= 16.0 * 16.0)
+                .filter(e -> e == lastAttacker
+                        // isAggressive is the synced anger flag: set for piglins (even when we wear gold armor),
+                        // brutes, zombified piglins, skeletons/wither skeletons, zoglins and endermen
+                        || (e instanceof net.minecraft.world.entity.monster.Enemy && e instanceof net.minecraft.world.entity.Mob
+                            && ((net.minecraft.world.entity.Mob) e).isAggressive()
+                            && e.distanceToSqr(player) <= aggroRangeSq)
+                        // hoglins never set the aggressive flag and zoglins attack on sight; both charge from up to 16 blocks
+                        || ((e instanceof net.minecraft.world.entity.monster.Zoglin || e instanceof net.minecraft.world.entity.monster.hoglin.Hoglin) && e.distanceToSqr(player) <= aggroRangeSq)
+                        || (e instanceof net.minecraft.world.entity.monster.piglin.Piglin && !wearingGold
+                            && ((net.minecraft.world.entity.monster.piglin.Piglin) e).isAdult()
+                            && e.distanceToSqr(player) <= aggroRangeSq)
+                        || (e instanceof net.minecraft.world.entity.monster.piglin.PiglinBrute && e.distanceToSqr(player) <= aggroRangeSq)
                         || (e instanceof net.minecraft.world.entity.monster.MagmaCube
-                            && e.distanceToSqr(player) <= 8 * 8)
+                            && e.distanceToSqr(player) <= magmaRangeSq)
+                        // a lit blaze is in attack mode (blazes override isOnFire to their synced charged flag)
+                        || (e instanceof net.minecraft.world.entity.monster.Blaze && e.isOnFire() && e.distanceToSqr(player) <= aggroRangeSq)
                         || (e instanceof net.minecraft.world.entity.monster.EnderMan
-                            && (((net.minecraft.world.entity.monster.EnderMan) e).isCreepy()
-                                || ((net.minecraft.world.entity.Mob) e).getTarget() == player)
-                            && e.distanceToSqr(player) <= 16.0 * 16.0)
+                            && ((net.minecraft.world.entity.monster.EnderMan) e).isCreepy()
+                            && e.distanceToSqr(player) <= aggroRangeSq)
                         || ghastsThreatening.contains(e))
                 .filter(e -> !(e instanceof net.minecraft.world.entity.monster.Ghast) || ghastsThreatening.contains(e))
-                .filter(e -> e.distanceToSqr(player) <= 24.0 * 24.0 || e instanceof net.minecraft.world.entity.monster.Ghast)
-                .filter(e -> ((net.minecraft.world.entity.LivingEntity) e).getLastHurtMob() == player
+                .filter(e -> e.distanceToSqr(player) <= maxRangeSq || e instanceof net.minecraft.world.entity.monster.Ghast || e == lastAttacker)
+                // corridor only gates pre-emptive proximity targets; angry mobs and whatever hit us get engaged anywhere
+                .filter(e -> e == lastAttacker
+                        || (e instanceof net.minecraft.world.entity.Mob && ((net.minecraft.world.entity.Mob) e).isAggressive())
                         || ghastsThreatening.contains(e)
                         || isEntityInHighwayCorridor(e))
                 .min(java.util.Comparator.comparingDouble(e -> e.distanceToSqr(player)));

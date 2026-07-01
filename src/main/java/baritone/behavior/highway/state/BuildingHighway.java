@@ -40,6 +40,10 @@ public class BuildingHighway extends State {
 
     @Override
     public void handle(HighwayContext context) {
+        if (context.repeatCheck() && context.timer() <= 120) {
+            return;
+        }
+
         if (!context.baritone().getBuilderProcess().isActive()) {
             Helper.HELPER.logDirect("Restarting builder");
             context.transitionTo(HighwayState.Nothing);

@@ -327,7 +327,6 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         highwayContext.incrementTimers();
 
         if (highwayContext.autoTotem() || highwayContext.clearCursorItem() ||
-                (highwayContext.repeatCheck() && highwayContext.timer() <= 120) ||
                 highwayContext.stuckCheck() || highwayContext.healthCheck()) {
             return;
         }

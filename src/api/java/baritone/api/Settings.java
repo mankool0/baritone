@@ -1664,7 +1664,22 @@ public final class Settings {
     /**
      * Allow emergency gapple eating to interrupt MobCombat when health/food thresholds are met.
      */
-    public final Setting<Boolean> highwayEmergencyEatDuringCombat = new Setting<>(false);
+    public final Setting<Boolean> highwayEmergencyEatDuringCombat = new Setting<>(true);
+
+    /**
+     * Radius within which angered (isAggressive) or naturally hostile mobs are engaged during highway building
+     */
+    public final Setting<Double> highwayMobAggroRange = new Setting<>(16.0);
+
+    /**
+     * Radius within which magma cubes are engaged during highway building
+     */
+    public final Setting<Double> highwayMagmaCubeAggroRange = new Setting<>(8.0);
+
+    /**
+     * Overall cap on mob engagement distance. Ghasts and mobs that recently damaged the player are exempt.
+     */
+    public final Setting<Double> highwayMobMaxAggroRange = new Setting<>(24.0);
 
     /**
      * Disconnect from the server if lost some health
