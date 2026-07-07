@@ -21,6 +21,7 @@ import baritone.api.pathing.goals.GoalBlock;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
+import net.minecraft.core.BlockPos;
 
 public class GoingToPlaceLocEnderShulker extends State {
     public GoingToPlaceLocEnderShulker(HighwayState state) {
@@ -33,12 +34,14 @@ public class GoingToPlaceLocEnderShulker extends State {
             return; // Wait to get there
         }
 
-        if (context.playerContext().playerFeet().getX() == context.placeLoc().getX() && context.playerContext().playerFeet().getY() == context.placeLoc().getY() && context.playerContext().playerFeet().getZ() == (context.placeLoc().getZ() - 2)) {
+        BlockPos stand = context.placeLoc().offset(context.highwayDirection().getX() * -2, 0, context.highwayDirection().getZ() * -2);
+
+        if (context.playerContext().playerFeet().equals(stand)) {
             // We have arrived
             context.transitionTo(HighwayState.PlacingEnderShulkerSupport);
         } else {
             // Keep trying to get there
-            context.baritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(context.placeLoc().getX(), context.placeLoc().getY(), context.placeLoc().getZ() - 2));
+            context.baritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(stand));
         }
     }
 }
