@@ -40,6 +40,7 @@ import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
 import net.minecraft.network.protocol.game.ServerboundSwingPacket;
+import net.minecraft.tags.FluidTags;
 import net.minecraft.util.Mth;
 import net.minecraft.world.ContainerHelper;
 import net.minecraft.world.InteractionHand;
@@ -1386,7 +1387,7 @@ public class HighwayContext {
             return currentHighwayState;
         }
         // Check if we can place at this location
-        if (!canPlaceShulkerAt(shulkerPlaceLoc)) {
+        if (!canPlaceBlockAt(shulkerPlaceLoc)) {
             Helper.HELPER.logDirect("Cannot place shulker at " + shulkerPlaceLoc);
             return prevHighwayState;
         }
@@ -1410,7 +1411,7 @@ public class HighwayContext {
         }
 
         // Determine placement direction and target position
-        Direction placeSide = getShulkerPlaceSide(shulkerPlaceLoc);
+        Direction placeSide = getBestPlaceSide(shulkerPlaceLoc);
         if (placeSide == null) {
             Helper.HELPER.logDirect("No valid placement side found");
             return prevHighwayState;
@@ -1456,7 +1457,80 @@ public class HighwayContext {
         }
     }
 
-    private boolean canPlaceShulkerAt(BlockPos pos) {
+    public boolean placeBlockAgainstNeighbor(BlockPos placeLoc, int itemSlot) {
+        if (!canPlaceBlockAt(placeLoc)) {
+            return false;
+        }
+
+        Direction placeSide = getBestPlaceSide(placeLoc);
+        if (placeSide == null) {
+            return false;
+        }
+
+        BlockPos neighbor = placeLoc.relative(placeSide);
+        Vec3 hitPos = Vec3.atCenterOf(placeLoc).add(
+                placeSide.getStepX() * 0.5,
+                placeSide.getStepY() * 0.5,
+                placeSide.getStepZ() * 0.5
+        );
+        BlockHitResult blockHitResult = new BlockHitResult(hitPos, placeSide.getOpposite(), neighbor, false);
+
+        Rotation targetRotation = RotationUtils.calcRotationFromVec3d(
+                RayTraceUtils.inferSneakingEyePosition(playerContext.player()),
+                hitPos,
+                playerContext.playerRotations()
+        );
+        baritone.getLookBehavior().updateTarget(targetRotation, true);
+        playerContext.player().getInventory().selected = itemSlot;
+
+        InteractionResult result = playerContext.playerController().processRightClickBlock(
+                playerContext.player(),
+                playerContext.world(),
+                InteractionHand.MAIN_HAND,
+                blockHitResult
+        );
+        return result.consumesAction();
+    }
+
+    public boolean isLootEnderChestSpotSafe(BlockPos placeLoc) {
+        BlockPos[] column = {placeLoc, placeLoc.above(), placeLoc.below()};
+        for (BlockPos p : column) {
+            if (isLavaAt(p)) {
+                return false;
+            }
+        }
+        for (BlockPos p : new BlockPos[]{placeLoc, placeLoc.above()}) {
+            for (Direction d : Direction.Plane.HORIZONTAL) {
+                if (isLavaAt(p.relative(d))) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private boolean isLavaAt(BlockPos pos) {
+        return playerContext.world().getBlockState(pos).getFluidState().is(FluidTags.LAVA);
+    }
+
+    public BlockPos findSafeLootEnderChestSpot(int minBack, int maxBack) {
+        Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
+        Vec3 origin = new Vec3(eChestEmptyShulkOriginVector.x, eChestEmptyShulkOriginVector.y, eChestEmptyShulkOriginVector.z);
+        for (int back = minBack; back <= maxBack; back++) {
+            Vec3 curPos = new Vec3(
+                    playerContext.playerFeet().getX() + (back * -highwayDirection.getX()),
+                    playerContext.playerFeet().getY(),
+                    playerContext.playerFeet().getZ() + (back * -highwayDirection.getZ())
+            );
+            BetterBlockPos candidate = getClosestPoint(origin, direction, curPos, LocationType.SideStorage);
+            if (isLootEnderChestSpotSafe(candidate)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private boolean canPlaceBlockAt(BlockPos pos) {
         // Check if position is valid
         if (!playerContext.world().isInWorldBounds(pos)) return false;
 
@@ -1466,7 +1540,7 @@ public class HighwayContext {
         return currentState.canBeReplaced() || currentState.getBlock() instanceof SnowLayerBlock;
     }
 
-    private Direction getShulkerPlaceSide(BlockPos pos) {
+    private Direction getBestPlaceSide(BlockPos pos) {
         Vec3 eyePos = playerContext.player().getEyePosition();
         Vec3 blockCenter = Vec3.atCenterOf(pos);
         Vec3 lookVec = blockCenter.subtract(eyePos);

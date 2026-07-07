@@ -17,57 +17,119 @@
 
 package baritone.behavior.highway.state;
 
-import baritone.api.schematic.FillSchematic;
-import baritone.api.schematic.WhiteBlackSchematic;
+import baritone.api.utils.Helper;
 import baritone.api.utils.Rotation;
 import baritone.api.utils.RotationUtils;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.AirBlock;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.EnderChestBlock;
+import net.minecraft.world.level.block.state.BlockState;
 
-import java.util.Arrays;
 import java.util.Optional;
 
 public class PlacingLootEnderChest extends State {
+    private boolean placed = false;
+
     public PlacingLootEnderChest(HighwayState state) {
         super(state);
     }
 
     @Override
     public void handle(HighwayContext context) {
+        // Give the placement a few ticks to register before we start polling for the block
+        if (placed && context.timer() < 30) {
+            return;
+        }
+
+        // Wait for an in-progress clear to finish
         if (!context.baritone().getBuilderProcess().isPaused() && context.baritone().getBuilderProcess().isActive()) {
-            return; // Wait for build to complete
+            context.resetTimer();
+            return;
+        }
+
+        BlockState placeState = context.playerContext().world().getBlockState(context.placeLoc());
+        BlockState aboveState = context.playerContext().world().getBlockState(context.placeLoc().above());
+
+        // Chest is down with headroom to open it - we're done here
+        if (placeState.getBlock() instanceof EnderChestBlock && aboveState.getBlock() instanceof AirBlock) {
+            context.baritone().getInputOverrideHandler().clearAllKeys();
+            context.transitionTo(HighwayState.OpeningLootEnderChest);
+            placed = false;
+            context.resetTimer();
+            return;
+        }
+
+        // We attempted a placement - wait for the server to confirm the chest appears
+        if (placed) {
+            if (context.timer() < 100) {
+                return;
+            }
+            Helper.HELPER.logDirect("Ender chest placement timed out, relocating.");
+            placed = false;
+            context.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);
+            context.resetTimer();
+            return;
+        }
+
+        // Lava has crept into the spot (or was never safe) - don't break netherrack into it, pick a new spot
+        if (!context.isLootEnderChestSpotSafe(context.placeLoc())) {
+            Helper.HELPER.logDirect("Lava near ender chest spot, relocating.");
+            context.baritone().getPathingBehavior().cancelEverything();
+            context.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);
+            context.resetTimer();
+            return;
         }
 
         context.baritone().getPathingBehavior().cancelEverything();
         context.settings().buildRepeat.value = new Vec3i(0, 0, 0);
 
-        if (context.playerContext().world().getBlockState(context.placeLoc()).getBlock() instanceof EnderChestBlock && context.playerContext().world().getBlockState(context.placeLoc().above()).getBlock() instanceof AirBlock) {
-            context.transitionTo(HighwayState.OpeningLootEnderChest);
+        // Clear the chest position and the block above it before placing
+        if (!(placeState.getBlock() instanceof AirBlock) || !(aboveState.getBlock() instanceof AirBlock)) {
+            context.baritone().getBuilderProcess().clearArea(context.placeLoc(), context.placeLoc().above());
             context.resetTimer();
             return;
         }
-        if (context.playerContext().world().getBlockState(context.placeLoc()).getBlock() instanceof AirBlock && context.playerContext().world().getBlockState(context.placeLoc().above()).getBlock() instanceof AirBlock) {
-            Optional<Rotation> eChestLocReachable = RotationUtils.reachable(context.playerContext(), context.placeLoc().below(), context.playerContext().playerController().getBlockReachDistance());
-            if (eChestLocReachable.isEmpty()) {
-                context.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);
-                context.resetTimer();
-                return;
-            }
-            context.baritone().getLookBehavior().updateTarget(eChestLocReachable.get(), true);
-            context.baritone().getBuilderProcess().build("enderChest", new FillSchematic(1, 1, 1, Blocks.ENDER_CHEST.defaultBlockState()), context.placeLoc());
-        }
-        else {
-            WhiteBlackSchematic tempSchem = new WhiteBlackSchematic(1, 2, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
-            context.baritone().getBuilderProcess().build("eChestPrep", tempSchem, context.placeLoc());
-        }
-        //return;
 
-        //currentState = State.OpeningLootEnderChest;
-        context.resetTimer();
+        // Make sure we can still reach the support before committing
+        Optional<Rotation> reach = RotationUtils.reachable(context.playerContext(), context.placeLoc().below(), context.playerContext().playerController().getBlockReachDistance());
+        if (reach.isEmpty()) {
+            context.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);
+            context.resetTimer();
+            return;
+        }
+
+        // Placement isn't getting accepted after a while (not the block being in the way, we already cleared it) - relocate
+        if (context.timer() > 200) {
+            Helper.HELPER.logDirect("Ender chest placement not progressing, relocating.");
+            context.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);
+            context.resetTimer();
+            return;
+        }
+
+        int slot = context.putItemHotbar(Item.getId(Blocks.ENDER_CHEST.asItem()));
+        if (slot == -1) {
+            Helper.HELPER.logDirect("No ender chests to place, relocating.");
+            context.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);
+            context.resetTimer();
+            return;
+        }
+        if (slot >= 9) {
+            // Couldn't get the chest onto the hotbar yet, wait for the inventory move
+            context.resetTimer();
+            return;
+        }
+
+        // Convert to a plain BlockPos to avoid BetterBlockPos leaking into Minecraft's block entity maps
+        BlockPos placeLoc = new BlockPos(context.placeLoc().getX(), context.placeLoc().getY(), context.placeLoc().getZ());
+        if (context.placeBlockAgainstNeighbor(placeLoc, slot)) {
+            placed = true;
+            context.resetTimer();
+        }
     }
 }

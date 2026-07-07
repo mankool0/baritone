@@ -21,10 +21,9 @@ import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
-import baritone.behavior.highway.enums.LocationType;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.phys.Vec3;
 
 public class LootEnderChestPlaceLocPrep extends State {
     public LootEnderChestPlaceLocPrep(HighwayState state) {
@@ -43,11 +42,16 @@ public class LootEnderChestPlaceLocPrep extends State {
         context.setRepeatCheck(false);
         context.resetTimer();
 
-        Vec3 curPos = new Vec3(context.playerContext().playerFeet().getX() + (7 * -context.highwayDirection().getX()), context.playerContext().playerFeet().getY(), context.playerContext().playerFeet().getZ() + (7 * -context.highwayDirection().getZ())); // Go back a bit just in case
-        Vec3 direction = new Vec3(context.highwayDirection().getX(), context.highwayDirection().getY(), context.highwayDirection().getZ());
+        // Start ~7 blocks back and scan further back for a spot without lava behind it
+        BlockPos safeLoc = context.findSafeLootEnderChestSpot(7, 25);
+        if (safeLoc == null) {
+            Helper.HELPER.logDirect("Couldn't find a lava-free ender chest spot, pausing.");
+            context.baritone().getPathingBehavior().cancelEverything();
+            context.setPaused(true);
+            return;
+        }
 
-        context.setPlaceLoc(context.getClosestPoint(new Vec3(context.eChestEmptyShulkOriginVector().x, context.eChestEmptyShulkOriginVector().y, context.eChestEmptyShulkOriginVector().z), direction, curPos, LocationType.SideStorage));
-
+        context.setPlaceLoc(safeLoc);
         context.transitionTo(HighwayState.GoingToLootEnderChestPlaceLoc);
     }
 }
