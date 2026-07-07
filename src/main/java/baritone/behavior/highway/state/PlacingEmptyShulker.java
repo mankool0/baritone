@@ -43,6 +43,11 @@ public class PlacingEmptyShulker extends PlacingShulkerBase {
     }
 
     @Override
+    protected HighwayState getRelocateState() {
+        return HighwayState.EmptyShulkerPlaceLocPrep;
+    }
+
+    @Override
     public void handle(HighwayContext context) {
         handleWithShulkerType(context, ShulkerType.Empty);
 

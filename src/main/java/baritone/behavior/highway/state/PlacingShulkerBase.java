@@ -42,6 +42,15 @@ public abstract class PlacingShulkerBase extends State {
     protected abstract HighwayState getNextState();
     protected abstract ShulkerType getShulkerType();
 
+    /**
+     * State to jump to when lava is found at the placement spot, so a fresh (safe) spot can be picked.
+     * Returns {@code null} to disable lava relocation (default), keeping the original behavior for shulker
+     * types that aren't placed out on the side-storage line.
+     */
+    protected HighwayState getRelocateState() {
+        return null;
+    }
+
     @Override
     public void handle(HighwayContext context) {
         handleWithShulkerType(context, getShulkerType());
@@ -80,6 +89,17 @@ public abstract class PlacingShulkerBase extends State {
                 placed = false;
                 return;
             }
+        }
+
+        // Lava has crept into the spot (or was never safe) - don't break netherrack into it, pick a new spot
+        HighwayState relocateState = getRelocateState();
+        if (relocateState != null && !context.isSideStorageSpotSafe(context.placeLoc())) {
+            Helper.HELPER.logDirect("Lava near shulker spot, relocating.");
+            context.baritone().getPathingBehavior().cancelEverything();
+            context.transitionTo(relocateState);
+            placed = false;
+            context.resetTimer();
+            return;
         }
 
         // Shulker box spot isn't air or shulker, lets fix that

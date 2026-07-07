@@ -78,7 +78,7 @@ public class PlacingLootEnderChest extends State {
         }
 
         // Lava has crept into the spot (or was never safe) - don't break netherrack into it, pick a new spot
-        if (!context.isLootEnderChestSpotSafe(context.placeLoc())) {
+        if (!context.isSideStorageSpotSafe(context.placeLoc())) {
             Helper.HELPER.logDirect("Lava near ender chest spot, relocating.");
             context.baritone().getPathingBehavior().cancelEverything();
             context.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);

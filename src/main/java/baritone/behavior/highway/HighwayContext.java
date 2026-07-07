@@ -1492,7 +1492,7 @@ public class HighwayContext {
         return result.consumesAction();
     }
 
-    public boolean isLootEnderChestSpotSafe(BlockPos placeLoc) {
+    public boolean isSideStorageSpotSafe(BlockPos placeLoc) {
         BlockPos[] column = {placeLoc, placeLoc.above(), placeLoc.below()};
         for (BlockPos p : column) {
             if (isLavaAt(p)) {
@@ -1513,7 +1513,7 @@ public class HighwayContext {
         return playerContext.world().getBlockState(pos).getFluidState().is(FluidTags.LAVA);
     }
 
-    public BlockPos findSafeLootEnderChestSpot(int minBack, int maxBack) {
+    public BlockPos findSafeSideStorageSpot(int minBack, int maxBack) {
         Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
         Vec3 origin = new Vec3(eChestEmptyShulkOriginVector.x, eChestEmptyShulkOriginVector.y, eChestEmptyShulkOriginVector.z);
         for (int back = minBack; back <= maxBack; back++) {
@@ -1523,7 +1523,7 @@ public class HighwayContext {
                     playerContext.playerFeet().getZ() + (back * -highwayDirection.getZ())
             );
             BetterBlockPos candidate = getClosestPoint(origin, direction, curPos, LocationType.SideStorage);
-            if (isLootEnderChestSpotSafe(candidate)) {
+            if (isSideStorageSpotSafe(candidate)) {
                 return candidate;
             }
         }
