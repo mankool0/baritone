@@ -182,6 +182,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
                 if (diag && highwayRail) {
                     sideRailSupport = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.LAVA.defaultBlockState(), Blocks.FIRE.defaultBlockState()), Blocks.NETHERRACK.defaultBlockState(), false, true, true);
+                    sideRailSupport.setThrowawayFallback(Blocks.OBSIDIAN.defaultBlockState());
                     fullSchem.put(sideRailSupport, 0, 1, 0);
                     fullSchem.put(sideRailSupport, 0, 1, highwayWidth + 1);
                 }
@@ -244,6 +245,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
                 if (diag && highwayRail) {
                     sideRailSupport = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.LAVA.defaultBlockState(), Blocks.FIRE.defaultBlockState()), Blocks.NETHERRACK.defaultBlockState(), false, true, true);
+                    sideRailSupport.setThrowawayFallback(Blocks.OBSIDIAN.defaultBlockState());
                     fullSchem.put(sideRailSupport, 0, 1, 0);
                     fullSchem.put(sideRailSupport, highwayWidth + 1, 1, 0);
                 }

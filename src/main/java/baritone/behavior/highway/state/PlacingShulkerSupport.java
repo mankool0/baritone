@@ -53,7 +53,9 @@ public class PlacingShulkerSupport extends State {
         context.settings().buildRepeat.value = new Vec3i(0, 0, 0);
         if (context.playerContext().world().getBlockState(context.placeLoc().below()).getBlock() instanceof AirBlock) {
             supportBlockNeeded = true;
-            context.baritone().getBuilderProcess().build("supportBlock", new WhiteBlackSchematic(1, 1, 1, context.blackListBlocks(), Blocks.NETHERRACK.defaultBlockState(), false, false, true), context.placeLoc().below());
+            WhiteBlackSchematic supportSchem = new WhiteBlackSchematic(1, 1, 1, context.blackListBlocks(), Blocks.NETHERRACK.defaultBlockState(), false, false, true);
+            supportSchem.setThrowawayFallback(Blocks.OBSIDIAN.defaultBlockState());
+            context.baritone().getBuilderProcess().build("supportBlock", supportSchem, context.placeLoc().below());
             return;
         }
 

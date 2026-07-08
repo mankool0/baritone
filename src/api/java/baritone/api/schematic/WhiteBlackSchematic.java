@@ -35,6 +35,7 @@ public class WhiteBlackSchematic extends AbstractSchematic {
     private final boolean WhiteList;
     private final boolean ValidIfUnder; // If true and current in desired state is under blocks then it's a valid state
     private final boolean UseThrowaway;
+    private BlockState ThrowawayFallback; // Only used when UseThrowaway is set and the inventory has no throwaway blocks at all
 
     public WhiteBlackSchematic(int x, int y, int z, List<BlockState> bomList, BlockState defaultState, boolean whiteList, boolean validIfUnder, boolean useThrowaway) {
         super(x, y, z);
@@ -52,18 +53,37 @@ public class WhiteBlackSchematic extends AbstractSchematic {
         return ValidIfUnder;
     }
 
+    public void setThrowawayFallback(BlockState state) {
+        ThrowawayFallback = state;
+    }
+
     private BlockState getDefaultOrThrowaway() {
         if (UseThrowaway) {
+            List<ItemStack> inventory = BaritoneAPI.getProvider().getPrimaryBaritone().getPlayerContext().player().getInventory().items;
             for (Item item : BaritoneAPI.getSettings().acceptableThrowawayItems.value) {
                 for (int i = 0; i < 9; i++) {
-                    ItemStack stack = BaritoneAPI.getProvider().getPrimaryBaritone().getPlayerContext().player().getInventory().items.get(i);
+                    ItemStack stack = inventory.get(i);
                     if (item instanceof BlockItem && stack.getItem() instanceof BlockItem && ((BlockItem) item).getBlock() == ((BlockItem) stack.getItem()).getBlock()) {
                         return ((BlockItem) item).getBlock().defaultBlockState();
                     }
                 }
             }
+            // None in the hotbar; the fallback only kicks in once the whole inventory is out of
+            // throwaway blocks, and stops being used as soon as we pick some up again
+            if (ThrowawayFallback != null && !hasThrowawayInInventory(inventory)) {
+                return ThrowawayFallback;
+            }
         }
         return DefaultBom.getAnyBlockState();
+    }
+
+    private static boolean hasThrowawayInInventory(List<ItemStack> inventory) {
+        for (ItemStack stack : inventory) {
+            if (BaritoneAPI.getSettings().acceptableThrowawayItems.value.contains(stack.getItem())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
