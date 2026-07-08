@@ -210,6 +210,10 @@ public final class PathRenderer implements IRenderer {
         BlockStateInterface bsi = new BlockStateInterface(BaritoneAPI.getProvider().getPrimaryBaritone().getPlayerContext()); // TODO this assumes same dimension between primary baritone and render view? is this safe?
 
         positions.forEach(pos -> {
+            // Prevent BetterBlockPos from leaking into Minecraft's block entity map
+            if (pos instanceof BetterBlockPos) {
+                pos = new BlockPos(pos.getX(), pos.getY(), pos.getZ());
+            }
             BlockState state = bsi.get0(pos);
             VoxelShape shape = state.getShape(player.level(), pos);
             AABB toDraw = shape.isEmpty() ? Shapes.block().bounds() : shape.bounds();

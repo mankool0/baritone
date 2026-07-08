@@ -371,13 +371,14 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             if (MovementHelper.isReplaceable(placeAgainstPos.x, placeAgainstPos.y, placeAgainstPos.z, placeAgainstState, bsi)) {
                 continue;
             }
-            if (!toPlace.canSurvive(ctx.world(), new BetterBlockPos(x, y, z))) {
+            if (!toPlace.canSurvive(ctx.world(), new BlockPos(x, y, z))) {
                 continue;
             }
             if (!placementPlausible(new BetterBlockPos(x, y, z), toPlace)) {
                 continue;
             }
-            VoxelShape shape = placeAgainstState.getShape(ctx.world(), placeAgainstPos);
+            // Prevent BetterBlockPos from leaking into Minecraft's block entity map
+            VoxelShape shape = placeAgainstState.getShape(ctx.world(), new BlockPos(placeAgainstPos.x, placeAgainstPos.y, placeAgainstPos.z));
             if (shape.isEmpty()) {
                 continue;
             }
