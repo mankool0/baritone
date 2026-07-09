@@ -71,6 +71,7 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 import java.awt.*;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Optional;
@@ -914,14 +915,35 @@ public class HighwayContext {
         playerContext.playerController().windowClick(0, 45, 0, ClickType.PICKUP, playerContext.player());
     }
 
+    // States where the offhand is deliberately occupied (echest farming keeps an ender chest there
+    // between PrepEchest and SwapBack) - a totem swap would fight the state's own offhand swaps and
+    // loop forever. Every state NOT listed here keeps a totem equipped, so new states default to protected.
+    private static final EnumSet<HighwayState> OFFHAND_OCCUPIED_STATES = EnumSet.of(
+            HighwayState.FarmingEnderChestPrepEchest,
+            HighwayState.FarmingEnderChestPrepPick,
+            HighwayState.FarmingEnderChest,
+            HighwayState.FarmingEnderChestSwapBack,
+            HighwayState.InQueue
+    );
+
     public boolean autoTotem() {
-        if (settings.highwayAutoTotem.value && currentState.getState() == HighwayState.BuildingHighway && playerContext.player().getOffhandItem().getItem() != Items.TOTEM_OF_UNDYING) {
-            int totemSlot = getItemSlot(Item.getId(Items.TOTEM_OF_UNDYING));
-            if (totemSlot != -1) {
-                swapOffhand(totemSlot);
-                timer = 0;
-                return true;
-            }
+        if (!settings.highwayAutoTotem.value
+                || playerContext.player().getOffhandItem().getItem() == Items.TOTEM_OF_UNDYING
+                || OFFHAND_OCCUPIED_STATES.contains(currentState.getState())) {
+            return false;
+        }
+        // swapOffhand clicks the player inventory: defer while a container is open, the cursor is
+        // carrying a stack (clearCursorItem handles that), or an item (gapple) is mid-use.
+        if (playerContext.player().hasContainerOpen()
+                || !playerContext.player().containerMenu.getCarried().isEmpty()
+                || playerContext.player().isUsingItem()) {
+            return false;
+        }
+        int totemSlot = getItemSlot(Item.getId(Items.TOTEM_OF_UNDYING));
+        if (totemSlot != -1) {
+            swapOffhand(totemSlot);
+            timer = 0;
+            return true;
         }
         return false;
     }

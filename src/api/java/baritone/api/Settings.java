@@ -1697,7 +1697,8 @@ public final class Settings {
     public final Setting<Boolean> highwayAllowMixedShulks = new Setting<>(true);
 
     /**
-     * If true will try to place a totem into offhand during digging/paving
+     * If true will keep a totem in the offhand in every highway state except those that need the
+     * offhand for something else (e.g. ender chest farming)
      */
     public final Setting<Boolean> highwayAutoTotem = new Setting<>(false);
 
