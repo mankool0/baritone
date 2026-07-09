@@ -53,6 +53,27 @@ public class FarmingEnderChest extends State {
             return;
         }
 
+        BlockState state = context.playerContext().world().getBlockState(context.placeLoc());
+
+        if (!(state.getBlock() instanceof AirBlock)) {
+            if (!HighwayContext.validPicksList.contains(context.playerContext().player().getItemInHand(InteractionHand.MAIN_HAND).getItem())) {
+                return;
+            }
+
+            // First chest of the session so break it the legitimate way (real client mining) so
+            // the server's destroy target is set
+            if (!context.instantMineCalibrated()) {
+                if (context.calibrationBreakTick(context.placeLoc())) {
+                    context.setInstantMineCalibrated(true);
+                }
+                return;
+            }
+
+            context.instantMineTick(context.placeLoc());
+            return;
+        }
+
+        // placeLoc is clear: decide whether to keep farming or stop.
         Item origItem = context.playerContext().player().getOffhandItem().getItem();
         if ((context.getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) + context.playerContext().player().getOffhandItem().getCount()) <= context.settings().highwayEnderChestsToKeep.value) {
             // Out of ender chests to farm, swap the offhand back and move on.
@@ -67,34 +88,12 @@ public class FarmingEnderChest extends State {
             return;
         }
 
-        BlockState state = context.playerContext().world().getBlockState(context.placeLoc());
-
         // Nothing placed yet: face the support block and drop a fresh ender chest from the offhand.
-        if (state.getBlock() instanceof AirBlock) {
-            Optional<Rotation> support = RotationUtils.reachable(context.playerContext(), context.placeLoc().below(), context.playerContext().playerController().getBlockReachDistance());
-            support.ifPresent(rotation -> context.baritone().getLookBehavior().updateTarget(rotation, true));
+        Optional<Rotation> support = RotationUtils.reachable(context.playerContext(), context.placeLoc().below(), context.playerContext().playerController().getBlockReachDistance());
+        support.ifPresent(rotation -> context.baritone().getLookBehavior().updateTarget(rotation, true));
 
-            if (context.place(context.placeLoc(), 5.0f, false, false, InteractionHand.OFF_HAND) == HighwayContext.PlaceResult.Placed) {
-                context.resetTimer();
-            }
-            return;
+        if (context.place(context.placeLoc(), 5.0f, false, false, InteractionHand.OFF_HAND) == HighwayContext.PlaceResult.Placed) {
+            context.resetTimer();
         }
-
-        if (!HighwayContext.validPicksList.contains(context.playerContext().player().getItemInHand(InteractionHand.MAIN_HAND).getItem())) {
-            return;
-        }
-
-        // First chest of the session so break it the legitimate way (real client mining) so
-        // the server's destroy target is set
-        if (!context.instantMineCalibrated()) {
-            if (context.calibrationBreakTick(context.placeLoc())) {
-                context.setInstantMineCalibrated(true);
-            }
-            return;
-        }
-
-        // Calibrated: instant-rebreak the chest like Meteor's InstantRebreak - face it and fire
-        // STOP_DESTROY_BLOCK + swing every tick.
-        context.instantMineTick(context.placeLoc());
     }
 }
