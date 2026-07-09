@@ -66,6 +66,9 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
     @Override
     public void updateTarget(Rotation rotation, boolean blockInteract) {
         this.target = new Target(rotation, Target.Mode.resolve(ctx, blockInteract));
+
+    public Optional<Rotation> getServerRotation() {
+        return Optional.ofNullable(this.serverRotation);
     }
 
     @Override
