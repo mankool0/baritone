@@ -36,16 +36,17 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
 import java.util.Optional;
 
-import static baritone.pathing.movement.Movement.HORIZONTALS_BUT_ALSO_DOWN_____SO_EVERY_DIRECTION_EXCEPT_UP;
-
 public class LiquidRemovalPathing extends State {
+    private static final int AIM_WAIT_MAX = 10;
+    private static final int AIM_RECOVERY_TICKS = 30;
+
+    private int aimWaitTicks = 0;
+
     public LiquidRemovalPathing(HighwayState state) {
         super(state);
     }
@@ -84,7 +85,8 @@ public class LiquidRemovalPathing extends State {
                 context.getIssueType(firstSourceBlock.east()) != HighwayBlockState.Blocks &&
                 context.getIssueType(firstSourceBlock.south()) != HighwayBlockState.Blocks &&
                 context.getIssueType(firstSourceBlock.west()) != HighwayBlockState.Blocks &&
-                context.getIssueType(firstSourceBlock.below()) != HighwayBlockState.Blocks) {
+                context.getIssueType(firstSourceBlock.below()) != HighwayBlockState.Blocks &&
+                context.getIssueType(firstSourceBlock.above()) != HighwayBlockState.Blocks) {
             BlockPos playerPos = context.playerContext().playerFeet();
 
             // Calculate direction from player to lava for non-blocking checks
@@ -104,30 +106,26 @@ public class LiquidRemovalPathing extends State {
                 return;
             }
         }
-        Optional<Rotation> lavaReachable = Optional.empty();
-
-        // From MovementHelper.attemptToPlaceABlock
-        for (Direction side : Direction.values()) {//(int i = 0; i < 5; i++) {
-            BlockPos against1 = context.sourceBlocks().getFirst().offset(side.getUnitVec3i()); //sourceBlocks.get(0).offset(HORIZONTALS_BUT_ALSO_DOWN_____SO_EVERY_DIRECTION_EXCEPT_UP[i]);
-            if (MovementHelper.canPlaceAgainst(context.playerContext(), against1)) {
-                double faceX = (context.sourceBlocks().getFirst().getX() + against1.getX() + 1.0D) * 0.5D;
-                double faceY = (context.sourceBlocks().getFirst().getY() + against1.getY() + 0.5D) * 0.5D;
-                double faceZ = (context.sourceBlocks().getFirst().getZ() + against1.getZ() + 1.0D) * 0.5D;
-                Rotation place = RotationUtils.calcRotationFromVec3d(context.playerContext().playerHead(), new Vec3(faceX, faceY, faceZ), context.playerContext().playerRotations());
-                HitResult res = RayTraceUtils.rayTraceTowards(context.playerContext().player(), place, context.playerContext().playerController().getBlockReachDistance(), false);
-                if (res.getType() == HitResult.Type.BLOCK && ((BlockHitResult) res).getBlockPos().equals(against1) && ((BlockHitResult) res).getBlockPos().relative(((BlockHitResult) res).getDirection()).equals(context.sourceBlocks().getFirst())) {
-                    lavaReachable = Optional.ofNullable(place);
-                    if (supportNeeded) {
-                        context.setLiquidPathingCanMine(false);
-                    }
-                    break;
-                }
+        // Pause the placement attempts after too many ticks of waiting for a requested rotation
+        // to produce a click (e.g. only a sliver of the face is visible past an edge), so the
+        // movement logic below can reposition the player for a better view of the face.
+        if (aimWaitTicks > AIM_WAIT_MAX) {
+            aimWaitTicks++;
+            if (aimWaitTicks > AIM_WAIT_MAX + AIM_RECOVERY_TICKS) {
+                aimWaitTicks = 0;
             }
         }
+        boolean aimPaused = aimWaitTicks > AIM_WAIT_MAX;
 
-        if (lavaReachable.isPresent()) {
-            context.baritone().getLookBehavior().updateTarget(lavaReachable.get(), true);
+        boolean fillReachable = context.placeAimable(context.sourceBlocks().getFirst(), (float) context.playerContext().playerController().getBlockReachDistance());
+        if (fillReachable && supportNeeded) {
+            context.setLiquidPathingCanMine(false);
+        }
+
+        if (fillReachable && !aimPaused) {
             context.baritone().getInputOverrideHandler().clearAllKeys();
+            // keep crouching through the aim/place ticks
+            context.baritone().getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
 
             int netherRackSlot = context.putItemHotbar(Item.getId(Blocks.NETHERRACK.asItem()));
             if (netherRackSlot == -1) {
@@ -141,8 +139,12 @@ public class LiquidRemovalPathing extends State {
             if (Item.getId(stack.getItem()) == Item.getId(Blocks.NETHERRACK.asItem())) {
                 context.playerContext().player().getInventory().selected = netherRackSlot;
             }
-            context.baritone().getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
-            //currentState = State.LiquidRemovalPrep;
+            if (context.place(context.sourceBlocks().getFirst(), (float) context.playerContext().playerController().getBlockReachDistance(), true, false, InteractionHand.MAIN_HAND) == HighwayContext.PlaceResult.Placed) {
+                aimWaitTicks = 0;
+                context.resetTimer();
+            } else {
+                aimWaitTicks++;
+            }
         } else {
             int pickSlot = context.putPickaxeHotbar();
             if (pickSlot == -1) {
@@ -184,76 +186,47 @@ public class LiquidRemovalPathing extends State {
             }
 
 
+            if (!aimPaused) {
+                for (BlockPos placeAt : placeAtList) {
+                    if (!context.placeAimable(placeAt, (float) context.playerContext().playerController().getBlockReachDistance())) {
+                        continue;
+                    }
 
+                    context.baritone().getInputOverrideHandler().clearAllKeys();
+                    // placing floor below feet means there are holes around us, stay
+                    // crouched for the whole aim/place sequence
+                    context.baritone().getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
+                    int netherRackSlot = context.putItemHotbar(Item.getId(Blocks.NETHERRACK.asItem()));
+                    if (netherRackSlot == -1) {
+                        Helper.HELPER.logDirect("Error getting netherrack slot");
+                        context.transitionTo(HighwayState.Nothing);
+                        return;
+                    }
+                    if (Item.getId(context.playerContext().player().getInventory().items.get(netherRackSlot).getItem()) == Item.getId(Blocks.NETHERRACK.asItem())) {
+                        context.playerContext().player().getInventory().selected = netherRackSlot;
+                    }
 
-            //ArrayList<Rotation> belowFeetReachableList = new ArrayList<>();
-            //Optional<Rotation> belowFeetReachable = Optional.empty();
-            for (BlockPos placeAt : placeAtList) {
-                // From MovementHelper.attemptToPlaceABlock
-                for (int i = 0; i < 5; i++) {
-                    BlockPos against1 = placeAt.relative(HORIZONTALS_BUT_ALSO_DOWN_____SO_EVERY_DIRECTION_EXCEPT_UP[i]);
-                    if (MovementHelper.canPlaceAgainst(context.playerContext(), against1)) {
-                        double faceX = (placeAt.getX() + against1.getX() + 1.0D) * 0.5D;
-                        double faceY = (placeAt.getY() + against1.getY() + 0.5D) * 0.5D;
-                        double faceZ = (placeAt.getZ() + against1.getZ() + 1.0D) * 0.5D;
-                        Rotation place = RotationUtils.calcRotationFromVec3d(context.playerContext().playerHead(), new Vec3(faceX, faceY, faceZ), context.playerContext().playerRotations());
-                        HitResult res = RayTraceUtils.rayTraceTowards(context.playerContext().player(), place, context.playerContext().playerController().getBlockReachDistance(), false);
-                        
-                        if (res.getType() == HitResult.Type.BLOCK &&
-                            ((BlockHitResult) res).getBlockPos().equals(against1) && 
-                            ((BlockHitResult) res).getBlockPos().relative(((BlockHitResult) res).getDirection()).equals(placeAt)) {
-                            
-                            context.baritone().getLookBehavior().updateTarget(place, true);
-                            context.baritone().getInputOverrideHandler().clearAllKeys();
-                            int netherRackSlot = context.putItemHotbar(Item.getId(Blocks.NETHERRACK.asItem()));
-                            if (netherRackSlot == -1) {
-                                Helper.HELPER.logDirect("Error getting netherrack slot");
-                                context.transitionTo(HighwayState.Nothing);
-                                return;
-                            }
-                            if (Item.getId(context.playerContext().player().getInventory().items.get(netherRackSlot).getItem()) == Item.getId(Blocks.NETHERRACK.asItem())) {
-                                context.playerContext().player().getInventory().selected = netherRackSlot;
-                            }
-
-                            double lastX = context.playerContext().getPlayerEntity().getXLast();
-                            double lastY = context.playerContext().getPlayerEntity().getYLast();
-                            double lastZ = context.playerContext().getPlayerEntity().getZLast();
-                            final Vec3 pos = new Vec3(lastX + (context.playerContext().player().getX() - lastX) * context.playerContext().minecraft().getDeltaTracker().getGameTimeDeltaPartialTick(true),
-                                    lastY + (context.playerContext().player().getY() - lastY) * context.playerContext().minecraft().getDeltaTracker().getGameTimeDeltaPartialTick(true),
-                                    lastZ + (context.playerContext().player().getZ() - lastZ) * context.playerContext().minecraft().getDeltaTracker().getGameTimeDeltaPartialTick(true));
-                            BetterBlockPos originPos = new BetterBlockPos(pos.x, pos.y+0.5f, pos.z);
-                            double l_Offset = pos.y - originPos.getY();
-                            if (context.place(placeAt, (float) context.playerContext().playerController().getBlockReachDistance(), true, l_Offset == -0.5f, InteractionHand.MAIN_HAND) == HighwayContext.PlaceResult.Placed) {
-                                context.resetTimer();
-                                context.baritone().getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
-                                return;
-                            }
-                        }
+                    double lastX = context.playerContext().getPlayerEntity().getXLast();
+                    double lastY = context.playerContext().getPlayerEntity().getYLast();
+                    double lastZ = context.playerContext().getPlayerEntity().getZLast();
+                    final Vec3 pos = new Vec3(lastX + (context.playerContext().player().getX() - lastX) * context.playerContext().minecraft().getDeltaTracker().getGameTimeDeltaPartialTick(true),
+                            lastY + (context.playerContext().player().getY() - lastY) * context.playerContext().minecraft().getDeltaTracker().getGameTimeDeltaPartialTick(true),
+                            lastZ + (context.playerContext().player().getZ() - lastZ) * context.playerContext().minecraft().getDeltaTracker().getGameTimeDeltaPartialTick(true));
+                    BetterBlockPos originPos = new BetterBlockPos(pos.x, pos.y+0.5f, pos.z);
+                    double l_Offset = pos.y - originPos.getY();
+                    HighwayContext.PlaceResult placeResult = context.place(placeAt, (float) context.playerContext().playerController().getBlockReachDistance(), true, l_Offset == -0.5f, InteractionHand.MAIN_HAND);
+                    if (placeResult == HighwayContext.PlaceResult.Placed) {
+                        aimWaitTicks = 0;
+                        context.resetTimer();
+                        return;
+                    }
+                    if (placeResult == HighwayContext.PlaceResult.Aiming) {
+                        aimWaitTicks++;
+                        // rotation was sent this tick, click on a following tick
+                        return;
                     }
                 }
             }
-
-                    /*
-                    if (!belowFeetReachableList.isEmpty()) {
-                        baritone.getLookBehavior().updateTarget(belowFeetReachableList.get(0), true);
-                        baritone.getInputOverrideHandler().clearAllKeys();
-
-                        int netherRackSlot = putItemHotbar(Item.getId(Blocks.NETHERRACK.asItem()));
-                        if (netherRackSlot == -1) {
-                            Helper.HELPER.logDirect("Error getting netherrack slot");
-                            currentState = State.Nothing;
-                            return;
-                        }
-                        if (Item.getId(ctx.player().getInventory().items.get(netherRackSlot).getItem()) == Item.getId(Blocks.NETHERRACK.asItem())) {
-                            ctx.player().getInventory().selected = netherRackSlot;
-                        }
-
-                        //TODO: Change this placing to use place method
-                        //Helper.HELPER.logDirect("Placing " + placeAt);
-                        baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
-                        baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
-                        return;
-                    }*/
 
             ArrayList<Rotation> possibleIssueReachableList = new ArrayList<>();
             for (BlockPos curIssuePos : possibleIssuePosList) {

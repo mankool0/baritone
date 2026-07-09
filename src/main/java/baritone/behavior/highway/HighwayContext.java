@@ -36,12 +36,10 @@ import net.minecraft.core.*;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
 import net.minecraft.network.protocol.game.ServerboundSwingPacket;
 import net.minecraft.tags.FluidTags;
-import net.minecraft.util.Mth;
 import net.minecraft.world.ContainerHelper;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -2114,7 +2112,8 @@ public class HighwayContext {
         NotReplaceable,
         Neighbors,
         CantPlace,
-        Placed
+        Placed,
+        Aiming
     }
 
     public PlaceResult place(BlockPos pos, float p_Distance, boolean p_Rotate, boolean p_UseSlabRule, InteractionHand hand) {
@@ -2147,7 +2146,27 @@ public class HighwayContext {
                 return PlaceResult.CantPlace;
         }
 
-        final Vec3 eyesPos = new Vec3(playerContext.player().getX(), playerContext.player().getEyeY(), playerContext.player().getZ());
+        if (p_Rotate) {
+            Optional<Rotation> serverRotation = baritone.getLookBehavior().getServerRotation();
+            if (serverRotation.isPresent()) {
+                HitResult res = RayTraceUtils.rayTraceTowards(playerContext.player(), serverRotation.get(), p_Distance);
+                if (res != null && res.getType() == HitResult.Type.BLOCK) {
+                    BlockHitResult hit = (BlockHitResult) res;
+                    if (hit.getBlockPos().relative(hit.getDirection()).equals(pos) && clickFace(hit, packetSwing, hand) == PlaceResult.Placed) {
+                        return PlaceResult.Placed;
+                    }
+                }
+            }
+
+            Rotation aimRotation = findPlaceRotation(pos, p_Distance);
+            if (aimRotation != null) {
+                baritone.getLookBehavior().updateTarget(aimRotation, true);
+                return PlaceResult.Aiming;
+            }
+            return PlaceResult.CantPlace;
+        }
+
+        final Vec3 eyesPos = getEyesPos();
 
         for (final Direction side : Direction.values())
         {
@@ -2164,35 +2183,80 @@ public class HighwayContext {
                 final Vec3 hitVec = new Vec3(neighbor.getX(), neighbor.getY(), neighbor.getZ()).add(0.5, 0.5, 0.5).add(new Vec3(side2.getStepX(), side2.getStepY(), side2.getStepZ()).scale(0.5));
                 if (eyesPos.distanceTo(hitVec) <= p_Distance)
                 {
-                    final Block neighborBlock = playerContext.world().getBlockState(neighbor).getBlock();
-
                     BlockHitResult blockHitResult = new BlockHitResult(hitVec, side2, neighbor, false);
-                    final boolean activated = playerContext.world().getBlockState(neighbor).useWithoutItem(playerContext.world(), playerContext.player(), blockHitResult) == InteractionResult.SUCCESS;
-
-                    if (blackList.contains(neighborBlock) || shulkerBlockList.contains(neighborBlock) || activated)
-                    {
-                        playerContext.player().connection.send(new ServerboundPlayerCommandPacket(playerContext.player(), ServerboundPlayerCommandPacket.Action.PRESS_SHIFT_KEY));
-                    }
-                    if (p_Rotate)
-                    {
-                        faceVectorPacketInstant(hitVec);
-                    }
-                    InteractionResult l_Result2 = playerContext.playerController().processRightClickBlock(playerContext.player(), playerContext.world(), hand, blockHitResult);
-
-                    if (l_Result2 == InteractionResult.SUCCESS)
-                    {
-                        if (packetSwing)
-                            playerContext.player().connection.send(new ServerboundSwingPacket(hand));
-                        else
-                            playerContext.player().swing(hand);
-                        if (activated)
-                        {
-                            playerContext.player().connection.send(new ServerboundPlayerCommandPacket(playerContext.player(), ServerboundPlayerCommandPacket.Action.RELEASE_SHIFT_KEY));
-                        }
+                    if (clickFace(blockHitResult, packetSwing, hand) == PlaceResult.Placed)
                         return PlaceResult.Placed;
-                    }
                 }
             }
+        }
+        return PlaceResult.CantPlace;
+    }
+
+    public boolean placeAimable(BlockPos pos, float p_Distance) {
+        return findPlaceRotation(pos, p_Distance) != null;
+    }
+
+    private Rotation findPlaceRotation(BlockPos pos, float p_Distance) {
+        final Vec3 eyesPos = getEyesPos();
+
+        for (final Direction side : Direction.values())
+        {
+            final BlockPos neighbor = pos.offset(side.getUnitVec3i());
+            final Direction side2 = side.getOpposite();
+
+            if (!playerContext.world().getBlockState(neighbor).getFluidState().isEmpty())
+                continue;
+
+            VoxelShape collisionShape = playerContext.world().getBlockState(neighbor).getCollisionShape(playerContext.world(), neighbor);
+            if (collisionShape == Shapes.empty())
+                continue;
+
+            final Vec3 faceCenter = new Vec3(neighbor.getX(), neighbor.getY(), neighbor.getZ()).add(0.5, 0.5, 0.5).add(new Vec3(side2.getStepX(), side2.getStepY(), side2.getStepZ()).scale(0.5));
+            final Vec3 u = side2.getAxis() == Direction.Axis.X ? new Vec3(0, 1, 0) : new Vec3(1, 0, 0);
+            final Vec3 v = side2.getAxis() == Direction.Axis.Z ? new Vec3(0, 1, 0) : new Vec3(0, 0, 1);
+            final Vec3[] facePoints = {
+                    faceCenter,
+                    faceCenter.add(u.scale(0.3)), faceCenter.add(u.scale(-0.3)),
+                    faceCenter.add(v.scale(0.3)), faceCenter.add(v.scale(-0.3))
+            };
+
+            for (final Vec3 point : facePoints) {
+                if (eyesPos.distanceTo(point) > p_Distance)
+                    continue;
+
+                Rotation rotation = RotationUtils.calcRotationFromVec3d(playerContext.playerHead(), point, playerContext.playerRotations());
+                HitResult res = RayTraceUtils.rayTraceTowards(playerContext.player(), rotation, p_Distance);
+                if (res != null && res.getType() == HitResult.Type.BLOCK
+                        && ((BlockHitResult) res).getBlockPos().relative(((BlockHitResult) res).getDirection()).equals(pos)) {
+                    return rotation;
+                }
+            }
+        }
+        return null;
+    }
+
+    private PlaceResult clickFace(BlockHitResult blockHitResult, boolean packetSwing, InteractionHand hand) {
+        final BlockPos neighbor = blockHitResult.getBlockPos();
+        final Block neighborBlock = playerContext.world().getBlockState(neighbor).getBlock();
+        final boolean activated = playerContext.world().getBlockState(neighbor).useWithoutItem(playerContext.world(), playerContext.player(), blockHitResult) == InteractionResult.SUCCESS;
+
+        if (blackList.contains(neighborBlock) || shulkerBlockList.contains(neighborBlock) || activated)
+        {
+            playerContext.player().connection.send(new ServerboundPlayerCommandPacket(playerContext.player(), ServerboundPlayerCommandPacket.Action.PRESS_SHIFT_KEY));
+        }
+        InteractionResult l_Result2 = playerContext.playerController().processRightClickBlock(playerContext.player(), playerContext.world(), hand, blockHitResult);
+
+        if (l_Result2 == InteractionResult.SUCCESS)
+        {
+            if (packetSwing)
+                playerContext.player().connection.send(new ServerboundSwingPacket(hand));
+            else
+                playerContext.player().swing(hand);
+            if (activated)
+            {
+                playerContext.player().connection.send(new ServerboundPlayerCommandPacket(playerContext.player(), ServerboundPlayerCommandPacket.Action.RELEASE_SHIFT_KEY));
+            }
+            return PlaceResult.Placed;
         }
         return PlaceResult.CantPlace;
     }
@@ -2249,31 +2313,8 @@ public class HighwayContext {
         return ValidResult.AlreadyBlockThere;
     }
 
-    private float[] getLegitRotations(Vec3 vec) {
-        Vec3 eyesPos = getEyesPos();
-
-        double diffX = vec.x - eyesPos.x;
-        double diffY = vec.y - eyesPos.y;
-        double diffZ = vec.z - eyesPos.z;
-
-        double diffXZ = Math.sqrt(diffX * diffX + diffZ * diffZ);
-
-        float yaw = (float) Math.toDegrees(Math.atan2(diffZ, diffX)) - 90F;
-        float pitch = (float) -Math.toDegrees(Math.atan2(diffY, diffXZ));
-
-        return new float[]
-                { playerContext.player().getYRot() + Mth.wrapDegrees(yaw - playerContext.player().getYRot()),
-                        playerContext.player().getXRot() + Mth.wrapDegrees(pitch - playerContext.player().getXRot()) };
-    }
-
     private Vec3 getEyesPos() {
         return new Vec3(playerContext.player().getX(), playerContext.player().getEyeY(), playerContext.player().getZ());
-    }
-
-    private void faceVectorPacketInstant(Vec3 vec) {
-        float[] rotations = getLegitRotations(vec);
-
-        playerContext.player().connection.send(new ServerboundMovePlayerPacket.Rot(rotations[0], rotations[1], playerContext.player().onGround(), false));
     }
 
     public boolean calibrationBreakTick(BlockPos pos) {

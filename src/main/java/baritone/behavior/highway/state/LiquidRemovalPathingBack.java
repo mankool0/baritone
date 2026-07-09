@@ -44,9 +44,12 @@ public class LiquidRemovalPathingBack extends State {
         }
 
         BlockState tempState = context.playerContext().world().getBlockState(context.playerContext().playerFeet());
-        if (tempState.getBlock() instanceof LiquidBlock && fireRest.getDuration() < context.settings().highwayFireRestMinDuration.value) {
+        if (tempState.getBlock() instanceof LiquidBlock && (fireRest == null || fireRest.getDuration() < context.settings().highwayFireRestMinDuration.value)) {
             Helper.HELPER.logDirect("We are stuck in lava, going directly to gapple eating.");
+            context.baritone().getInputOverrideHandler().clearAllKeys();
+            context.baritone().getPathingBehavior().cancelEverything();
             context.transitionTo(HighwayState.LiquidRemovalGapplePrep);
+            return;
         }
         if (context.baritone().getCustomGoalProcess().isActive()) {
             return; // Wait to get there
