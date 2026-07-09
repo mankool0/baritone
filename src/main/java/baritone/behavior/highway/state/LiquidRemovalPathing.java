@@ -79,6 +79,16 @@ public class LiquidRemovalPathing extends State {
             return;
         }
 
+        if (context.placeLoc() != null && context.playerContext().player().onGround()
+                && context.playerContext().playerFeet().getY() < context.placeLoc().getY()
+                && context.getIssueType(context.playerContext().playerFeet()) != HighwayBlockState.Liquids) {
+            Helper.HELPER.logDirect("Fell below the liquid clearing level, pathing back");
+            context.baritone().getInputOverrideHandler().clearAllKeys();
+            context.transitionTo(HighwayState.LiquidRemovalPathingBack);
+            context.resetTimer();
+            return;
+        }
+
         boolean supportNeeded = false;
         BlockPos firstSourceBlock = context.sourceBlocks().getFirst();
         if (context.getIssueType(firstSourceBlock.north()) != HighwayBlockState.Blocks &&
