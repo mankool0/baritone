@@ -65,9 +65,11 @@ public enum HighwayState {
     PlacingLootEnderChestSupport,
     PlacingLootEnderChest,
     OpeningLootEnderChest,
+    DepositingLootEnderChestDepletedShulkers,
     LootingLootEnderChestPicks,
     LootingLootEnderChestEnderChests,
     LootingLootEnderChestGapples,
+    DepositingLootEnderChestDepletedShulkersFinal,
 
     EchestMiningPlaceLocPrep,
     GoingToPlaceLocEnderShulker,

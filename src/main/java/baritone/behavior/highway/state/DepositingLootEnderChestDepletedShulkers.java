@@ -22,11 +22,9 @@ import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
 import net.minecraft.client.gui.screens.inventory.ContainerScreen;
-import net.minecraft.world.item.Item;
-import net.minecraft.world.item.Items;
 
-public class LootingLootEnderChestGapples extends State {
-    public LootingLootEnderChestGapples(HighwayState state) {
+public class DepositingLootEnderChestDepletedShulkers extends State {
+    public DepositingLootEnderChestDepletedShulkers(HighwayState state) {
         super(state);
     }
 
@@ -41,18 +39,19 @@ public class LootingLootEnderChestGapples extends State {
             return;
         }
 
-        if (context.getItemCountInventory(Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) < context.settings().highwayGapplesToHave.value) {
-            int gapplesLooted = context.lootGappleChestSlot();
-            if (gapplesLooted > 0) {
-                Helper.HELPER.logDirect("Looted " + gapplesLooted + " gapples");
-            } else {
-                Helper.HELPER.logDirect("No more gapples. Rolling with what we have.");
-                context.transitionTo(HighwayState.DepositingLootEnderChestDepletedShulkersFinal);
-            }
-
+        if (context.depositDepletedShulkerChestSlot() > 0) {
+            Helper.HELPER.logDirect("Deposited depleted pickaxe shulker, lowering startShulkerCount from " + context.startShulkerCount() + " to " + (context.startShulkerCount() - 1));
+            context.setStartShulkerCount(context.startShulkerCount() - 1);
             context.resetTimer();
+            return;
+        }
+
+        // Nothing left to deposit, or the ender chest is full
+        if (state == HighwayState.DepositingLootEnderChestDepletedShulkersFinal) {
+            context.transitionTo(HighwayState.Nothing);
+            context.playerContext().player().closeContainer();
         } else {
-            context.transitionTo(HighwayState.DepositingLootEnderChestDepletedShulkersFinal);
+            context.transitionTo(HighwayState.LootingLootEnderChestPicks);
         }
     }
 }

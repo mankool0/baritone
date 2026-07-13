@@ -46,7 +46,7 @@ public class OpeningLootEnderChest extends State {
             context.baritone().getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
         } else {
             context.baritone().getInputOverrideHandler().clearAllKeys();
-            context.transitionTo(HighwayState.LootingLootEnderChestPicks);
+            context.transitionTo(HighwayState.DepositingLootEnderChestDepletedShulkers);
         }
 
         context.resetTimer();

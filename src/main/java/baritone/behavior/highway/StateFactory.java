@@ -139,6 +139,9 @@ public class StateFactory {
             case OpeningLootEnderChest -> {
                 return new OpeningLootEnderChest(highwayState);
             }
+            case DepositingLootEnderChestDepletedShulkers, DepositingLootEnderChestDepletedShulkersFinal -> {
+                return new DepositingLootEnderChestDepletedShulkers(highwayState);
+            }
             case LootingLootEnderChestPicks -> {
                 return new LootingLootEnderChestPicks(highwayState);
             }

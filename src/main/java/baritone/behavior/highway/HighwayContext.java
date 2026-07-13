@@ -1249,6 +1249,27 @@ public class HighwayContext {
         return pickaxeCount;
     }
 
+    private boolean isDepletedPickShulker(ItemStack shulker) {
+        if (!settings.itemSaver.value) {
+            return false;
+        }
+        NonNullList<ItemStack> contents = getShulkerContents(shulker);
+
+        int depletedCount = 0;
+        for (ItemStack curStack : contents) {
+            if (curStack.getItem() instanceof AirItem) {
+                continue;
+            }
+            if (curStack.getItem() instanceof PickaxeItem && (curStack.getDamageValue() + settings.itemSaverThreshold.value) >= curStack.getMaxDamage() && curStack.getMaxDamage() > 1) {
+                depletedCount++;
+            } else {
+                return false; // Found a usable pick or some other item
+            }
+        }
+
+        return depletedCount > 0;
+    }
+
     private int isEnderChestShulker(ItemStack shulker) {
         NonNullList<ItemStack> contents = getShulkerContents(shulker);
 
@@ -1345,6 +1366,13 @@ public class HighwayContext {
 
                     case Empty: {
                         if (isEmptyShulker(stack)) {
+                            return i;
+                        }
+                        break;
+                    }
+
+                    case DepletedPickaxe: {
+                        if (isDepletedPickShulker(stack)) {
                             return i;
                         }
                         break;
@@ -1748,7 +1776,12 @@ public class HighwayContext {
                         }
                 }
                 if (doLoot) {
-                    if (getItemSlot(Item.getId(Items.AIR)) == -1) {
+                    int depletedSlot = getShulkerSlot(ShulkerType.DepletedPickaxe);
+                    if (depletedSlot != -1) {
+                        playerContext.playerController().windowClick(curContainer.containerId, i, 0, ClickType.PICKUP, playerContext.player());
+                        playerContext.playerController().windowClick(curContainer.containerId, depletedSlot < 9 ? depletedSlot + 54 : depletedSlot + 18, 0, ClickType.PICKUP, playerContext.player()); // Have to convert slot id to single chest slot id
+                        playerContext.playerController().windowClick(curContainer.containerId, i, 0, ClickType.PICKUP, playerContext.player()); // Put depleted shulker in looted slot
+                    } else if (getItemSlot(Item.getId(Items.AIR)) == -1) {
                         // For some reason we have no air slots so we have to throw out some throwaway items
                         int throwawaySlot = getAcceptableThrowawaySlot();
                         if (throwawaySlot == 8) {
@@ -1766,6 +1799,23 @@ public class HighwayContext {
                     }
                     return 1;
                 }
+            }
+        }
+
+        return 0;
+    }
+
+    public int depositDepletedShulkerChestSlot() {
+        int depletedSlot = getShulkerSlot(ShulkerType.DepletedPickaxe);
+        if (depletedSlot == -1) {
+            return 0;
+        }
+
+        AbstractContainerMenu curContainer = playerContext.player().containerMenu;
+        for (int i = 0; i < 27; i++) {
+            if (curContainer.getSlot(i).getItem().isEmpty()) {
+                playerContext.playerController().windowClick(curContainer.containerId, depletedSlot < 9 ? depletedSlot + 54 : depletedSlot + 18, 0, ClickType.QUICK_MOVE, playerContext.player()); // Have to convert slot id to single chest slot id
+                return 1;
             }
         }
 
@@ -1807,6 +1857,12 @@ public class HighwayContext {
 
                     case EnderChest:
                         if (isEnderChestShulker(stack) > 0) {
+                            count++;
+                        }
+                        break;
+
+                    case DepletedPickaxe:
+                        if (isDepletedPickShulker(stack)) {
                             count++;
                         }
                         break;

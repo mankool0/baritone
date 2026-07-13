@@ -22,6 +22,7 @@ public enum ShulkerType {
     NonSilkPickaxe, // For paving
     //SilkPickaxe,
     AnyPickaxe, // For digging
+    DepletedPickaxe,
     Gapple,
     Empty,
     Any
