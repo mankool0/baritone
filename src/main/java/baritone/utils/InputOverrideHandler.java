@@ -46,6 +46,11 @@ public final class InputOverrideHandler extends Behavior implements IInputOverri
     private final BlockBreakHelper blockBreakHelper;
     private final BlockPlaceHelper blockPlaceHelper;
 
+    /**
+     * Set by {@link #suppressClicksThisTick()}, cleared when the click helpers next run.
+     */
+    private boolean suppressClicks;
+
     public InputOverrideHandler(Baritone baritone) {
         super(baritone);
         this.blockBreakHelper = new BlockBreakHelper(baritone.getPlayerContext());
@@ -75,6 +80,14 @@ public final class InputOverrideHandler extends Behavior implements IInputOverri
     }
 
     /**
+     * Drops any click forced this tick instead of executing it. For callers that have already
+     * interacted with the world this tick, invalidating whatever the crosshair ray now hits.
+     */
+    public final void suppressClicksThisTick() {
+        this.suppressClicks = true;
+    }
+
+    /**
      * Clears the override state for all keys
      */
     @Override
@@ -90,8 +103,12 @@ public final class InputOverrideHandler extends Behavior implements IInputOverri
         if (isInputForcedDown(Input.CLICK_LEFT)) {
             setInputForceState(Input.CLICK_RIGHT, false);
         }
-        blockBreakHelper.tick(isInputForcedDown(Input.CLICK_LEFT));
-        blockPlaceHelper.tick(isInputForcedDown(Input.CLICK_RIGHT));
+        // A suppressed click was decided against a world that has since changed, so the crosshair
+        // ray it would execute against no longer means what the caller thought it did.
+        final boolean suppressed = this.suppressClicks;
+        this.suppressClicks = false;
+        blockBreakHelper.tick(isInputForcedDown(Input.CLICK_LEFT) && !suppressed);
+        blockPlaceHelper.tick(isInputForcedDown(Input.CLICK_RIGHT) && !suppressed);
 
         if (inControl()) {
             if (ctx.player().input.getClass() != PlayerMovementInput.class) {

@@ -1814,6 +1814,49 @@ public final class Settings {
     public final Setting<Integer> multiBreak = new Setting<>(-1);
 
     /**
+     * Printer mode for the builder: instead of stopping and staring at every block, place and
+     * instant-break blocks while pathing, whenever the rotation already sent to the server
+     * raytraces onto the block to click.
+     */
+    public final Setting<Boolean> printer = new Setting<>(true);
+
+    /**
+     * Ticks between printer placements. 1 = up to one placement every tick.
+     */
+    public final Setting<Integer> printerPlaceDelay = new Setting<>(1);
+
+    /**
+     * Maximum printer placements per tick. Values above 1 are more likely to be flagged by an
+     * anticheat, as are {@link #multiBreak} values above 1, which cap the printer's breaks.
+     */
+    public final Setting<Integer> printerMultiPlace = new Setting<>(1);
+
+    /**
+     * Ticks between printer instant-breaks. 1 = up to one break every tick.
+     */
+    public final Setting<Integer> printerBreakDelay = new Setting<>(1);
+
+    /**
+     * Ticks the printer holds off after a hotbar swap. The swap is applied optimistically
+     * client-side and only a rejection comes back, so acting inside this window can use the item
+     * the server still thinks is selected. Raise it on a high ping connection.
+     */
+    public final Setting<Integer> printerInventorySettleTicks = new Setting<>(5);
+
+    /**
+     * Allow the printer to instant-break incorrect blocks while pathing without stopping.
+     * Only blocks that break in a single tick with a hotbar tool are handled this way; everything
+     * else falls back to the normal stationary breaking.
+     */
+    public final Setting<Boolean> printerBreak = new Setting<>(true);
+
+    /**
+     * How many repetitions of the highway cross-section the builder works on at once when the
+     * printer is enabled.
+     */
+    public final Setting<Integer> highwayPrinterLookahead = new Setting<>(4);
+
+    /**
      * A map of lowercase setting field names to their respective setting
      */
     public final Map<String, Setting<?>> byLowerName;

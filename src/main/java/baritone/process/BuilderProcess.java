@@ -29,9 +29,11 @@ import baritone.api.schematic.*;
 import baritone.api.schematic.format.ISchematicFormat;
 import baritone.api.utils.*;
 import baritone.api.utils.input.Input;
+import baritone.behavior.LookBehavior;
 import baritone.pathing.movement.CalculationContext;
 import baritone.pathing.movement.Movement;
 import baritone.pathing.movement.MovementHelper;
+import baritone.pathing.path.PathExecutor;
 import baritone.utils.BaritoneProcessHelper;
 import baritone.utils.BlockStateInterface;
 import baritone.utils.PathingCommandContext;
@@ -42,11 +44,15 @@ import baritone.utils.schematic.litematica.LitematicaHelper;
 import baritone.utils.schematic.schematica.SchematicaHelper;
 import com.google.common.collect.ImmutableSet;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import net.minecraft.client.gui.screens.ChatScreen;
+import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Vec3i;
+import net.minecraft.util.Mth;
 import net.minecraft.util.Tuple;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.monster.EnderMan;
 import net.minecraft.world.entity.vehicle.Boat;
@@ -55,10 +61,23 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.block.AirBlock;
+import net.minecraft.world.level.block.AnvilBlock;
+import net.minecraft.world.level.block.BedBlock;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.ButtonBlock;
+import net.minecraft.world.level.block.CakeBlock;
+import net.minecraft.world.level.block.ComparatorBlock;
+import net.minecraft.world.level.block.CraftingTableBlock;
+import net.minecraft.world.level.block.DoorBlock;
+import net.minecraft.world.level.block.EntityBlock;
+import net.minecraft.world.level.block.FenceGateBlock;
 import net.minecraft.world.level.block.HorizontalDirectionalBlock;
+import net.minecraft.world.level.block.LeverBlock;
 import net.minecraft.world.level.block.LiquidBlock;
+import net.minecraft.world.level.block.NoteBlock;
 import net.minecraft.world.level.block.PipeBlock;
+import net.minecraft.world.level.block.RepeaterBlock;
 import net.minecraft.world.level.block.RotatedPillarBlock;
 import net.minecraft.world.level.block.StairBlock;
 import net.minecraft.world.level.block.TrapDoorBlock;
@@ -75,6 +94,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -103,6 +123,41 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private List<BlockState> approxPlaceable;
     private List<BetterBlockPos> toBreakEntity = new ArrayList<>();
     public int stopAtHeight = 0;
+
+    /**
+     * How far the aimed-at yaw may sit from the movement yaw before a pitch-only aim is hopeless.
+     */
+    private static final float PRINTER_MAX_PITCH_ONLY_YAW_DIFF = 25;
+
+    /**
+     * Consecutive placement ticks before the printer stops placing to let breaking catch up.
+     */
+    private static final int PRINTER_MAX_BREAK_STARVATION = 20;
+
+    /**
+     * How many nodes ahead on the current path the printer treats as off limits for breaking.
+     */
+    private static final int PRINTER_PATH_PROTECT_LENGTH = 24;
+
+    private int printerPlaceCooldown;
+    private int printerBreakCooldown;
+    private int printerBreakGrace;
+    private boolean legitBreakSessionLastTick;
+    private int printerBreakStarvation;
+    /**
+     * Snapshot of {@link LookBehavior#isMovementInputForced()} taken before the forced inputs are
+     * cleared for this tick, so it lines up with the impulses the last physics step actually used.
+     */
+    private boolean printerMovementForced;
+
+    private record PrinterAction(boolean placed, boolean broke) {
+
+        private static final PrinterAction NONE = new PrinterAction(false, false);
+
+        boolean acted() {
+            return placed || broke;
+        }
+    }
 
     public BuilderProcess(Baritone baritone) {
         super(baritone);
@@ -453,6 +508,346 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         }
     }
 
+    /**
+     * Printer: act on whatever the rotation that was last sent to the server can already justify
+     * (fire), then steer the next rotation toward the closest outstanding work (aim). Firing
+     * raytraces the server-visible rotation, so the clicked block and cursor come from a hit the
+     * server can reproduce.
+     *
+     * @return the actions performed this tick, if any
+     */
+    private PrinterAction printerTick(BuilderCalculationContext bcc, boolean mayPlace) {
+        if (printerPlaceCooldown > 0) {
+            printerPlaceCooldown--;
+        }
+        if (printerBreakCooldown > 0) {
+            printerBreakCooldown--;
+        }
+        if (printerBreakGrace > 0) {
+            printerBreakGrace--;
+        }
+        PrinterAction action = printerFire(bcc, mayPlace);
+        printerAim(bcc, printerMovementForced, mayPlace);
+        return action;
+    }
+
+    private PrinterAction printerFire(BuilderCalculationContext bcc, boolean mayPlace) {
+        if (printerInventoryUnsettled()) {
+            return PrinterAction.NONE; // hotbar contents not confirmed by the server yet
+        }
+        Rotation rot = baritone.getLookBehavior().getServerRotation().orElse(null);
+        if (rot == null) {
+            return PrinterAction.NONE;
+        }
+        double reach = ctx.playerController().getBlockReachDistance();
+        Vec3 predictedEye = ctx.player().getEyePosition(1.0f).add(ctx.player().getDeltaMovement());
+        int breaksLeft = printerBreakCooldown <= 0 ? Math.max(1, Baritone.settings().multiBreak.value) : 0;
+        int placesLeft = mayPlace && printerPlaceCooldown <= 0 ? Math.max(1, Baritone.settings().printerMultiPlace.value) : 0;
+        boolean placed = false;
+        boolean broke = false;
+        int placeSlot = -1;
+        while (breaksLeft > 0 || placesLeft > 0) {
+            HitResult hit = RayTraceUtils.rayTraceTowards(ctx.player(), rot, reach, false);
+            if (!(hit instanceof BlockHitResult bhr) || hit.getType() != HitResult.Type.BLOCK) {
+                break;
+            }
+            BetterBlockPos clicked = BetterBlockPos.from(bhr.getBlockPos());
+            // the server re-checks the rotation against the movement packet that follows the
+            // action, so the ray has to still reach the cell from where we'll be next tick
+            if (!printerRayIntersectsCell(predictedEye, rot, clicked, reach)) {
+                break;
+            }
+            if (breaksLeft > 0 && !placed && printerTryBreak(bcc, bhr, clicked)) {
+                // the block is gone client-side, the same ray now continues to whatever is behind it
+                broke = true;
+                breaksLeft--;
+                continue;
+            }
+            int usedSlot = placesLeft > 0 ? printerTryPlace(bcc, bhr, clicked, rot, placed ? placeSlot : -1) : -1;
+            if (usedSlot >= 0) {
+                placed = true;
+                placeSlot = usedSlot;
+                placesLeft--;
+                continue;
+            }
+            break;
+        }
+        if (broke) {
+            printerBreakCooldown = Math.max(1, Baritone.settings().printerBreakDelay.value);
+        }
+        if (placed) {
+            printerPlaceCooldown = Math.max(1, Baritone.settings().printerPlaceDelay.value);
+        }
+        if (placed || broke) {
+            baritone.getInputOverrideHandler().suppressClicksThisTick();
+        }
+        return new PrinterAction(placed, broke);
+    }
+
+    private boolean printerTryBreak(BuilderCalculationContext bcc, BlockHitResult bhr, BetterBlockPos clicked) {
+        if (!printerBreakAllowed() || !incorrectPositions.contains(clicked) || !printerBreakSafe(clicked)) {
+            return false;
+        }
+        BlockState state = bcc.bsi.get0(clicked);
+        if (state.getBlock() instanceof AirBlock || state.getBlock() instanceof LiquidBlock
+                || MovementHelper.isReplaceable(clicked.x, clicked.y, clicked.z, state, bcc.bsi)) {
+            return false;
+        }
+        BlockState desired = bcc.getSchematic(clicked.x, clicked.y, clicked.z, state);
+        if (desired == null || valid(state, desired, false)) {
+            return false;
+        }
+        if (!printerCanInstaBreak(state, clicked)) {
+            return false; // only single-tick breaks can be done without stopping
+        }
+        MovementHelper.switchToBestToolFor(ctx, state);
+        // clickBlock doesn't sync the hotbar the way the use path does, so the tool we just
+        // picked would otherwise reach the server a tick after the dig it applies to
+        ctx.playerController().syncHeldItem();
+        if (!ctx.playerController().clickBlock(clicked, bhr.getDirection())) {
+            return false;
+        }
+        ctx.player().swing(InteractionHand.MAIN_HAND);
+        ctx.playerController().setDestroyDelay(0);
+        return true;
+    }
+
+    /**
+     * @param requiredSlot if >= 0, only place when this hotbar slot works: changing the selected
+     *                     slot after a use packet within the same tick is not vanilla-plausible
+     * @return the hotbar slot used, or -1 if nothing was placed
+     */
+    private int printerTryPlace(BuilderCalculationContext bcc, BlockHitResult bhr, BetterBlockPos clicked, Rotation rot, int requiredSlot) {
+        BetterBlockPos placeAt = BetterBlockPos.from(clicked.relative(bhr.getDirection()));
+        if (!incorrectPositions.contains(placeAt)) {
+            return -1;
+        }
+        if (!MovementHelper.canPlaceAgainst(bcc.bsi, clicked) || printerAvoidClicking(bcc.bsi.get0(clicked))) {
+            return -1;
+        }
+        BlockState curr = bcc.bsi.get0(placeAt);
+        if (!MovementHelper.isReplaceable(placeAt.x, placeAt.y, placeAt.z, curr, bcc.bsi)) {
+            return -1;
+        }
+        BlockState desired = bcc.getSchematic(placeAt.x, placeAt.y, placeAt.z, curr);
+        if (desired == null || desired.getBlock() instanceof AirBlock || valid(curr, desired, false)) {
+            return -1;
+        }
+        if (!desired.canSurvive(ctx.world(), placeAt) || !placementPlausible(placeAt, desired)) {
+            return -1;
+        }
+        OptionalInt slot = hasAnyItemThatWouldPlace(desired, bhr, rot);
+        if (!slot.isPresent() || (requiredSlot >= 0 && slot.getAsInt() != requiredSlot)) {
+            return -1;
+        }
+        ctx.player().getInventory().selected = slot.getAsInt();
+        InteractionResult result = ctx.playerController().processRightClickBlock(ctx.player(), ctx.world(), InteractionHand.MAIN_HAND, bhr);
+        if (!result.consumesAction()) {
+            return -1;
+        }
+        if (result == InteractionResult.SUCCESS) {
+            // vanilla only swings on SUCCESS, not CONSUME
+            ctx.player().swing(InteractionHand.MAIN_HAND);
+        }
+        return slot.getAsInt();
+    }
+
+    /**
+     * Picks the closest outstanding block that the printer could act on and requests the rotation
+     * for it. While moving only the pitch may be steered, since the yaw has to stay with the
+     * movement; when idle the rotation is free.
+     */
+    private void printerAim(BuilderCalculationContext bcc, boolean moving, boolean mayPlace) {
+        LookBehavior look = baritone.getLookBehavior();
+        double reach = ctx.playerController().getBlockReachDistance();
+        Vec3 eye = ctx.player().getEyePosition(1.0f);
+        Rotation current = ctx.playerRotations();
+        float predictedYaw = look.getServerRotation().map(Rotation::getYaw).orElse(current.getYaw());
+        boolean breakAllowed = printerBreakAllowed();
+        List<BlockState> hotbar = approxPlaceable.subList(0, 9);
+
+        List<BetterBlockPos> candidates = new ArrayList<>(incorrectPositions);
+        // measured to the block center, so allow a block's bounding radius (sqrt(3)/2) of slack
+        // before discarding it; the exact reach is enforced per hit point further down
+        double maxDistSq = (reach + 1) * (reach + 1);
+        candidates.removeIf(pos -> eye.distanceToSqr(VecUtils.getBlockPosCenter(pos)) > maxDistSq);
+        candidates.sort(Comparator.comparingDouble(pos -> eye.distanceToSqr(VecUtils.getBlockPosCenter(pos))));
+
+        for (BetterBlockPos pos : candidates) {
+            BlockState curr = bcc.bsi.get0(pos);
+            BlockState desired = bcc.getSchematic(pos.x, pos.y, pos.z, curr);
+            if (desired == null || valid(curr, desired, false)) {
+                continue;
+            }
+            if (!(curr.getBlock() instanceof AirBlock) && !(curr.getBlock() instanceof LiquidBlock)
+                    && !MovementHelper.isReplaceable(pos.x, pos.y, pos.z, curr, bcc.bsi)) {
+                // wrong solid block, needs to be broken first
+                if (!breakAllowed || !printerBreakSafe(pos) || !printerCanInstaBreak(curr, pos)) {
+                    continue;
+                }
+                Rotation aim = printerAimRotation(eye, VecUtils.getBlockPosCenter(pos), current, predictedYaw, moving);
+                if (aim != null && printerAimHits(aim, reach, hr -> hr.getBlockPos().equals(pos))) {
+                    look.updateSecondaryTarget(aim, moving);
+                    return;
+                }
+                if (!moving) {
+                    // center is occluded; look for any visible spot on the block
+                    Optional<Rotation> reachable = RotationUtils.reachable(ctx.player(), pos, reach);
+                    if (reachable.isPresent() && printerAimHits(reachable.get(), reach, hr -> hr.getBlockPos().equals(pos))) {
+                        look.updateSecondaryTarget(reachable.get(), false);
+                        return;
+                    }
+                }
+            } else {
+                // missing block, needs to be placed
+                if (!mayPlace
+                        || desired.getBlock() instanceof AirBlock
+                        || !containsBlockState(hotbar, desired)
+                        || !desired.canSurvive(ctx.world(), pos)
+                        || !placementPlausible(pos, desired)) {
+                    continue;
+                }
+                for (Direction d : Direction.values()) { // same faces, same order, as possibleToPlace
+                    BetterBlockPos clickPos = pos.relative(d);
+                    if (!MovementHelper.canPlaceAgainst(bcc.bsi, clickPos) || printerAvoidClicking(bcc.bsi.get0(clickPos))) {
+                        continue;
+                    }
+                    Direction face = d.getOpposite();
+                    VoxelShape shape = bcc.bsi.get0(clickPos).getShape(ctx.world(), clickPos);
+                    if (shape.isEmpty()) {
+                        continue;
+                    }
+                    AABB aabb = shape.bounds();
+                    for (Vec3 mult : aabbSideMultipliers(d)) {
+                        double px = clickPos.x + aabb.minX * mult.x + aabb.maxX * (1 - mult.x);
+                        double py = clickPos.y + aabb.minY * mult.y + aabb.maxY * (1 - mult.y);
+                        double pz = clickPos.z + aabb.minZ * mult.z + aabb.maxZ * (1 - mult.z);
+                        Vec3 point = new Vec3(px, py, pz);
+                        if (eye.distanceToSqr(point) > reach * reach) {
+                            continue;
+                        }
+                        Rotation aim = printerAimRotation(eye, point, current, predictedYaw, moving);
+                        if (aim != null && printerAimHits(aim, reach, hr -> hr.getBlockPos().equals(clickPos) && hr.getDirection() == face)) {
+                            look.updateSecondaryTarget(aim, moving);
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * @param predictedYaw the yaw the movement is expected to hold, used for pitch-only aims. It's
+     *                     only a prediction — {@link #printerFire} re-checks the rotation the
+     *                     server actually received before anything is clicked.
+     */
+    private Rotation printerAimRotation(Vec3 eye, Vec3 point, Rotation current, float predictedYaw, boolean moving) {
+        Rotation exact = RotationUtils.calcRotationFromVec3d(eye, point, current);
+        if (!moving) {
+            return exact;
+        }
+        if (Math.abs(Mth.degreesDifference(exact.getYaw(), predictedYaw)) > PRINTER_MAX_PITCH_ONLY_YAW_DIFF) {
+            return null; // too far off the movement yaw for a pitch-only aim to ever hit
+        }
+        return new Rotation(predictedYaw, exact.getPitch());
+    }
+
+    private boolean printerAimHits(Rotation aim, double reach, Predicate<BlockHitResult> test) {
+        // check the rotation as it would actually be sent (mouse-quantized + randomLooking)
+        Rotation actual = baritone.getLookBehavior().getAimProcessor().peekRotation(aim);
+        HitResult result = RayTraceUtils.rayTraceTowards(ctx.player(), actual, reach, false);
+        return result instanceof BlockHitResult hr && result.getType() == HitResult.Type.BLOCK && test.test(hr);
+    }
+
+    private boolean printerUsable() {
+        return ctx.player() != null
+                && ctx.minecraft().gameMode != null
+                && (ctx.minecraft().screen == null || ctx.minecraft().screen instanceof ChatScreen || ctx.minecraft().screen instanceof InventoryScreen)
+                && ctx.player().containerMenu.getCarried().isEmpty()
+                && !ctx.player().isUsingItem()
+                && !ctx.player().isHandsBusy()
+                && !ctx.player().isFallFlying()
+                && !ctx.player().isPassenger();
+    }
+
+    /**
+     * @return whether a hotbar swap is still unconfirmed. Not applicable when the builder isn't
+     * allowed to touch the inventory, since nothing swaps and the counter never advances.
+     */
+    private boolean printerInventoryUnsettled() {
+        return Baritone.settings().allowInventory.value
+                && baritone.getInventoryBehavior().ticksSinceLastInventoryMove() < Baritone.settings().printerInventorySettleTicks.value;
+    }
+
+    /**
+     * Never dig out our own support or anything the current path is about to walk on.
+     */
+    private boolean printerBreakSafe(BlockPos pos) {
+        BetterBlockPos feet = ctx.playerFeet();
+        if (Math.abs(pos.getX() - feet.x) <= 1 && Math.abs(pos.getZ() - feet.z) <= 1
+                && pos.getY() <= feet.y - 1 && pos.getY() >= feet.y - 3) {
+            return false;
+        }
+        PathExecutor current = baritone.getPathingBehavior().getCurrent();
+        if (current != null && current.getPath() != null) {
+            List<BetterBlockPos> positions = current.getPath().positions();
+            int start = Math.max(0, current.getPosition());
+            int end = Math.min(positions.size(), current.getPosition() + PRINTER_PATH_PROTECT_LENGTH);
+            for (int i = start; i < end; i++) {
+                BetterBlockPos p = positions.get(i);
+                if (pos.equals(p) || pos.equals(p.below())) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private boolean printerBreakAllowed() {
+        return Baritone.settings().printerBreak.value && printerBreakGrace <= 0 && ctx.player().onGround();
+    }
+
+    /**
+     * @return whether the tool {@link MovementHelper#switchToBestToolFor} would pick breaks this
+     * block within a single tick. Probes with the same switch the dig itself performs, so aiming
+     * and firing can never disagree about what is instant.
+     */
+    private boolean printerCanInstaBreak(BlockState state, BlockPos pos) {
+        var inventory = ctx.player().getInventory();
+        int previous = inventory.selected;
+        MovementHelper.switchToBestToolFor(ctx, state);
+        boolean instant = state.getDestroyProgress(ctx.player(), ctx.world(), pos) >= 1.0f;
+        inventory.selected = previous;
+        return instant;
+    }
+
+    /**
+     * Blocks that would open a GUI or otherwise activate when right clicked; the legit place path
+     * handles those by sneaking, the printer just leaves them alone.
+     */
+    private static boolean printerAvoidClicking(BlockState state) {
+        Block block = state.getBlock();
+        return block instanceof EntityBlock
+                || block instanceof DoorBlock
+                || block instanceof TrapDoorBlock
+                || block instanceof FenceGateBlock
+                || block instanceof ButtonBlock
+                || block instanceof LeverBlock
+                || block instanceof CraftingTableBlock
+                || block instanceof AnvilBlock
+                || block instanceof CakeBlock
+                || block instanceof RepeaterBlock
+                || block instanceof ComparatorBlock
+                || block instanceof NoteBlock
+                || block instanceof BedBlock;
+    }
+
+    private static boolean printerRayIntersectsCell(Vec3 eye, Rotation rotation, BlockPos cell, double range) {
+        Vec3 direction = RotationUtils.calcLookDirectionFromRotation(rotation);
+        return new AABB(cell).clip(eye, eye.add(direction.scale(range))).isPresent();
+    }
+
     @Override
     public PathingCommand onTick(boolean calcFailed, boolean isSafeToCancel) {
         return onTick(calcFailed, isSafeToCancel, 0);
@@ -467,6 +862,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             ticks = 5;
         } else {
             ticks--;
+        }
+        if (recursions == 0) {
+            printerMovementForced = baritone.getLookBehavior().isMovementInputForced();
         }
         baritone.getInputOverrideHandler().clearAllKeys();
         if (paused) {
@@ -554,45 +952,75 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         }
 
         List<Optional<Tuple<BetterBlockPos, Rotation>>> toBreak = toBreakNearPlayer(bcc);
-        if (!toBreak.isEmpty() && isSafeToCancel && ctx.player().onGround()) {
+
+        // The printer acts without stopping pathing; the stationary break/place paths below only
+        // engage on ticks it didn't act, since they'd send conflicting packets otherwise.
+        boolean breakSession = legitBreakSessionLastTick;
+        legitBreakSessionLastTick = false;
+        // Never place while a stationary break is being lined up: a placement skips the break
+        // branch for that tick, releasing the attack and resetting the dig progress, and the
+        // placed block can wall off the break target. Nor let placements starve breaking forever.
+        boolean mayPlace = !breakSession && printerBreakStarvation < PRINTER_MAX_BREAK_STARVATION;
+        PrinterAction printerAction = PrinterAction.NONE;
+        if (Baritone.settings().printer.value && printerUsable()) {
+            printerAction = printerTick(bcc, mayPlace);
+        }
+        if (!toBreak.isEmpty() && printerAction.placed() && !printerAction.broke()) {
+            printerBreakStarvation++;
+        } else {
+            printerBreakStarvation = 0;
+        }
+
+        if (!toBreak.isEmpty() && isSafeToCancel && ctx.player().onGround() && !printerAction.acted()) {
+            legitBreakSessionLastTick = true;
             // we'd like to pause to break this block
             // only change look direction if it's safe (don't want to fuck up an in progress parkour for example
-            int count = 0;
-            int toBreakCount = Baritone.settings().multiBreak.value <= 0 ? 1 : Baritone.settings().multiBreak.value;
-            for (Optional<Tuple<BetterBlockPos, Rotation>> blockInfo: toBreak) {
-                if (count >= toBreakCount) {
+            // prefer a candidate that is already in the crosshair so we don't thrash the aim between targets
+            Optional<Tuple<BetterBlockPos, Rotation>> chosen = Optional.empty();
+            for (Optional<Tuple<BetterBlockPos, Rotation>> blockInfo : toBreak) {
+                if (blockInfo.isPresent() && ctx.isLookingAt(blockInfo.get().getA())) {
+                    chosen = blockInfo;
                     break;
                 }
-                if (blockInfo.isPresent()) {
-                    Rotation rot = blockInfo.get().getB();
-                    BetterBlockPos pos = blockInfo.get().getA();
-                    baritone.getLookBehavior().updateTarget(rot, true);
-                    MovementHelper.switchToBestToolFor(ctx, bcc.get(pos));
-                    if (ctx.player().isCrouching()) {
-                        // really horrible bug where a block is visible for breaking while sneaking but not otherwise
-                        // so you can't see it, it goes to place something else, sneaks, then the next tick it tries to break
-                        // and is unable since it's unsneaked in the intermediary tick
-                        baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
-                    }
-                    if (ctx.isLookingAt(pos) || ctx.playerRotations().isReallyCloseTo(rot)) {
-                        baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_LEFT, true);
-                    }
-                    count++;
+            }
+            if (!chosen.isPresent()) {
+                chosen = toBreak.stream().filter(Optional::isPresent).findFirst().orElse(Optional.empty());
+            }
+            if (chosen.isPresent()) {
+                Rotation rot = chosen.get().getB();
+                BetterBlockPos pos = chosen.get().getA();
+                baritone.getLookBehavior().updateTarget(rot, true);
+                MovementHelper.switchToBestToolFor(ctx, bcc.get(pos));
+                if (ctx.player().isCrouching()) {
+                    // really horrible bug where a block is visible for breaking while sneaking but not otherwise
+                    // so you can't see it, it goes to place something else, sneaks, then the next tick it tries to break
+                    // and is unable since it's unsneaked in the intermediary tick
+                    baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
                 }
+                if (ctx.isLookingAt(pos)) {
+                    baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_LEFT, true);
+                }
+                // keep blockBreakSpeed spacing between this (possibly multi-tick) break and the
+                // printer's next dig
+                printerBreakGrace = Math.max(printerBreakGrace, Math.max(1, Baritone.settings().blockBreakSpeed.value));
             }
 
             return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
         }
         List<BlockState> desirableOnHotbar = new ArrayList<>();
         Optional<Placement> toPlace = searchForPlacables(bcc, desirableOnHotbar);
-        if (toPlace.isPresent() && isSafeToCancel && ctx.player().onGround() && ticks <= 0) {
-            Rotation rot = toPlace.get().rot;
-            baritone.getLookBehavior().updateTarget(rot, true);
-            ctx.player().getInventory().selected = toPlace.get().hotbarSelection;
-            baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
-            if ((ctx.isLookingAt(toPlace.get().placeAgainst) && ((BlockHitResult) ctx.objectMouseOver()).getDirection().equals(toPlace.get().side)) || ctx.playerRotations().isReallyCloseTo(rot)) {
-                baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
+        if (!printerAction.acted() && toPlace.isPresent() && isSafeToCancel && ctx.player().onGround() && ticks <= 0) {
+            if (!printerInventoryUnsettled()) {
+                Rotation rot = toPlace.get().rot;
+                baritone.getLookBehavior().updateTarget(rot, true);
+                ctx.player().getInventory().selected = toPlace.get().hotbarSelection;
+                baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
+                if (ctx.isLookingAt(toPlace.get().placeAgainst) && ((BlockHitResult) ctx.objectMouseOver()).getDirection().equals(toPlace.get().side)) {
+                    baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
+                }
             }
+            // hold position even while the hotbar is unconfirmed, rather than falling through to
+            // goal-following and walking on with placements suspended
             return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
         }
 
@@ -614,6 +1042,10 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             for (int i = 9; i < 36; i++) {
                 for (BlockState desired : noValidHotbarOption) {
                     if (valid(approxPlaceable.get(i), desired, true)) {
+                        if (printerInventoryUnsettled()) {
+                            // a move is already in flight; hold instead of clicking again
+                            return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+                        }
                         if (!baritone.getInventoryBehavior().attemptToPutOnHotbar(i, usefulSlots::contains)) {
                             // awaiting inventory move, so pause
                             return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
@@ -1114,6 +1546,12 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         numRepeats = 0;
         paused = false;
         observedCompleted = null;
+        printerPlaceCooldown = 0;
+        printerBreakCooldown = 0;
+        printerBreakGrace = 0;
+        legitBreakSessionLastTick = false;
+        printerBreakStarvation = 0;
+        printerMovementForced = false;
     }
 
     @Override

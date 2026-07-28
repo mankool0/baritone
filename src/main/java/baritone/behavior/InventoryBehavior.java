@@ -52,6 +52,14 @@ public final class InventoryBehavior extends Behavior implements Helper {
         super(baritone);
     }
 
+    /**
+     * @return ticks since the last hotbar swap was sent. Stops advancing while a container is
+     * open, and is meaningless when {@code allowInventory} is off since no moves are made then.
+     */
+    public int ticksSinceLastInventoryMove() {
+        return ticksSinceLastInventoryMove;
+    }
+
     @Override
     public void onTick(TickEvent event) {
         if (!Baritone.settings().allowInventory.value) {

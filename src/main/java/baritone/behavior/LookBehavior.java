@@ -25,6 +25,7 @@ import baritone.api.behavior.look.ITickableAimProcessor;
 import baritone.api.event.events.*;
 import baritone.api.utils.IPlayerContext;
 import baritone.api.utils.Rotation;
+import baritone.api.utils.input.Input;
 import baritone.behavior.look.ForkableRandom;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 
@@ -38,6 +39,20 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
      * The current look target, may be {@code null}.
      */
     private Target target;
+
+    /**
+     * Secondary look target, may be {@code null}. Unlike {@link #target} it only overrides the
+     * rotation sent to the server, and it yields to a primary target set for a block interaction.
+     * Its yaw is only applied on ticks without movement input, since the movement physics ran
+     * against the primary yaw; otherwise just the pitch is taken.
+     */
+    private SecondaryTarget secondaryTarget;
+
+    /**
+     * The rotation and mode that were actually applied during PRE this tick, for POST bookkeeping.
+     */
+    private Rotation appliedRotation;
+    private Target.Mode appliedMode;
 
     /**
      * The rotation known to the server. Returned by {@link #getEffectiveRotation()} for use in {@link IPlayerContext}.
@@ -65,7 +80,19 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
 
     @Override
     public void updateTarget(Rotation rotation, boolean blockInteract) {
-        this.target = new Target(rotation, Target.Mode.resolve(ctx, blockInteract));
+        this.target = new Target(rotation, Target.Mode.resolve(ctx, blockInteract), blockInteract);
+    }
+
+    /**
+     * Sets the secondary (packet-only) look target for this tick.
+     *
+     * @param rotation  The desired rotation
+     * @param pitchOnly If true, only the pitch is taken and the yaw follows the primary target
+     *                  (or the player's current yaw). A full rotation degrades to pitch-only on
+     *                  ticks with movement input.
+     */
+    public void updateSecondaryTarget(Rotation rotation, boolean pitchOnly) {
+        this.secondaryTarget = new SecondaryTarget(rotation, pitchOnly);
     }
 
     public Optional<Rotation> getServerRotation() {
@@ -87,19 +114,37 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
     @Override
     public void onPlayerUpdate(PlayerUpdateEvent event) {
 
-        if (this.target == null) {
+        if (this.target == null && this.secondaryTarget == null) {
             return;
         }
 
         switch (event.getState()) {
             case PRE: {
-                if (this.target.mode == Target.Mode.NONE) {
-                    // Just return for PRE, we still want to set target to null on POST
+                Rotation desired = null;
+                Target.Mode mode = Target.Mode.NONE;
+                if (this.target != null) {
+                    desired = this.target.rotation;
+                    mode = this.target.mode;
+                }
+                // A primary target set for a block interaction keeps priority over the secondary.
+                if (this.secondaryTarget != null && !(this.target != null && this.target.interact)) {
+                    if (this.secondaryTarget.pitchOnly || this.isMovementInputForced()) {
+                        final float baseYaw = this.target != null ? this.target.rotation.getYaw() : ctx.player().getYRot();
+                        desired = new Rotation(baseYaw, this.secondaryTarget.rotation.getPitch());
+                    } else {
+                        desired = this.secondaryTarget.rotation;
+                    }
+                    mode = Target.Mode.resolve(ctx, true);
+                }
+                if (desired == null || mode == Target.Mode.NONE) {
+                    // Just return for PRE, we still want to clear the targets on POST
                     return;
                 }
 
+                this.appliedRotation = desired;
+                this.appliedMode = mode;
                 this.prevRotation = new Rotation(ctx.player().getYRot(), ctx.player().getXRot());
-                final Rotation actual = this.processor.peekRotation(this.target.rotation);
+                final Rotation actual = this.processor.peekRotation(desired);
                 ctx.player().setYRot(actual.getYaw());
                 ctx.player().setXRot(actual.getPitch());
                 break;
@@ -107,15 +152,15 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
             case POST: {
                 // Reset the player's rotations back to their original values
                 if (this.prevRotation != null) {
-                    this.smoothYawBuffer.addLast(this.target.rotation.getYaw());
+                    this.smoothYawBuffer.addLast(this.appliedRotation.getYaw());
                     while (this.smoothYawBuffer.size() > Baritone.settings().smoothLookTicks.value) {
                         this.smoothYawBuffer.removeFirst();
                     }
-                    this.smoothPitchBuffer.addLast(this.target.rotation.getPitch());
+                    this.smoothPitchBuffer.addLast(this.appliedRotation.getPitch());
                     while (this.smoothPitchBuffer.size() > Baritone.settings().smoothLookTicks.value) {
                         this.smoothPitchBuffer.removeFirst();
                     }
-                    if (this.target.mode == Target.Mode.SERVER) {
+                    if (this.appliedMode == Target.Mode.SERVER) {
                         ctx.player().setYRot(this.prevRotation.getYaw());
                         ctx.player().setXRot(this.prevRotation.getPitch());
                     } else if (ctx.player().isFallFlying() ? Baritone.settings().elytraSmoothLook.value : Baritone.settings().smoothLook.value) {
@@ -128,13 +173,30 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
                     //ctx.player().yRotO = prevRotation.getYaw();
                     this.prevRotation = null;
                 }
-                // The target is done being used for this game tick, so it can be invalidated
+                // The targets are done being used for this game tick, so they can be invalidated
                 this.target = null;
+                this.secondaryTarget = null;
+                this.appliedRotation = null;
+                this.appliedMode = null;
                 break;
             }
             default:
                 break;
         }
+    }
+
+    /**
+     * @return whether the yaw is steering movement this tick, in which case it can't be repointed
+     * for the server without desyncing from the physics. The impulses cover real keys too.
+     */
+    public boolean isMovementInputForced() {
+        if (ctx.player().input.forwardImpulse != 0 || ctx.player().input.leftImpulse != 0) {
+            return true;
+        }
+        return baritone.getInputOverrideHandler().isInputForcedDown(Input.MOVE_FORWARD)
+                || baritone.getInputOverrideHandler().isInputForcedDown(Input.MOVE_BACK)
+                || baritone.getInputOverrideHandler().isInputForcedDown(Input.MOVE_LEFT)
+                || baritone.getInputOverrideHandler().isInputForcedDown(Input.MOVE_RIGHT);
     }
 
     @Override
@@ -153,6 +215,7 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
     public void onWorldEvent(WorldEvent event) {
         this.serverRotation = null;
         this.target = null;
+        this.secondaryTarget = null;
     }
 
     public void pig() {
@@ -311,14 +374,27 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
         }
     }
 
+    private static class SecondaryTarget {
+
+        public final Rotation rotation;
+        public final boolean pitchOnly;
+
+        public SecondaryTarget(Rotation rotation, boolean pitchOnly) {
+            this.rotation = rotation;
+            this.pitchOnly = pitchOnly;
+        }
+    }
+
     private static class Target {
 
         public final Rotation rotation;
         public final Mode mode;
+        public final boolean interact;
 
-        public Target(Rotation rotation, Mode mode) {
+        public Target(Rotation rotation, Mode mode, boolean interact) {
             this.rotation = rotation;
             this.mode = mode;
+            this.interact = interact;
         }
 
         enum Mode {

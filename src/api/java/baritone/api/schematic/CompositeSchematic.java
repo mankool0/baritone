@@ -46,6 +46,25 @@ public class CompositeSchematic extends AbstractSchematic {
         recalcArr();
     }
 
+    /**
+     * @return a new flat composite holding {@code copies} copies of this composite's entries, each
+     * successive copy shifted by the step vector. Offsets are normalized to stay non-negative, so
+     * for a negative step component the caller must offset the build origin by
+     * {@code (copies - 1) * step} on that axis to keep the first copy where it was.
+     */
+    public CompositeSchematic repeated(int stepX, int stepY, int stepZ, int copies) {
+        int shiftX = stepX < 0 ? -(copies - 1) * stepX : 0;
+        int shiftY = stepY < 0 ? -(copies - 1) * stepY : 0;
+        int shiftZ = stepZ < 0 ? -(copies - 1) * stepZ : 0;
+        CompositeSchematic repeated = new CompositeSchematic(0, 0, 0);
+        for (int k = 0; k < copies; k++) {
+            for (CompositeSchematicEntry entry : schematics) {
+                repeated.put(entry.schematic, entry.x + k * stepX + shiftX, entry.y + k * stepY + shiftY, entry.z + k * stepZ + shiftZ);
+            }
+        }
+        return repeated;
+    }
+
     public CompositeSchematicEntry getSchematic(int x, int y, int z, BlockState currentState) {
         for (CompositeSchematicEntry entry : schematicArr) {
             if (x >= entry.x && y >= entry.y && z >= entry.z &&

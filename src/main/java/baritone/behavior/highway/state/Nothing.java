@@ -17,11 +17,13 @@
 
 package baritone.behavior.highway.state;
 
+import baritone.api.schematic.ISchematic;
 import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.enums.HighwayState;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.LocationType;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.world.phys.Vec3;
 
@@ -45,7 +47,22 @@ public class Nothing extends State {
 
 
         context.baritone().getPathingBehavior().cancelEverything();
-        context.baritone().getBuilderProcess().build("netherHighway", context.schematic(), context.originBuild());
+
+        // The context keeps the single-slice schematic that the correctness scans size themselves
+        // against; the builder gets several slices at once so the printer always has targets.
+        ISchematic buildSchem = context.schematic();
+        BlockPos buildOrigin = context.originBuild();
+        int lookahead = context.settings().highwayPrinterLookahead.value;
+        if (context.settings().printer.value && lookahead > 1) {
+            int stepX = context.highwayDirection().getX();
+            int stepZ = context.highwayDirection().getZ();
+            buildSchem = context.schematic().repeated(stepX, 0, stepZ, lookahead);
+            buildOrigin = buildOrigin.offset(stepX < 0 ? (lookahead - 1) * stepX : 0, 0, stepZ < 0 ? (lookahead - 1) * stepZ : 0);
+            // the builder only repeats once the whole region is correct, so advance by the full
+            // window width or each repeat would just re-expose slices it already built
+            context.settings().buildRepeat.value = new Vec3i(stepX * lookahead, 0, stepZ * lookahead);
+        }
+        context.baritone().getBuilderProcess().build("netherHighway", buildSchem, buildOrigin);
 
         context.transitionTo(HighwayState.BuildingHighway);
     }
