@@ -21,6 +21,7 @@ import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
+import baritone.behavior.highway.enums.ShulkerType;
 import net.minecraft.client.gui.screens.inventory.ContainerScreen;
 
 public class DepositingLootEnderChestDepletedShulkers extends State {
@@ -48,8 +49,20 @@ public class DepositingLootEnderChestDepletedShulkers extends State {
 
         // Nothing left to deposit, or the ender chest is full
         if (state == HighwayState.DepositingLootEnderChestDepletedShulkersFinal) {
-            context.transitionTo(HighwayState.Nothing);
             context.playerContext().player().closeContainer();
+            if (context.refillingEnderChests()) {
+                // This storage trip was a digging ender-chest refill: we should now hold a shulker to open.
+                if (context.getShulkerCountInventory(ShulkerType.EnderChest) > 0) {
+                    context.setEnderChestAccessLoc(context.placeLoc()); // reuse this access chest for the stash
+                    context.transitionTo(HighwayState.EchestMiningPlaceLocPrep); // -> top up loose ender chests
+                } else {
+                    // Storage had no shulker; abort the refill and let BuildingHighway re-evaluate (it will pause).
+                    context.setRefillingEnderChests(false);
+                    context.transitionTo(HighwayState.Nothing);
+                }
+            } else {
+                context.transitionTo(HighwayState.Nothing);
+            }
         } else {
             context.transitionTo(HighwayState.LootingLootEnderChestPicks);
         }

@@ -41,8 +41,14 @@ public class LootingEnderShulker extends State {
             return;
         }
 
-        if (context.getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) < context.settings().highwayEnderChestsToLoot.value) {
-            int enderChestsLooted = context.lootEnderChestSlot();
+        int target = context.paving()
+                ? context.settings().highwayEnderChestsToLoot.value
+                : Math.min(64, Math.max(context.settings().highwayEnderChestsToHave.value, Math.min(context.settings().highwayEnderChestsThreshold.value, 56)));
+
+        if (context.getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) < target) {
+            int enderChestsLooted = context.paving()
+                    ? context.lootEnderChestSlot()
+                    : context.topUpEnderChestSlotFromShulker(target);
             if (enderChestsLooted > 0) {
                 Helper.HELPER.logDirect("Looted " + enderChestsLooted + " ender chests");
             } else {
@@ -50,12 +56,6 @@ public class LootingEnderShulker extends State {
                 context.transitionTo(HighwayState.MiningEnderShulker);
                 context.playerContext().player().closeContainer();
             }
-
-            //if (getItemCountInventory(Item.getId(Items.AIR)) == 0) {
-            //    Helper.HELPER.logDirect("No space for ender chests. Rolling with what we have.");
-            //    currentState = HighwayBuilderBehavior.State.MiningEnderShulker;
-            //    ctx.player().closeContainer();
-            //}
 
             context.resetTimer();
         } else {

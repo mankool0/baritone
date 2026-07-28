@@ -80,6 +80,8 @@ public enum HighwayState {
     MiningEnderShulker,
     CollectingEnderShulker,
     InventoryCleaningEnderShulker,
+    EnderChestStashPlaceLocPrep,
+    DepositingStashEnderShulker,
     GoingToPlaceLocEnderChest,
     FarmingEnderChestPrepEchest,
     FarmingEnderChestPrepPick,

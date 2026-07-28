@@ -22,6 +22,7 @@ import baritone.api.utils.BetterBlockPos;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
+import baritone.behavior.highway.enums.ShulkerType;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Item;
@@ -53,6 +54,15 @@ public class CollectingEnderShulker extends State {
         }
 
         // No more shulker boxes to find
-        context.transitionTo(HighwayState.GoingToPlaceLocEnderChest);
+        if (context.paving()) {
+            context.transitionTo(HighwayState.GoingToPlaceLocEnderChest); // paving mines the chests into obsidian
+        } else if (context.getShulkerCountInventory(ShulkerType.EnderChest) > 0) {
+            context.transitionTo(HighwayState.EnderChestStashPlaceLocPrep); // digging stashes the shulker back into storage
+        } else {
+            // Shulker emptied out while topping up: nothing to stash, just resume
+            context.setRefillingEnderChests(false);
+            context.setEnderChestAccessLoc(null);
+            context.transitionTo(HighwayState.Nothing);
+        }
     }
 }

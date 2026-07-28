@@ -39,7 +39,12 @@ public class LootingLootEnderChestEnderChests extends State {
             return;
         }
 
-        if (context.getShulkerCountInventory(ShulkerType.EnderChest) < context.settings().highwayEnderChestShulksToHave.value) {
+        int wantShulks = context.settings().highwayEnderChestShulksToHave.value;
+        if (!context.paving()) {
+            wantShulks = context.refillingEnderChests() ? 1 : 0;
+        }
+
+        if (context.getShulkerCountInventory(ShulkerType.EnderChest) < wantShulks) {
             int enderShulksLooted = context.lootShulkerChestSlot(ShulkerType.EnderChest);
             if (enderShulksLooted > 0) {
                 Helper.HELPER.logDirect("Looted " + enderShulksLooted + " ender chest shulker");

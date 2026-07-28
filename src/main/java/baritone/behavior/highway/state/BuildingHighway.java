@@ -108,6 +108,42 @@ public class BuildingHighway extends State {
             return;
         }
 
+        // Digging: keep loose ender chests topped up for storage access (paving refills them via the obsidian farm above).
+        // Cap the threshold below a full stack: a refill tops us up to ~64, and topping fits a single slot (<=64), so a
+        // threshold too close to 64 could never be satisfied and would drain every shulker from storage in a loop.
+        int enderChestThreshold = Math.min(context.settings().highwayEnderChestsThreshold.value, 56);
+        if (!context.paving() && context.getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) < enderChestThreshold) {
+            if (context.getShulkerCountInventory(ShulkerType.EnderChest) > 0) {
+                // We already hold an ender chest shulker: open it and top up. No grab happened, so the stash places a fresh chest.
+                if (!context.refillingEnderChests()) {
+                    context.setRefillingEnderChests(true);
+                    context.setEnderChestAccessLoc(null);
+                }
+                context.setRepeatCheck(false);
+                context.transitionTo(HighwayState.EchestMiningPlaceLocPrep);
+                context.baritone().getPathingBehavior().cancelEverything();
+                context.resetTimer();
+                return;
+            }
+            if (context.repeatCheck()) {
+                if (!context.enderChestHasEnderShulks()) {
+                    Helper.HELPER.logDirect("Low on ender chests and none in storage, pausing before we run dry.");
+                    context.baritone().getPathingBehavior().cancelEverything();
+                    context.setPaused(true);
+                    return;
+                }
+                // Fetch a shulker (also tops picks/gapples) from storage, then loop back here to top up
+                Helper.HELPER.logDirect("Low on ender chests, fetching an ender chest shulker from storage.");
+                context.setRefillingEnderChests(true);
+                context.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);
+            } else {
+                Helper.HELPER.logDirect("Ender chest count under threshold. Player may still be loading. Waiting 120 ticks");
+                context.resetTimer();
+                context.setRepeatCheck(true);
+            }
+            return;
+        }
+
         if (context.getItemCountInventory(Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) <= context.settings().highwayGapplesThreshold.value) {
             if (context.getShulkerCountInventory(ShulkerType.Gapple) == 0) {
                 Helper.HELPER.logDirect("No more gapples, pausing");

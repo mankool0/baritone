@@ -167,6 +167,9 @@ public class HighwayContext {
     private int picksToHave = 5;
     private boolean enderChestHasPickShulks = true;
     private boolean enderChestHasEnderShulks = true;
+    private boolean refillingEnderChests = false;
+    private boolean stashingEnderShulker = false;
+    private BlockPos enderChestAccessLoc = null;
     private boolean repeatCheck = false;
     private ShulkerType picksToUse;
     private BetterBlockPos cachedPlayerFeet = null;
@@ -734,6 +737,32 @@ public class HighwayContext {
         this.enderChestHasEnderShulks = enderChestHasEnderShulks;
     }
 
+    public boolean refillingEnderChests() {
+        return refillingEnderChests;
+    }
+
+    public void setRefillingEnderChests(boolean refillingEnderChests) {
+        this.refillingEnderChests = refillingEnderChests;
+    }
+
+    public boolean stashingEnderShulker() {
+        return stashingEnderShulker;
+    }
+
+    public void setStashingEnderShulker(boolean stashingEnderShulker) {
+        this.stashingEnderShulker = stashingEnderShulker;
+    }
+
+    public BlockPos enderChestAccessLoc() {
+        return enderChestAccessLoc;
+    }
+
+    public void setEnderChestAccessLoc(BlockPos enderChestAccessLoc) {
+        this.enderChestAccessLoc = enderChestAccessLoc == null
+                ? null
+                : new BlockPos(enderChestAccessLoc.getX(), enderChestAccessLoc.getY(), enderChestAccessLoc.getZ());
+    }
+
     public boolean repeatCheck() {
         return repeatCheck;
     }
@@ -949,7 +978,8 @@ public class HighwayContext {
     }
 
     public boolean clearCursorItem() {
-        if (!playerContext.player().containerMenu.getCarried().isEmpty() && playerContext.player().containerMenu == playerContext.player().inventoryMenu) {
+        AbstractContainerMenu curContainer = playerContext.player().containerMenu;
+        if (!curContainer.getCarried().isEmpty()) {
             if (cursorStackNonEmpty && timer >= 20) {
                 // We have some item on our cursor for 20 ticks, try to place it somewhere
                 timer = 0;
@@ -957,19 +987,15 @@ public class HighwayContext {
 
                 int emptySlot = getItemSlot(Item.getId(Items.AIR));
                 if (emptySlot != -1) {
-                    Helper.HELPER.logDirect("Had " + playerContext.player().containerMenu.getCarried().getDisplayName() + " on our cursor. Trying to place into slot " + emptySlot);
+                    Helper.HELPER.logDirect("Had " + curContainer.getCarried().getDisplayName() + " on our cursor. Trying to place into slot " + emptySlot);
 
-                    if (emptySlot <= 8) {
-                        // Fix slot id if it's a hotbar slot
-                        emptySlot += 36;
-                    }
-                    playerContext.playerController().windowClick(playerContext.player().inventoryMenu.containerId, emptySlot, 0, ClickType.PICKUP, playerContext.player());
+                    playerContext.playerController().windowClick(curContainer.containerId, invSlotToMenuSlot(emptySlot), 0, ClickType.PICKUP, playerContext.player());
                     cursorStackNonEmpty = false;
                     return true;
                 } else {
-                    if (isAcceptableThrowawayItem(playerContext.player().containerMenu.getCarried().getItem())) {
+                    if (isAcceptableThrowawayItem(curContainer.getCarried().getItem())) {
                         // Netherrack on our cursor, we can just throw it out
-                        playerContext.playerController().windowClick(playerContext.player().inventoryMenu.containerId, -999, 0, ClickType.PICKUP, playerContext.player());
+                        playerContext.playerController().windowClick(curContainer.containerId, -999, 0, ClickType.PICKUP, playerContext.player());
                         cursorStackNonEmpty = false;
                         return true;
                     } else {
@@ -979,12 +1005,8 @@ public class HighwayContext {
                             throwawaySlot = getAcceptableThrowawaySlotNoHotbar();
                         }
                         if (throwawaySlot != -1) {
-                            if (throwawaySlot <= 8) {
-                                // Fix slot id if it's a hotbar slot
-                                throwawaySlot += 36;
-                            }
-                            playerContext.playerController().windowClick(playerContext.player().inventoryMenu.containerId, throwawaySlot, 0, ClickType.PICKUP, playerContext.player());
-                            playerContext.playerController().windowClick(playerContext.player().inventoryMenu.containerId, -999, 0, ClickType.PICKUP, playerContext.player());
+                            playerContext.playerController().windowClick(curContainer.containerId, invSlotToMenuSlot(throwawaySlot), 0, ClickType.PICKUP, playerContext.player());
+                            playerContext.playerController().windowClick(curContainer.containerId, -999, 0, ClickType.PICKUP, playerContext.player());
                             cursorStackNonEmpty = false;
                             return true;
                         }
@@ -998,6 +1020,17 @@ public class HighwayContext {
             return true;
         }
         return false;
+    }
+
+    public int invSlotToMenuSlot(int invSlot) {
+        AbstractContainerMenu menu = playerContext.player().containerMenu;
+        if (menu == playerContext.player().inventoryMenu) {
+            // Inventory menu: main slots map directly, hotbar sits after them at 36-44
+            return invSlot < 9 ? invSlot + 36 : invSlot;
+        }
+        // Container menus: container slots first, then main inventory, then hotbar
+        int containerSlots = menu.slots.size() - 36;
+        return invSlot < 9 ? invSlot + containerSlots + 27 : invSlot + containerSlots - 9;
     }
 
     public boolean stuckCheck() {
@@ -1815,6 +1848,88 @@ public class HighwayContext {
         for (int i = 0; i < 27; i++) {
             if (curContainer.getSlot(i).getItem().isEmpty()) {
                 playerContext.playerController().windowClick(curContainer.containerId, depletedSlot < 9 ? depletedSlot + 54 : depletedSlot + 18, 0, ClickType.QUICK_MOVE, playerContext.player()); // Have to convert slot id to single chest slot id
+                return 1;
+            }
+        }
+
+        return 0;
+    }
+
+    /**
+     * Inventory slot of a loose ender chest stack that still has room to merge into (count < 64),
+     * preferring the smallest so we top a partial stack rather than starting a new one. -1 if none.
+     */
+    private int getMergeableEnderChestSlot() {
+        int best = -1;
+        int bestCount = 64;
+        for (int i = 0; i < 36; i++) {
+            ItemStack stack = playerContext.player().getInventory().items.get(i);
+            if (stack.getItem() instanceof BlockItem && ((BlockItem) stack.getItem()).getBlock() instanceof EnderChestBlock && stack.getCount() < 64) {
+                if (stack.getCount() < bestCount) {
+                    best = i;
+                    bestCount = stack.getCount();
+                }
+            }
+        }
+        return best;
+    }
+
+    /**
+     * With an open ender chest shulker box, top up our loose ender chest stack toward {@code target}
+     * (capped at 64) by merging a partial amount out of a single box slot, so it never spills into a
+     * second inventory slot. Returns the number of ender chests moved this call (0 when nothing moved).
+     */
+    public int topUpEnderChestSlotFromShulker(int target) {
+        target = Math.min(target, 64);
+        int have = getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem()));
+        int need = target - have;
+        if (need <= 0) {
+            return 0;
+        }
+
+        AbstractContainerMenu curContainer = playerContext.player().containerMenu;
+        int looseSlot = getMergeableEnderChestSlot();
+        for (int i = 0; i < 27; i++) {
+            ItemStack stack = curContainer.getSlot(i).getItem();
+            if (!(stack.getItem() instanceof BlockItem) || !(((BlockItem) stack.getItem()).getBlock() instanceof EnderChestBlock)) {
+                continue;
+            }
+            int boxCount = stack.getCount();
+            if (looseSlot == -1) {
+                // No partial loose stack to merge into. Only proceed if we have a free slot to hold them;
+                // capped target keeps it to a single slot. Bail otherwise (shouldn't happen above 0 chests).
+                if (getItemSlot(Item.getId(Items.AIR)) == -1) {
+                    return 0;
+                }
+                playerContext.playerController().windowClick(curContainer.containerId, i, 0, ClickType.QUICK_MOVE, playerContext.player());
+                return boxCount;
+            }
+            int looseCount = playerContext.player().getInventory().items.get(looseSlot).getCount();
+            int containerLooseSlot = invSlotToMenuSlot(looseSlot);
+            // Pick up the box stack, deposit into our loose slot (fills to at most 64), put any remainder back
+            playerContext.playerController().windowClick(curContainer.containerId, i, 0, ClickType.PICKUP, playerContext.player());
+            playerContext.playerController().windowClick(curContainer.containerId, containerLooseSlot, 0, ClickType.PICKUP, playerContext.player());
+            playerContext.playerController().windowClick(curContainer.containerId, i, 0, ClickType.PICKUP, playerContext.player()); // empty cursor -> no-op, remainder -> back to box slot
+            return Math.min(boxCount, 64 - looseCount);
+        }
+
+        return 0;
+    }
+
+    /**
+     * With an open ender storage (ender chest) container, deposit one shulker box of the given type
+     * from inventory into a free storage slot. Returns 1 on success, 0 if none to deposit or no space.
+     */
+    public int depositShulkerChestSlot(ShulkerType shulkerType) {
+        int slot = getShulkerSlot(shulkerType);
+        if (slot == -1) {
+            return 0;
+        }
+
+        AbstractContainerMenu curContainer = playerContext.player().containerMenu;
+        for (int i = 0; i < 27; i++) {
+            if (curContainer.getSlot(i).getItem().isEmpty()) {
+                playerContext.playerController().windowClick(curContainer.containerId, invSlotToMenuSlot(slot), 0, ClickType.QUICK_MOVE, playerContext.player());
                 return 1;
             }
         }

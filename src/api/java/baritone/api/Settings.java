@@ -1622,6 +1622,18 @@ public final class Settings {
     public final Setting<Integer> highwayEnderChestsToKeep = new Setting<>(8);
 
     /**
+     * While digging, refill loose ender chests from an ender chest shulker when below this count.
+     * Clamped to 56: a refill can't exceed one slot (64), so a trigger near 64 would refill forever.
+     */
+    public final Setting<Integer> highwayEnderChestsThreshold = new Setting<>(8);
+
+    /**
+     * While digging, refill loose ender chests up to this count. Capped at 64 (a single slot) and
+     * raised to at least the threshold so a refill always clears its own trigger.
+     */
+    public final Setting<Integer> highwayEnderChestsToHave = new Setting<>(64);
+
+    /**
      * Max search distance for obsidian after mining ender chests
      */
     public final Setting<Double> highwayObsidianMaxSearchDist = new Setting<>(6D);

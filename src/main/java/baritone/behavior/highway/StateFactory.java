@@ -178,6 +178,12 @@ public class StateFactory {
             case InventoryCleaningEnderShulker -> {
                 return new InventoryCleaningEnderShulker(highwayState);
             }
+            case EnderChestStashPlaceLocPrep -> {
+                return new EnderChestStashPlaceLocPrep(highwayState);
+            }
+            case DepositingStashEnderShulker -> {
+                return new DepositingStashEnderShulker(highwayState);
+            }
             case GoingToPlaceLocEnderChest -> {
                 return new GoingToPlaceLocEnderChest(highwayState);
             }

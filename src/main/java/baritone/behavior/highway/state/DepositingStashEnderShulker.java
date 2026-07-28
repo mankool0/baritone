@@ -17,40 +17,44 @@
 
 package baritone.behavior.highway.state;
 
-import baritone.api.utils.Rotation;
-import baritone.api.utils.RotationUtils;
-import baritone.api.utils.input.Input;
+import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
+import baritone.behavior.highway.enums.ShulkerType;
 import net.minecraft.client.gui.screens.inventory.ContainerScreen;
 
-import java.util.Optional;
-
-public class OpeningLootEnderChest extends State {
-    public OpeningLootEnderChest(HighwayState state) {
+/**
+ * With ender storage open, deposit the (partially depleted) ender chest shulker back into it so it
+ * stays in the ender inventory rather than being carried. Ends the digging refill cycle.
+ */
+public class DepositingStashEnderShulker extends State {
+    public DepositingStashEnderShulker(HighwayState state) {
         super(state);
     }
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.timer() < 10) {
+        if (context.timer() < 40) {
             return;
         }
 
-        Optional<Rotation> enderChestReachable = RotationUtils.reachable(context.playerContext(), context.placeLoc(), context.playerContext().playerController().getBlockReachDistance());
-        enderChestReachable.ifPresent(rotation -> context.baritone().getLookBehavior().updateTarget(rotation, true));
-
-        context.baritone().getInputOverrideHandler().clearAllKeys();
         if (!(context.playerContext().minecraft().screen instanceof ContainerScreen)) {
-            context.baritone().getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
-        } else {
-            context.baritone().getInputOverrideHandler().clearAllKeys();
-            context.transitionTo(context.stashingEnderShulker()
-                    ? HighwayState.DepositingStashEnderShulker
-                    : HighwayState.DepositingLootEnderChestDepletedShulkers);
+            context.transitionTo(HighwayState.OpeningLootEnderChest); // stashing flag routes the reopen back here
+            return;
         }
 
-        context.resetTimer();
+        if (context.depositShulkerChestSlot(ShulkerType.EnderChest) > 0) {
+            Helper.HELPER.logDirect("Stashed ender chest shulker back into storage.");
+            context.resetTimer();
+            return;
+        }
+
+        // Nothing left to deposit (done), or storage was full (keep the shulker and move on)
+        context.playerContext().player().closeContainer();
+        context.setStashingEnderShulker(false);
+        context.setRefillingEnderChests(false);
+        context.setEnderChestAccessLoc(null);
+        context.transitionTo(HighwayState.Nothing);
     }
 }
