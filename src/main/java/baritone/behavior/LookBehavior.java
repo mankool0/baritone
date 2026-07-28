@@ -49,10 +49,9 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
     private SecondaryTarget secondaryTarget;
 
     /**
-     * The rotation and mode that were actually applied during PRE this tick, for POST bookkeeping.
+     * The target that was actually applied during PRE this tick, for POST bookkeeping.
      */
-    private Rotation appliedRotation;
-    private Target.Mode appliedMode;
+    private Target applied;
 
     /**
      * The rotation known to the server. Returned by {@link #getEffectiveRotation()} for use in {@link IPlayerContext}.
@@ -120,31 +119,26 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
 
         switch (event.getState()) {
             case PRE: {
-                Rotation desired = null;
-                Target.Mode mode = Target.Mode.NONE;
-                if (this.target != null) {
-                    desired = this.target.rotation;
-                    mode = this.target.mode;
-                }
+                Target applied = this.target;
                 // A primary target set for a block interaction keeps priority over the secondary.
                 if (this.secondaryTarget != null && !(this.target != null && this.target.interact)) {
+                    final Rotation desired;
                     if (this.secondaryTarget.pitchOnly || this.isMovementInputForced()) {
                         final float baseYaw = this.target != null ? this.target.rotation.getYaw() : ctx.player().getYRot();
                         desired = new Rotation(baseYaw, this.secondaryTarget.rotation.getPitch());
                     } else {
                         desired = this.secondaryTarget.rotation;
                     }
-                    mode = Target.Mode.resolve(ctx, true);
+                    applied = new Target(desired, Target.Mode.resolve(ctx, true), true);
                 }
-                if (desired == null || mode == Target.Mode.NONE) {
+                if (applied == null || applied.mode == Target.Mode.NONE) {
                     // Just return for PRE, we still want to clear the targets on POST
                     return;
                 }
 
-                this.appliedRotation = desired;
-                this.appliedMode = mode;
+                this.applied = applied;
                 this.prevRotation = new Rotation(ctx.player().getYRot(), ctx.player().getXRot());
-                final Rotation actual = this.processor.peekRotation(desired);
+                final Rotation actual = this.processor.peekRotation(applied.rotation);
                 ctx.player().setYRot(actual.getYaw());
                 ctx.player().setXRot(actual.getPitch());
                 break;
@@ -152,15 +146,15 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
             case POST: {
                 // Reset the player's rotations back to their original values
                 if (this.prevRotation != null) {
-                    this.smoothYawBuffer.addLast(this.appliedRotation.getYaw());
+                    this.smoothYawBuffer.addLast(this.applied.rotation.getYaw());
                     while (this.smoothYawBuffer.size() > Baritone.settings().smoothLookTicks.value) {
                         this.smoothYawBuffer.removeFirst();
                     }
-                    this.smoothPitchBuffer.addLast(this.appliedRotation.getPitch());
+                    this.smoothPitchBuffer.addLast(this.applied.rotation.getPitch());
                     while (this.smoothPitchBuffer.size() > Baritone.settings().smoothLookTicks.value) {
                         this.smoothPitchBuffer.removeFirst();
                     }
-                    if (this.appliedMode == Target.Mode.SERVER) {
+                    if (this.applied.mode == Target.Mode.SERVER) {
                         ctx.player().setYRot(this.prevRotation.getYaw());
                         ctx.player().setXRot(this.prevRotation.getPitch());
                     } else if (ctx.player().isFallFlying() ? Baritone.settings().elytraSmoothLook.value : Baritone.settings().smoothLook.value) {
@@ -176,8 +170,7 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
                 // The targets are done being used for this game tick, so they can be invalidated
                 this.target = null;
                 this.secondaryTarget = null;
-                this.appliedRotation = null;
-                this.appliedMode = null;
+                this.applied = null;
                 break;
             }
             default:
