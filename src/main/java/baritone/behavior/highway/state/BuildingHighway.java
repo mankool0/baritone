@@ -252,7 +252,7 @@ public class BuildingHighway extends State {
 
         if (context.timer() >= 10 && (context.playerContext().player().isOnFire() || context.playerContext().player().getFoodData().getFoodLevel() <= 16)) {
             MobEffectInstance fireRest = context.playerContext().player().getEffect(MobEffects.FIRE_RESISTANCE);
-            if (fireRest == null || fireRest.getDuration() < context.settings().highwayFireRestMinDuration.value || context.playerContext().player().getFoodData().getFoodLevel() <= 16) {
+            if (fireRest == null || fireRest.getDuration() < context.fireRestMinDuration() || context.playerContext().player().getFoodData().getFoodLevel() <= 16) {
                 Helper.HELPER.logDirect("Eating a gapple.");
                 context.clearSourceBlocks(); // Should fix occasional crash after eating gapples
                 context.transitionTo(HighwayState.LiquidRemovalGapplePrep);

@@ -408,9 +408,37 @@ public class HighwayContext {
         this.cachedAbsorption = cachedAbsorption;
     }
 
+    // All states of the two gapple-eat flows; used to release eat-side effects when any code
+    // path (mob combat, floating fix, stuck handling, ...) yanks the state machine out of them.
+    private static final EnumSet<HighwayState> GAPPLE_EAT_STATES = EnumSet.of(
+            HighwayState.EmergencyGapplePrep, HighwayState.EmergencyGapplePreEat, HighwayState.EmergencyGappleEat,
+            HighwayState.LiquidRemovalGapplePrep, HighwayState.LiquidRemovalGapplePreEat, HighwayState.LiquidRemovalGappleEat
+    );
+
     public void transitionTo(HighwayState nextState) {
         Helper.HELPER.logDebug(currentState + " -> " + nextState);
+        // Leaving the eat flow by any path: release the use key and drop the hitResult
+        // suppression so they can't leak into (and act during) other states.
+        if (currentState != null && GAPPLE_EAT_STATES.contains(currentState.getState())
+                && !GAPPLE_EAT_STATES.contains(nextState)) {
+            NetherHighwayBuilderBehavior.suppressHitResult = false;
+            if (playerContext.minecraft() != null) {
+                playerContext.minecraft().options.keyUse.setDown(false);
+            }
+        }
         currentState = StateFactory.getState(nextState);
+    }
+
+    public float gappleEatHealthThreshold() {
+        return Math.min(settings.highwayGappleEatHealthThreshold.value, 20f);
+    }
+
+    public int gappleEatFoodThreshold() {
+        return Math.min(settings.highwayGappleEatFoodThreshold.value, 19);
+    }
+
+    public int fireRestMinDuration() {
+        return Math.min(settings.highwayFireRestMinDuration.value, 5900);
     }
 
     public HighwayState previousState() {
@@ -654,8 +682,8 @@ public class HighwayContext {
         boolean inLiquidEat = currentStateEnum == HighwayState.LiquidRemovalGapplePrep || currentStateEnum == HighwayState.LiquidRemovalGapplePreEat || currentStateEnum == HighwayState.LiquidRemovalGappleEat;
         if (!inEmergencyEat && !inLiquidEat && !inRecovery && (!inCombat || settings.highwayEmergencyEatDuringCombat.value)) {
             if (currentStateEnum != HighwayState.Nothing) {
-                float healthThreshold = settings.highwayGappleEatHealthThreshold.value;
-                int foodThreshold = settings.highwayGappleEatFoodThreshold.value;
+                float healthThreshold = gappleEatHealthThreshold();
+                int foodThreshold = gappleEatFoodThreshold();
                 boolean healthTrigger = healthThreshold > 0 && playerContext.player().getHealth() < healthThreshold;
                 boolean foodTrigger = foodThreshold > 0 && playerContext.player().getFoodData().getFoodLevel() <= foodThreshold;
                 if (healthTrigger || foodTrigger) {

@@ -17,21 +17,23 @@
 
 package baritone.behavior.highway.state;
 
-import baritone.api.utils.input.Input;
+import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.NetherHighwayBuilderBehavior;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
 
 public class EmergencyGappleEat extends State {
+    private int heldWithoutEatingTicks;
+
     public EmergencyGappleEat(HighwayState state) {
         super(state);
     }
 
     @Override
     public void handle(HighwayContext context) {
-        float healthThreshold = context.settings().highwayGappleEatHealthThreshold.value;
-        int foodThreshold = context.settings().highwayGappleEatFoodThreshold.value;
+        float healthThreshold = context.gappleEatHealthThreshold();
+        int foodThreshold = context.gappleEatFoodThreshold();
         float health = context.playerContext().player().getHealth();
         int food = context.playerContext().player().getFoodData().getFoodLevel();
 
@@ -47,16 +49,29 @@ public class EmergencyGappleEat extends State {
             return;
         }
 
-        if (context.timer() <= 120) {
+        boolean screenOpen = context.playerContext().minecraft().screen != null;
+        if (!screenOpen) {
+            // Only count while the key can actually be held; with a screen open not progressing is expected
+            if (context.playerContext().player().isUsingItem()) {
+                heldWithoutEatingTicks = 0;
+            } else {
+                heldWithoutEatingTicks++;
+            }
+        }
+
+        if (context.timer() <= 120 && heldWithoutEatingTicks <= 40) {
             // suppressHitResult nulls the hitResult inside startUseItem() via a mixin redirect, preventing
             // block/container interaction (offhand echest placement, container opening) while keyUse is held.
             NetherHighwayBuilderBehavior.suppressHitResult = true;
-            if (context.playerContext().minecraft().screen == null) {
+            if (!screenOpen) {
                 context.playerContext().minecraft().options.keyUse.setDown(true);
-            } else {
-                context.baritone().getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
+            } else if (context.playerContext().player().hasContainerOpen()) {
+                context.playerContext().player().closeContainer();
             }
         } else {
+            if (heldWithoutEatingTicks > 40) {
+                Helper.HELPER.logDirect("Gapple eat isn't progressing (server never confirmed it), re-syncing the hotbar slot.");
+            }
             NetherHighwayBuilderBehavior.suppressHitResult = false;
             context.playerContext().minecraft().options.keyUse.setDown(false);
             context.baritone().getInputOverrideHandler().clearAllKeys();

@@ -331,8 +331,11 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
         highwayContext.incrementTimers();
 
-        if (highwayContext.autoTotem() || highwayContext.clearCursorItem() ||
-                highwayContext.stuckCheck() || highwayContext.healthCheck()) {
+        // autoTotem/clearCursorItem pause the state machine while they work, but the stuck/health
+        // watchdogs must run regardless: a cursor stack that can never be placed (full inventory)
+        // used to starve them and freeze the state machine forever with its keys latched.
+        boolean pauseStateMachine = highwayContext.autoTotem() || highwayContext.clearCursorItem();
+        if (highwayContext.stuckCheck() || highwayContext.healthCheck() || pauseStateMachine) {
             return;
         }
 

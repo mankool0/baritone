@@ -17,7 +17,6 @@
 
 package baritone.behavior.highway.state;
 
-import baritone.api.utils.input.Input;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.NetherHighwayBuilderBehavior;
 import baritone.behavior.highway.State;
@@ -37,8 +36,8 @@ public class EmergencyGapplePreEat extends State {
             NetherHighwayBuilderBehavior.suppressHitResult = true;
             if (context.playerContext().minecraft().screen == null) {
                 context.playerContext().minecraft().options.keyUse.setDown(true);
-            } else {
-                context.baritone().getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
+            } else if (context.playerContext().player().hasContainerOpen()) {
+                context.playerContext().player().closeContainer();
             }
         } else {
             NetherHighwayBuilderBehavior.suppressHitResult = false;

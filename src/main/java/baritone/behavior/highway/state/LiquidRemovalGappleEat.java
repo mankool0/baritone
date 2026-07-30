@@ -17,14 +17,17 @@
 
 package baritone.behavior.highway.state;
 
-import baritone.api.utils.input.Input;
+import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
+import baritone.behavior.highway.NetherHighwayBuilderBehavior;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 
 public class LiquidRemovalGappleEat extends State {
+    private int heldWithoutEatingTicks;
+
     public LiquidRemovalGappleEat(HighwayState state) {
         super(state);
     }
@@ -32,7 +35,8 @@ public class LiquidRemovalGappleEat extends State {
     @Override
     public void handle(HighwayContext context) {
         MobEffectInstance fireRest = context.playerContext().player().getEffect(MobEffects.FIRE_RESISTANCE);
-        if (fireRest != null && fireRest.getDuration() >= context.settings().highwayFireRestMinDuration.value && context.playerContext().player().getFoodData().getFoodLevel() > 16 /*&& ctx.playerFeet().getY() == placeLoc.getY()*/) {
+        if (fireRest != null && fireRest.getDuration() >= context.fireRestMinDuration() && context.playerContext().player().getFoodData().getFoodLevel() > 16 /*&& ctx.playerFeet().getY() == placeLoc.getY()*/) {
+            NetherHighwayBuilderBehavior.suppressHitResult = false;
             context.transitionTo(HighwayState.LiquidRemovalPathing);
             context.playerContext().minecraft().options.keyUse.setDown(false);
             context.baritone().getInputOverrideHandler().clearAllKeys();
@@ -40,13 +44,27 @@ public class LiquidRemovalGappleEat extends State {
             return;
         }
 
-        if (context.timer() <= 120) {
-            if (context.playerContext().minecraft().screen == null) {
-                context.playerContext().minecraft().options.keyUse.setDown(true);
+        boolean screenOpen = context.playerContext().minecraft().screen != null;
+        if (!screenOpen) {
+            if (context.playerContext().player().isUsingItem()) {
+                heldWithoutEatingTicks = 0;
             } else {
-                context.baritone().getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
+                heldWithoutEatingTicks++;
+            }
+        }
+
+        if (context.timer() <= 120 && heldWithoutEatingTicks <= 40) {
+            NetherHighwayBuilderBehavior.suppressHitResult = true;
+            if (!screenOpen) {
+                context.playerContext().minecraft().options.keyUse.setDown(true);
+            } else if (context.playerContext().player().hasContainerOpen()) {
+                context.playerContext().player().closeContainer();
             }
         } else {
+            if (heldWithoutEatingTicks > 40) {
+                Helper.HELPER.logDirect("Gapple eat isn't progressing (server never confirmed it), re-syncing the hotbar slot.");
+            }
+            NetherHighwayBuilderBehavior.suppressHitResult = false;
             context.playerContext().minecraft().options.keyUse.setDown(false);
             context.baritone().getInputOverrideHandler().clearAllKeys();
             context.transitionTo(HighwayState.LiquidRemovalGapplePrep); // Check if we have fire resistance now
