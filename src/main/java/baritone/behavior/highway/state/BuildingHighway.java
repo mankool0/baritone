@@ -18,7 +18,6 @@
 package baritone.behavior.highway.state;
 
 import baritone.api.utils.Helper;
-import baritone.api.utils.VecUtils;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayBlockState;
@@ -177,32 +176,17 @@ public class BuildingHighway extends State {
             Vec3 direction = new Vec3(context.highwayDirection().getX(), context.highwayDirection().getY(), context.highwayDirection().getZ());
 
             Vec3 curPosNotOffset = new Vec3(context.playerContext().playerFeet().getX(), context.playerContext().playerFeet().getY(), context.playerContext().playerFeet().getZ());
-            // Fix player feet location for diags so we don't check too far ahead
-            // +X,+Z and -X,-Z
-            if (((context.highwayDirection().getX() == 1 && context.highwayDirection().getZ() == 1) || (context.highwayDirection().getX() == -1 && context.highwayDirection().getZ() == -1))) {
-                curPosNotOffset = new Vec3(curPosNotOffset.x, curPosNotOffset.y, curPosNotOffset.x - 4);
-            } else if ((context.highwayDirection().getX() == 1 && context.highwayDirection().getZ() == -1) || (context.highwayDirection().getX() == -1 && context.highwayDirection().getZ() == 1)) {
-                curPosNotOffset = new Vec3(-curPosNotOffset.z - 5, curPosNotOffset.y, curPosNotOffset.z);
-            }
-
             Vec3 curPos = new Vec3(curPosNotOffset.x + (context.highwayCheckBackDistance() * -context.highwayDirection().getX()), curPosNotOffset.y, curPosNotOffset.z + (context.highwayCheckBackDistance() * -context.highwayDirection().getZ()));
             BlockPos startCheckPos = context.getClosestPoint(new Vec3(context.originVector().x, context.originVector().y, context.originVector().z), direction, curPos, LocationType.HighwayBuild);
-            BlockPos startCheckPosLiq = context.getClosestPoint(new Vec3(context.liqOriginVector().x, context.liqOriginVector().y, context.liqOriginVector().z), new Vec3(context.highwayDirection().getX(), context.highwayDirection().getY(), context.highwayDirection().getZ()), curPos, LocationType.ShulkerEchestInteraction);
+            BlockPos startCheckPosLiq = context.getClosestPoint(new Vec3(context.liqOriginVector().x, context.liqOriginVector().y, context.liqOriginVector().z), direction, curPos, LocationType.ShulkerEchestInteraction);
 
+            // Along-line distance in blocks from the scan start to the player's projected position;
+            // both points are on the highway line, so the larger axis delta is the step count for
+            // straight and diagonal highways alike
             BlockPos feetClosestPoint = context.getClosestPoint(new Vec3(context.originVector().x, context.originVector().y, context.originVector().z), direction, curPosNotOffset, LocationType.HighwayBuild);
-            double distToWantedStart;
-            if ((context.highwayDirection().getX() == 1 && context.highwayDirection().getZ() == 1) || (context.highwayDirection().getX() == -1 && context.highwayDirection().getZ() == -1)) {
-                distToWantedStart = Math.abs(Math.abs(context.playerContext().playerFeet().getX()) - Math.abs(startCheckPos.getX()));
-            } else if ((context.highwayDirection().getX() == 1 && context.highwayDirection().getZ() == -1) || (context.highwayDirection().getX() == -1 && context.highwayDirection().getZ() == 1)) {
-                distToWantedStart = Math.abs(Math.abs(context.playerContext().playerFeet().getZ()) - Math.abs(startCheckPos.getZ()));
-            } else {
-                distToWantedStart = VecUtils.distanceToCenter(feetClosestPoint, startCheckPos.getX(), startCheckPos.getY(), startCheckPos.getZ());
-            }
+            int distToWantedStart = Math.max(Math.abs(feetClosestPoint.getX() - startCheckPos.getX()), Math.abs(feetClosestPoint.getZ() - startCheckPos.getZ()));
 
-            int tempCheckBackDist = context.highwayCheckBackDistance();
-            if (distToWantedStart < tempCheckBackDist) {
-                tempCheckBackDist = (int) distToWantedStart;
-            }
+            int tempCheckBackDist = Math.min(context.highwayCheckBackDistance(), distToWantedStart);
 
             HighwayBlockState curState;
             if (context.baritone().getBuilderProcess().isPaused()) {
@@ -226,10 +210,11 @@ public class BuildingHighway extends State {
                 return;
             }
 
-            curState = context.isHighwayCorrect(startCheckPos, startCheckPosLiq, tempCheckBackDist, false); // Don't check front for blocks as we are probably just mining
+            int blocksCheckDist = Math.max(0, tempCheckBackDist - context.settings().highwayInvalidBlockCheckMargin.value);
+            curState = context.isHighwayCorrect(startCheckPos, startCheckPosLiq, blocksCheckDist, false);
             if (curState == HighwayBlockState.Blocks) {
                 if (!context.invalidBlockFixActive()) {
-                    Helper.HELPER.logDirect("Fixing invalid blocks.");
+                    Helper.HELPER.logDirect("Fixing invalid blocks: " + String.join("; ", context.lastMismatches()));
                     context.startInvalidBlockFix();
                     context.transitionTo(HighwayState.Nothing);
                     context.resetTimer();

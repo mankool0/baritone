@@ -166,7 +166,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 } else {
                     highwayContext.setLiqOriginVector(new Vec3(startX, 0, startZ - highwayWidthLiqOffset));
                 }
-                highwayContext.setBackPathOriginVector(new Vec3(startX, 0, startZ - highwayWidthLiqOffsetRail + 2));
+                highwayContext.setBackPathOriginVector(new Vec3(startX, 0, startZ - highwayWidthLiqOffsetRail + 1));
                 highwayContext.seteChestEmptyShulkOriginVector(new Vec3(startX, 0, startZ - highwayWidthOffset - 1));
             }
 
@@ -355,32 +355,16 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
         if (settings.highwayRenderLiquidScanArea.value) {
             highwayContext.renderLockLiquid().lock();
-            //PathRenderer.drawManySelectionBoxes(ctx.minecraft().getRenderViewEntity(), renderBlocks, Color.CYAN);
-            BufferBuilder bufferBuilder = IRenderer.startLines(Color.BLUE, 2, settings.renderSelectionBoxesIgnoreDepth.value);
-
-            //BlockPos blockpos = movingObjectPositionIn.getBlockPos();
-            BlockStateInterface bsi = new BlockStateInterface(BaritoneAPI.getProvider().getPrimaryBaritone().getPlayerContext()); // TODO this assumes same dimension between primary baritone and render view? is this safe?
-
-            highwayContext.renderBlocksLiquid().forEach(pos -> {
-                BlockState state = bsi.get0(pos);
-                VoxelShape shape;
-                AABB toDraw;
-
-                if (state.getBlock() instanceof AirBlock) {
-                    shape = Blocks.DIRT.defaultBlockState().getShape(player.level(), pos);
-                } else {
-                    shape = state.getShape(player.level(), pos);
-                }
-                if (!shape.isEmpty()) {
-                    AABB bounds = shape.bounds();
-                    toDraw = new AABB(pos.getX(), pos.getY(), pos.getZ(), pos.getX() + bounds.getXsize(), pos.getY() + bounds.getYsize(), pos.getZ() + bounds.getZsize());
-                    IRenderer.emitAABB(bufferBuilder, event.getModelViewStack(), toDraw, .002D);
-                }
-            });
-
-            IRenderer.endLines(bufferBuilder, settings.renderSelectionBoxesIgnoreDepth.value);
-
+            AABB liquidArea = highwayContext.renderAreaLiquid();
             highwayContext.renderLockLiquid().unlock();
+
+            if (liquidArea != null) {
+                BufferBuilder bufferBuilder = IRenderer.startLines(Color.BLUE, 2, settings.renderSelectionBoxesIgnoreDepth.value);
+                // Inflate a bit more than the building-area boxes: when paving, the scan area hugs
+                // the building area, so equal-size boxes would z-fight
+                IRenderer.emitAABB(bufferBuilder, event.getModelViewStack(), liquidArea, .05D);
+                IRenderer.endLines(bufferBuilder, settings.renderSelectionBoxesIgnoreDepth.value);
+            }
         }
 
         if (settings.highwayRenderBuildingArea.value) {
@@ -406,6 +390,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     IRenderer.endLines(bufferBuilder, settings.renderSelectionBoxesIgnoreDepth.value);
                 }
             });
+            highwayContext.renderLockBuilding().unlock();
         }
     }
 
