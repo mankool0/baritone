@@ -1792,6 +1792,13 @@ public final class Settings {
     public final Setting<Integer> highwayInvalidBlockFixTimeout = new Setting<>(100);
 
     /**
+     * How many blocks directly behind the player the invalid block check leaves alone. Blocks that
+     * close are usually still being placed (rail and edge blocks land a few blocks behind the
+     * player, especially on diagonals), and flagging them restarts the builder needlessly.
+     */
+    public final Setting<Integer> highwayInvalidBlockCheckMargin = new Setting<>(5);
+
+    /**
      * Message to detect when entering a server queue.
      * Highway building will pause when this message is detected.
      */

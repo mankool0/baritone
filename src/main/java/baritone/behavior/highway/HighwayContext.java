@@ -111,16 +111,22 @@ public class HighwayContext {
     private final Lock renderLockLiquid = new ReentrantLock();
     private final Lock renderLockBuilding = new ReentrantLock();
 
-    public ArrayList<BlockPos> renderBlocksLiquid() {
-        return renderBlocksLiquid;
+    public AABB renderAreaLiquid() {
+        return renderAreaLiquid;
     }
 
     public HashMap<BlockPos, Color> renderBlocksBuilding() {
         return renderBlocksBuilding;
     }
 
-    private final ArrayList<BlockPos> renderBlocksLiquid = new ArrayList<>();
+    private AABB renderAreaLiquid = null;
     private final HashMap<BlockPos, Color> renderBlocksBuilding = new HashMap<>();
+
+    public List<String> lastMismatches() {
+        return lastMismatches;
+    }
+
+    private final ArrayList<String> lastMismatches = new ArrayList<>();
 
     public Rotation floatingFixReachablesRemoveFirst() {
         if (!floatingFixReachables.isEmpty()) {
@@ -402,9 +408,37 @@ public class HighwayContext {
         this.cachedAbsorption = cachedAbsorption;
     }
 
+    // All states of the two gapple-eat flows; used to release eat-side effects when any code
+    // path (mob combat, floating fix, stuck handling, ...) yanks the state machine out of them.
+    private static final EnumSet<HighwayState> GAPPLE_EAT_STATES = EnumSet.of(
+            HighwayState.EmergencyGapplePrep, HighwayState.EmergencyGapplePreEat, HighwayState.EmergencyGappleEat,
+            HighwayState.LiquidRemovalGapplePrep, HighwayState.LiquidRemovalGapplePreEat, HighwayState.LiquidRemovalGappleEat
+    );
+
     public void transitionTo(HighwayState nextState) {
         Helper.HELPER.logDebug(currentState + " -> " + nextState);
+        // Leaving the eat flow by any path: release the use key and drop the hitResult
+        // suppression so they can't leak into (and act during) other states.
+        if (currentState != null && GAPPLE_EAT_STATES.contains(currentState.getState())
+                && !GAPPLE_EAT_STATES.contains(nextState)) {
+            NetherHighwayBuilderBehavior.suppressHitResult = false;
+            if (playerContext.minecraft() != null) {
+                playerContext.minecraft().options.keyUse.setDown(false);
+            }
+        }
         currentState = StateFactory.getState(nextState);
+    }
+
+    public float gappleEatHealthThreshold() {
+        return Math.min(settings.highwayGappleEatHealthThreshold.value, 20f);
+    }
+
+    public int gappleEatFoodThreshold() {
+        return Math.min(settings.highwayGappleEatFoodThreshold.value, 19);
+    }
+
+    public int fireRestMinDuration() {
+        return Math.min(settings.highwayFireRestMinDuration.value, 5900);
     }
 
     public HighwayState previousState() {
@@ -648,8 +682,8 @@ public class HighwayContext {
         boolean inLiquidEat = currentStateEnum == HighwayState.LiquidRemovalGapplePrep || currentStateEnum == HighwayState.LiquidRemovalGapplePreEat || currentStateEnum == HighwayState.LiquidRemovalGappleEat;
         if (!inEmergencyEat && !inLiquidEat && !inRecovery && (!inCombat || settings.highwayEmergencyEatDuringCombat.value)) {
             if (currentStateEnum != HighwayState.Nothing) {
-                float healthThreshold = settings.highwayGappleEatHealthThreshold.value;
-                int foodThreshold = settings.highwayGappleEatFoodThreshold.value;
+                float healthThreshold = gappleEatHealthThreshold();
+                int foodThreshold = gappleEatFoodThreshold();
                 boolean healthTrigger = healthThreshold > 0 && playerContext.player().getHealth() < healthThreshold;
                 boolean foodTrigger = foodThreshold > 0 && playerContext.player().getFoodData().getFoodLevel() <= foodThreshold;
                 if (healthTrigger || foodTrigger) {
@@ -788,8 +822,6 @@ public class HighwayContext {
     }
 
     public BetterBlockPos getClosestPoint(Vec3 origin, Vec3 direction, Vec3 point, LocationType locType) {
-        // https://stackoverflow.com/a/51906100
-
         int yLevel = switch (locType) {
             case HighwayBuild -> settings.highwayLowestY.value;
             case ShulkerEchestInteraction -> paving ? settings.highwayMainY.value + 1 : settings.highwayMainY.value;
@@ -805,11 +837,20 @@ public class HighwayContext {
             point = new Vec3(firstStartingPos.getX(), firstStartingPos.getY(), firstStartingPos.getZ());
         }
 
-        direction = direction.normalize();
-        Vec3 lhs = point.subtract(origin);
-        double dotP = lhs.dot(direction);
-        Vec3 closest = origin.add(direction.scale(dotP));
-        return new BetterBlockPos(Math.round(closest.x), yLevel, Math.round(closest.z));
+        // Project onto the highway line, but round the along-line step count once and derive both
+        // coordinates from it in integer space. Rounding x and z independently after a double
+        // projection can disagree on half-integer results and return a point one block off the
+        // line, which laterally shifted offset highways whenever the build restarted.
+        long ox = Math.round(origin.x);
+        long oz = Math.round(origin.z);
+        long dirX = Math.round(direction.x);
+        long dirZ = Math.round(direction.z);
+        long lenSq = dirX * dirX + dirZ * dirZ;
+        if (lenSq == 0) {
+            return new BetterBlockPos((int) ox, yLevel, (int) oz);
+        }
+        long steps = Math.round(((point.x - ox) * dirX + (point.z - oz) * dirZ) / lenSq);
+        return new BetterBlockPos((int) (ox + steps * dirX), yLevel, (int) (oz + steps * dirZ));
     }
 
     public int getLargestItemSlot(int itemId) {
@@ -2039,18 +2080,8 @@ public class HighwayContext {
     }
 
     public int getHighwayLengthFront() {
-        // TODO: Clean this up
         Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
-        Vec3 curPosNotOffset = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
-        // Fix player feet location for diags so we don't check too far ahead
-        // +X,+Z and -X,-Z
-        if (((highwayDirection.getX() == 1 && highwayDirection.getZ() == 1) || (highwayDirection.getX() == -1 && highwayDirection.getZ() == -1))) {
-            curPosNotOffset = new Vec3(curPosNotOffset.x, curPosNotOffset.y, curPosNotOffset.x - 4);
-        } else if ((highwayDirection.getX() == 1 && highwayDirection.getZ() == -1) || (highwayDirection.getX() == -1 && highwayDirection.getZ() == 1)) {
-            curPosNotOffset = new Vec3(-curPosNotOffset.z - 5, curPosNotOffset.y, curPosNotOffset.z);
-        }
-
-        Vec3 curPosPlayer = new Vec3(curPosNotOffset.x, curPosNotOffset.y, curPosNotOffset.z);
+        Vec3 curPosPlayer = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
         BlockPos startCheckPos = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z), direction, curPosPlayer, LocationType.HighwayBuild);
 
 
@@ -2113,6 +2144,7 @@ public class HighwayContext {
         // startPos needs to be in center of highway
         renderLockBuilding.lock();
         renderBlocksBuilding.clear();
+        lastMismatches.clear();
         boolean foundBlocks = false;
         for (int i = 1; i < distanceToCheck; i++) {
             BlockPos curPos = startPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
@@ -2156,6 +2188,7 @@ public class HighwayContext {
                                             // can't do boats lol
                                             boatHasPassenger = entity.isVehicle();
                                             boatLocation = new BlockPos(blockX, blockY, blockZ);
+                                            renderLockBuilding.unlock();
                                             return HighwayBlockState.Boat;
                                         }
                                     }
@@ -2170,14 +2203,12 @@ public class HighwayContext {
                                     return HighwayBlockState.Liquids;
                                 } else {
                                     foundBlocks = true;
+                                    if (lastMismatches.size() < 4) {
+                                        lastMismatches.add("(" + blockX + ", " + blockY + ", " + blockZ + ") "
+                                                + BlockUtils.blockToString(current.getBlock()) + " -> " + BlockUtils.blockToString(desiredState.getBlock()));
+                                    }
                                 }
                             }
-
-
-                            //if (!schematic.desiredState(x, y, z, current, this.approxPlaceable).equals(current)) {
-                            // Found incorrect block
-                            //   foundBlocks = true;//current.getBlock() != Blocks.OBSIDIAN || blockY != 119;
-                            //}
                         }
 
                     }
@@ -2198,8 +2229,12 @@ public class HighwayContext {
 
     public BlockPos findFirstLiquidGround(BlockPos startPos, int distanceToCheck, boolean renderCheckedBlocks) {
         if (renderCheckedBlocks) {
+            BlockPos slice = startPos.offset(highwayDirection.getX(), 0, highwayDirection.getZ());
+            AABB area = new AABB(slice.getX(), slice.getY(), slice.getZ(),
+                    slice.getX() + liqCheckSchem.widthX(), slice.getY() + liqCheckSchem.heightY(), slice.getZ() + liqCheckSchem.lengthZ());
             renderLockLiquid.lock();
-            renderBlocksLiquid.clear();
+            renderAreaLiquid = area;
+            renderLockLiquid.unlock();
         }
         //Liquid Checking all around
         for (int i = 1; i < distanceToCheck; i++) {
@@ -2214,17 +2249,9 @@ public class HighwayContext {
                         if (!liqCheckSchem.inSchematic(x, y, z, current)) {
                             continue;
                         }
-                        if (renderCheckedBlocks) {
-                            if (i == 1 && !renderBlocksBuilding.containsKey(new BlockPos(blockX, blockY, blockZ))) {
-                                renderBlocksLiquid.add(new BlockPos(blockX, blockY, blockZ));
-                            }
-                        }
                         if (baritone.bsi.worldContainsLoadedChunk(blockX, blockZ)) { // check if its in render distance, not if its in cache
                             // Never should be liquids
                             if (current.getBlock() instanceof LiquidBlock) {
-                                if (renderCheckedBlocks) {
-                                    renderLockLiquid.unlock();
-                                }
                                 return new BlockPos(blockX, blockY, blockZ);
                             }
                         }
@@ -2232,9 +2259,6 @@ public class HighwayContext {
                     }
                 }
             }
-        }
-        if (renderCheckedBlocks) {
-            renderLockLiquid.unlock();
         }
         return null;
     }

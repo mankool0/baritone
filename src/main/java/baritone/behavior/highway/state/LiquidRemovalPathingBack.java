@@ -35,7 +35,7 @@ public class LiquidRemovalPathingBack extends State {
     @Override
     public void handle(HighwayContext context) {
         MobEffectInstance fireRest = context.playerContext().player().getEffect(MobEffects.FIRE_RESISTANCE);
-        if (fireRest != null && fireRest.getDuration() >= context.settings().highwayFireRestMinDuration.value && context.playerContext().playerFeet().getY() == context.placeLoc().getY()) {
+        if (fireRest != null && fireRest.getDuration() >= context.fireRestMinDuration() && context.playerContext().playerFeet().getY() == context.placeLoc().getY()) {
             context.transitionTo(HighwayState.LiquidRemovalPathing);
             context.playerContext().minecraft().options.keyUse.setDown(false);
             context.baritone().getInputOverrideHandler().clearAllKeys();
@@ -44,7 +44,7 @@ public class LiquidRemovalPathingBack extends State {
         }
 
         BlockState tempState = context.playerContext().world().getBlockState(context.playerContext().playerFeet());
-        if (tempState.getBlock() instanceof LiquidBlock && (fireRest == null || fireRest.getDuration() < context.settings().highwayFireRestMinDuration.value)) {
+        if (tempState.getBlock() instanceof LiquidBlock && (fireRest == null || fireRest.getDuration() < context.fireRestMinDuration())) {
             Helper.HELPER.logDirect("We are stuck in lava, going directly to gapple eating.");
             context.baritone().getInputOverrideHandler().clearAllKeys();
             context.baritone().getPathingBehavior().cancelEverything();

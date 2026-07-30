@@ -17,8 +17,8 @@
 
 package baritone.behavior.highway.state;
 
-import baritone.api.utils.input.Input;
 import baritone.behavior.highway.HighwayContext;
+import baritone.behavior.highway.NetherHighwayBuilderBehavior;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
 
@@ -29,14 +29,16 @@ public class LiquidRemovalGapplePreEat extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        // Constantiam has some weird issue where you want to eat for half a second, stop and then eat again
+        // Constantiam has some weird issue where you want to eat for half a second, stop and then eat again.
         if (context.timer() <= 10) {
+            NetherHighwayBuilderBehavior.suppressHitResult = true;
             if (context.playerContext().minecraft().screen == null) {
                 context.playerContext().minecraft().options.keyUse.setDown(true);
-            } else {
-                context.baritone().getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
+            } else if (context.playerContext().player().hasContainerOpen()) {
+                context.playerContext().player().closeContainer();
             }
         } else {
+            NetherHighwayBuilderBehavior.suppressHitResult = false;
             context.playerContext().minecraft().options.keyUse.setDown(false);
             context.baritone().getInputOverrideHandler().clearAllKeys();
             context.transitionTo(HighwayState.LiquidRemovalGappleEat);

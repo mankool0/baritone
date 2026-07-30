@@ -65,7 +65,7 @@ public class LiquidRemovalPathing extends State {
         }
 
         MobEffectInstance fireRest = context.playerContext().player().getEffect(MobEffects.FIRE_RESISTANCE);
-        if (fireRest != null && fireRest.getDuration() < context.settings().highwayFireRestMinDuration.value) {
+        if (fireRest != null && fireRest.getDuration() < context.fireRestMinDuration()) {
             Helper.HELPER.logDirect("Running out of fire resistance. Restarting liquid clearing.");
             context.transitionTo(HighwayState.Nothing);
             context.baritone().getInputOverrideHandler().clearAllKeys();

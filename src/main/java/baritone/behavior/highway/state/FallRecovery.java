@@ -46,7 +46,7 @@ public class FallRecovery extends State {
         boolean onFire = player.isOnFire();
         MobEffectInstance fireRes = player.getEffect(MobEffects.FIRE_RESISTANCE);
         int fireResDur = fireRes == null ? 0 : fireRes.getDuration();
-        boolean needFireRes = (inLava || onFire) && fireResDur < context.settings().highwayFireRestMinDuration.value;
+        boolean needFireRes = (inLava || onFire) && fireResDur < context.fireRestMinDuration();
 
         boolean pathing = context.baritone().getPathingBehavior().isPathing();
 

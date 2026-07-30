@@ -22,10 +22,11 @@ import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
 import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
 public class LiquidRemovalGapplePrep extends State {
+    private int hotbarWaitTicks;
+
     public LiquidRemovalGapplePrep(HighwayState state) {
         super(state);
     }
@@ -39,11 +40,16 @@ public class LiquidRemovalGapplePrep extends State {
             return;
         }
 
-        ItemStack stack = context.playerContext().player().getInventory().items.get(gappleSlot);
-        if (Item.getId(stack.getItem()) == Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) {
-            context.playerContext().player().getInventory().selected = gappleSlot;
+        if (gappleSlot >= 9) {
+            if (++hotbarWaitTicks <= 20) {
+                return;
+            }
+            Helper.HELPER.logDirect("Couldn't move gapples onto the hotbar (allowInventory off or moves blocked?)");
+            context.transitionTo(HighwayState.LiquidRemovalPrep);
+            return;
         }
 
+        context.playerContext().player().getInventory().selected = gappleSlot;
         context.transitionTo(HighwayState.LiquidRemovalGapplePreEat);
         context.resetTimer();
     }
