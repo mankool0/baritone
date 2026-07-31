@@ -39,6 +39,12 @@ public class BuildingHighway extends State {
 
     @Override
     public void handle(HighwayContext context) {
+        if (context.endPos() != null && !context.baritone().getBuilderProcess().isActive() && context.isHighwayEndComplete()) {
+            Helper.HELPER.logDirect("Reached the end of the highway at " + context.endPos().toString() + ", stopping.");
+            context.baritone().getNetherHighwayBuilderBehavior().stop();
+            return;
+        }
+
         if (context.repeatCheck() && context.timer() <= 120) {
             return;
         }

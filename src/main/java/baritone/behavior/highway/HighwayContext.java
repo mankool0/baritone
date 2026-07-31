@@ -152,6 +152,7 @@ public class HighwayContext {
     private WhiteBlackSchematic liqCheckSchem;
     private BetterBlockPos originBuild;
     private BetterBlockPos firstStartingPos;
+    private BetterBlockPos endPos; // on the highway line at HighwayBuild Y; null = build forever
     private Vec3 originVector = new Vec3(0, 0, 0);
     private Vec3 liqOriginVector = new Vec3(0, 0, 0);
     private Vec3 backPathOriginVector = new Vec3(0, 0, 0);
@@ -330,6 +331,14 @@ public class HighwayContext {
 
     public void setFirstStartingPos(BetterBlockPos firstStartingPos) {
         this.firstStartingPos = firstStartingPos;
+    }
+
+    public BetterBlockPos endPos() {
+        return endPos;
+    }
+
+    public void setEndPos(BetterBlockPos endPos) {
+        this.endPos = endPos;
     }
 
     public void setOriginVector(Vec3 originVector) {
@@ -850,7 +859,23 @@ public class HighwayContext {
             return new BetterBlockPos((int) ox, yLevel, (int) oz);
         }
         long steps = Math.round(((point.x - ox) * dirX + (point.z - oz) * dirZ) / lenSq);
+        // Mirror of the firstStartingPos clamp above: never allow points past the set end
+        if (endPos != null) {
+            long endSteps = dirX != 0 ? (endPos.getX() - ox) * dirX : (endPos.getZ() - oz) * dirZ;
+            steps = Math.min(steps, endSteps);
+        }
         return new BetterBlockPos((int) (ox + steps * dirX), yLevel, (int) (oz + steps * dirZ));
+    }
+
+    /**
+     * Signed slice count from {@code from} to {@code to} measured on the driving axis, so points on
+     * parallel lines (build/liquid/side-storage) agree on where a given slice ends. Negative means
+     * {@code to} is behind {@code from}.
+     */
+    public int stepsAlongHighway(BlockPos from, BlockPos to) {
+        return highwayDirection.getX() != 0
+                ? (to.getX() - from.getX()) * highwayDirection.getX()
+                : (to.getZ() - from.getZ()) * highwayDirection.getZ();
     }
 
     public int getLargestItemSlot(int itemId) {
@@ -2084,8 +2109,11 @@ public class HighwayContext {
         Vec3 curPosPlayer = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
         BlockPos startCheckPos = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z), direction, curPosPlayer, LocationType.HighwayBuild);
 
-
-        for (int i = 0; i < 10; i++) {
+        int scanLength = 10;
+        if (endPos != null) {
+            scanLength = Math.min(scanLength, stepsAlongHighway(startCheckPos, endPos) + 1);
+        }
+        for (int i = 0; i < scanLength; i++) {
             BlockPos curPos = startCheckPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
             for (int y = 0; y < schematic.heightY(); y++) {
                 for (int z = 0; z < schematic.lengthZ(); z++) {
@@ -2121,6 +2149,40 @@ public class HighwayContext {
         return 0;
     }
 
+    public boolean isHighwayEndComplete() {
+        if (endPos == null) {
+            return false;
+        }
+        Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
+        Vec3 curPosPlayer = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
+        // feetClosest is clamped to the end: even if we wandered past the end the scan still covers
+        // the final checkBackDistance slices instead of degenerating
+        BetterBlockPos feetClosest = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z), direction, curPosPlayer, LocationType.HighwayBuild);
+        Vec3 curPosBack = new Vec3(feetClosest.getX() + (highwayCheckBackDistance * -highwayDirection.getX()), feetClosest.getY(), feetClosest.getZ() + (highwayCheckBackDistance * -highwayDirection.getZ()));
+        BlockPos startCheckPos = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z), direction, curPosBack, LocationType.HighwayBuild);
+        BlockPos startCheckPosLiq = getClosestPoint(new Vec3(liqOriginVector.x, liqOriginVector.y, liqOriginVector.z), direction, curPosBack, LocationType.ShulkerEchestInteraction);
+        int scanDist = stepsAlongHighway(startCheckPos, endPos) + 1;
+        if (!isStretchLoaded(startCheckPos, schematic.widthX(), schematic.lengthZ(), scanDist)
+                || !isStretchLoaded(startCheckPosLiq, liqCheckSchem.widthX(), liqCheckSchem.lengthZ(), scanDist)) {
+            return false;
+        }
+        return isHighwayCorrect(startCheckPos, startCheckPosLiq, scanDist, false) == HighwayBlockState.Air;
+    }
+
+    private boolean isStretchLoaded(BlockPos startPos, int widthX, int lengthZ, int distanceToCheck) {
+        for (int i = 1; i < distanceToCheck; i++) {
+            BlockPos curPos = startPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
+            for (int z = 0; z < lengthZ; z++) {
+                for (int x = 0; x < widthX; x++) {
+                    if (!baritone.bsi.worldContainsLoadedChunk(x + curPos.getX(), z + curPos.getZ())) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
     public boolean canWalkOnFloorAhead() {
         BetterBlockPos feet = playerContext.playerFeet();
         int dirX = highwayDirection.getX();
@@ -2142,6 +2204,10 @@ public class HighwayContext {
 
     public HighwayBlockState isHighwayCorrect(BlockPos startPos, BlockPos startPosLiq, int distanceToCheck, boolean renderLiquidScan) {
         // startPos needs to be in center of highway
+        if (endPos != null) {
+            // Terrain past the end stays unbuilt; scanning it would trigger endless fixes
+            distanceToCheck = Math.min(distanceToCheck, stepsAlongHighway(startPos, endPos) + 1);
+        }
         renderLockBuilding.lock();
         renderBlocksBuilding.clear();
         lastMismatches.clear();
@@ -2228,6 +2294,9 @@ public class HighwayContext {
     }
 
     public BlockPos findFirstLiquidGround(BlockPos startPos, int distanceToCheck, boolean renderCheckedBlocks) {
+        if (endPos != null) {
+            distanceToCheck = Math.min(distanceToCheck, stepsAlongHighway(startPos, endPos) + 1);
+        }
         if (renderCheckedBlocks) {
             BlockPos slice = startPos.offset(highwayDirection.getX(), 0, highwayDirection.getZ());
             AABB area = new AABB(slice.getX(), slice.getY(), slice.getZ(),
