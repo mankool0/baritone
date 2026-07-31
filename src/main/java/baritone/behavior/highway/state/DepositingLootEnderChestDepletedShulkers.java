@@ -31,13 +31,17 @@ public class DepositingLootEnderChestDepletedShulkers extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.timer() < 40) {
+        if (context.timer() < 10) {
             return;
         }
 
         if (!(context.playerContext().minecraft().screen instanceof ContainerScreen)) {
             context.transitionTo(HighwayState.OpeningLootEnderChest);
             return;
+        }
+
+        if (context.timer() < 40 && !context.openContainerHasContents()) {
+            return; // Wait for the initial content sync; a truly empty container proceeds at 40
         }
 
         if (context.depositDepletedShulkerChestSlot() > 0) {

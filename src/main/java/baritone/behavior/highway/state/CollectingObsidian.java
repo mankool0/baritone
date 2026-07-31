@@ -42,25 +42,32 @@ public class CollectingObsidian extends State {
             return; // Wait for us to reach the goal
         }
 
+        Entity closestObsidian = null;
+        double closestDistance = Double.MAX_VALUE;
         for (Entity entity : context.playerContext().entities()) {
             if (entity instanceof ItemEntity) {
                 if (((ItemEntity) entity).getItem().getItem() instanceof BlockItem &&
                         (((BlockItem) ((ItemEntity) entity).getItem().getItem()).getBlock() == Blocks.OBSIDIAN
                         || ((BlockItem) ((ItemEntity) entity).getItem().getItem()).getBlock() == Blocks.CRYING_OBSIDIAN)) {
                     double obsidDistance = VecUtils.distanceToCenter(context.playerContext().playerFeet(), (int) entity.getX(), (int) entity.getY(), (int) entity.getZ());
-                    if (obsidDistance <= context.settings().highwayObsidianMaxSearchDist.value) {
-                        if (context.getItemCountInventory(Item.getId(Items.AIR)) == 0) {
-                            // No space for obsid, need to do removal
-                            context.transitionTo(HighwayState.InventoryCleaningObsidian);
-                            context.resetTimer();
-                        }
-                        context.baritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(new BetterBlockPos(entity.getX(), entity.getY(), entity.getZ())));
-                        return;
-                    } else {
+                    if (obsidDistance > context.settings().highwayObsidianMaxSearchDist.value) {
                         Helper.HELPER.logDirect("Ignoring found obsidian " + obsidDistance + " blocks away. Max search distance is " + context.settings().highwayObsidianMaxSearchDist.value + " blocks");
+                    } else if (obsidDistance < closestDistance) {
+                        closestDistance = obsidDistance;
+                        closestObsidian = entity;
                     }
                 }
             }
+        }
+
+        if (closestObsidian != null) {
+            if (context.getItemCountInventory(Item.getId(Items.AIR)) == 0) {
+                // No space for obsid, need to do removal
+                context.transitionTo(HighwayState.InventoryCleaningObsidian);
+                context.resetTimer();
+            }
+            context.baritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(new BetterBlockPos(closestObsidian.getX(), closestObsidian.getY(), closestObsidian.getZ())));
+            return;
         }
 
         // No more obsid to find

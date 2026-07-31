@@ -30,7 +30,7 @@ public class InventoryCleaningPickaxeShulker extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.timer() < 40) {
+        if (context.timer() < 10) {
             return;
         }
 

@@ -1088,6 +1088,25 @@ public class HighwayContext {
         return false;
     }
 
+    /**
+     * True once the open container shows any item in its chest/shulker slots, i.e. the server's
+     * initial content sync has arrived. False for a genuinely empty container too, so callers
+     * should keep a timer fallback rather than waiting on this forever.
+     */
+    public boolean openContainerHasContents() {
+        AbstractContainerMenu menu = playerContext.player().containerMenu;
+        if (menu == playerContext.player().inventoryMenu) {
+            return false;
+        }
+        int containerSlots = menu.slots.size() - 36;
+        for (int i = 0; i < containerSlots; i++) {
+            if (!menu.getSlot(i).getItem().isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public int invSlotToMenuSlot(int invSlot) {
         AbstractContainerMenu menu = playerContext.player().containerMenu;
         if (menu == playerContext.player().inventoryMenu) {
