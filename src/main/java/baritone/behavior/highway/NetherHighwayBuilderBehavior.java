@@ -354,10 +354,12 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
         highwayContext.incrementTimers();
 
-        // autoTotem/clearCursorItem pause the state machine while they work, but the stuck/health
-        // watchdogs must run regardless: a cursor stack that can never be placed (full inventory)
-        // used to starve them and freeze the state machine forever with its keys latched.
-        boolean pauseStateMachine = highwayContext.autoTotem() || highwayContext.clearCursorItem();
+        // Offhand rescue/autoTotem/clearCursorItem pause the state machine while they work, but the
+        // stuck/health watchdogs must run regardless: a cursor stack that can never be placed (full
+        // inventory) used to starve them and freeze the state machine forever with its keys latched.
+        // Rescue runs before autoTotem so stranded chests merge onto a loose stack instead of being
+        // swapped into the totem's slot.
+        boolean pauseStateMachine = highwayContext.rescueOffhandEnderChests() || highwayContext.autoTotem() || highwayContext.clearCursorItem();
         if (highwayContext.stuckCheck() || highwayContext.healthCheck() || pauseStateMachine) {
             return;
         }

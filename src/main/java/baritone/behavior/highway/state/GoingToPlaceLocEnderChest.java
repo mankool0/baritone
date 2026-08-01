@@ -23,6 +23,10 @@ import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Blocks;
 
 public class GoingToPlaceLocEnderChest extends State {
     public GoingToPlaceLocEnderChest(HighwayState state) {
@@ -42,7 +46,13 @@ public class GoingToPlaceLocEnderChest extends State {
             context.baritone().getPathingBehavior().cancelEverything();
             context.settings().buildRepeat.value = new Vec3i(0, 0, 0);
             context.resetTimer();
-            context.setInstantMineOriginalOffhandItem(context.playerContext().player().getOffhandItem().getItem());
+            Item offhandItem = context.playerContext().player().getOffhandItem().getItem();
+            if (offhandItem instanceof BlockItem && ((BlockItem) offhandItem).getBlock().equals(Blocks.ENDER_CHEST)) {
+                // Stranded chests from an interrupted farm session: recording them as the "original"
+                // would make SwapBack deliberately keep them in the offhand when the session ends
+                offhandItem = Items.AIR;
+            }
+            context.setInstantMineOriginalOffhandItem(offhandItem);
             context.setInstantMineCalibrated(false);
             context.transitionTo(HighwayState.FarmingEnderChestPrepEchest);
         } else {

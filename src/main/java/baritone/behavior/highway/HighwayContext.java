@@ -1043,6 +1043,65 @@ public class HighwayContext {
         return false;
     }
 
+    /**
+     * Swap the offhand ender chest stack into the inventory, merging onto a partial loose stack
+     * first so the chests never fragment into an extra slot; falls back to an empty slot. A merge
+     * moves at most (64 - partial) and leaves the remainder in the offhand for a follow-up call.
+     * Returns false when the offhand holds no ender chests or the inventory has no room.
+     */
+    public boolean stashOffhandEnderChests() {
+        Item offhandItem = playerContext.player().getOffhandItem().getItem();
+        if (!(offhandItem instanceof BlockItem) || !(((BlockItem) offhandItem).getBlock() instanceof EnderChestBlock)) {
+            return false;
+        }
+        int targetSlot = getMergeableEnderChestSlot();
+        if (targetSlot == -1) {
+            targetSlot = getItemSlot(Item.getId(Items.AIR));
+        }
+        if (targetSlot == -1) {
+            return false;
+        }
+        swapOffhand(targetSlot);
+        return true;
+    }
+
+    /**
+     * Ender chests belong in the offhand only between PrepEchest and SwapBack; anywhere else they
+     * are leftovers of an interrupted farm session, invisible to every inventory count (all scan
+     * slots 0-35 only).
+     */
+    public boolean rescueOffhandEnderChests() {
+        Item offhandItem = playerContext.player().getOffhandItem().getItem();
+        if (!(offhandItem instanceof BlockItem) || !(((BlockItem) offhandItem).getBlock() instanceof EnderChestBlock)
+                || OFFHAND_OCCUPIED_STATES.contains(currentState.getState())) {
+            return false;
+        }
+        // Same interaction guards as autoTotem: swapOffhand clicks the player inventory
+        if (playerContext.player().hasContainerOpen()
+                || !playerContext.player().containerMenu.getCarried().isEmpty()
+                || playerContext.player().isUsingItem()) {
+            return false;
+        }
+        if (stashOffhandEnderChests()) {
+            timer = 0;
+            return true;
+        }
+        // No partial chest stack and no empty slot: toss a throwaway stack so the next tick's
+        // stash has somewhere to land. Chests always outrank netherrack.
+        int throwawaySlot = getAcceptableThrowawaySlot();
+        if (throwawaySlot == 8) {
+            throwawaySlot = getAcceptableThrowawaySlotNoHotbar();
+        }
+        if (throwawaySlot == -1) {
+            return false;
+        }
+        AbstractContainerMenu menu = playerContext.player().containerMenu;
+        playerContext.playerController().windowClick(menu.containerId, invSlotToMenuSlot(throwawaySlot), 0, ClickType.PICKUP, playerContext.player());
+        playerContext.playerController().windowClick(menu.containerId, -999, 0, ClickType.PICKUP, playerContext.player());
+        timer = 0;
+        return true;
+    }
+
     public boolean clearCursorItem() {
         AbstractContainerMenu curContainer = playerContext.player().containerMenu;
         if (!curContainer.getCarried().isEmpty()) {
