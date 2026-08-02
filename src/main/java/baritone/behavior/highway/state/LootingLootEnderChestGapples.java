@@ -32,13 +32,17 @@ public class LootingLootEnderChestGapples extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.timer() < 40) {
+        if (context.timer() < 10) {
             return;
         }
 
         if (!(context.playerContext().minecraft().screen instanceof ContainerScreen)) {
             context.transitionTo(HighwayState.OpeningLootEnderChest);
             return;
+        }
+
+        if (context.timer() < 40 && !context.openContainerHasContents()) {
+            return; // Wait for the initial content sync; a truly empty container proceeds at 40
         }
 
         if (context.getItemCountInventory(Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) < context.settings().highwayGapplesToHave.value) {

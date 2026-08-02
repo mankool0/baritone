@@ -108,6 +108,12 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
     @Override
     public void build(int startX, int startZ, Vec3i direct, boolean selfSolve, boolean pave) {
+        build(startX, startZ, direct, selfSolve, pave, null);
+    }
+
+    @Override
+    public void build(int startX, int startZ, Vec3i direct, boolean selfSolve, boolean pave, Vec3i endCoords) {
+        highwayContext.setEndPos(null); // a stale end would clamp the projections below
         highwayContext.setHighwayDirection(direct);
         highwayContext.setPaving(pave);
         highwayContext.setCachedHealth(ctx.player().getHealth());
@@ -285,6 +291,18 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
         highwayContext.setFirstStartingPos(new BetterBlockPos(highwayContext.originBuild()));
 
+        if (endCoords != null) {
+            BetterBlockPos end = highwayContext.getClosestPoint(origin, direction, new Vec3(endCoords.getX(), 0, endCoords.getZ()), LocationType.HighwayBuild);
+            int endSteps = highwayContext.stepsAlongHighway(highwayContext.firstStartingPos(), end);
+            if (endSteps <= 0) {
+                Helper.HELPER.logDirect("End " + endCoords.getX() + ", " + endCoords.getZ() + " is not ahead of the start " + highwayContext.firstStartingPos().toString() + ", not starting");
+                stop();
+                return;
+            }
+            highwayContext.setEndPos(end);
+            Helper.HELPER.logDirect("Stopping at " + end.toString() + " (" + endSteps + " blocks ahead)");
+        }
+
         Helper.HELPER.logDirect("Building from " + highwayContext.originBuild().toString());
         settings.buildRepeat.value = new Vec3i(highwayContext.highwayDirection().getX(), 0, highwayContext.highwayDirection().getZ());
         baritone.getPathingBehavior().cancelEverything();
@@ -298,6 +316,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         highwayContext.setRepeatCheck(false);
         highwayContext.setStartShulkerCount(highwayContext.getShulkerCountInventory(ShulkerType.Any));
         highwayContext.setPaused(false);
+        highwayContext.resetThroughWallDetection();
         highwayContext.transitionTo(HighwayState.Nothing);
     }
 
@@ -313,11 +332,16 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         baritone.getPathingBehavior().cancelEverything();
         highwayContext.setFirstStartingPos(null);
         highwayContext.setOriginBuild(null);
+        highwayContext.setEndPos(null);
+        settings.buildRepeatCount.value = -1; // Nothing clamps it while an end is set
     }
 
     @Override
     public void printStatus() {
         Helper.HELPER.logDirect("State: " + highwayContext.currentState().getState());
+        if (highwayContext.endPos() != null) {
+            Helper.HELPER.logDirect("End: " + highwayContext.endPos().toString());
+        }
         Helper.HELPER.logDirect("Paused: " + highwayContext.paused());
         Helper.HELPER.logDirect("Timer: " + highwayContext.timer());
         Helper.HELPER.logDirect("startShulkerCount: " + highwayContext.startShulkerCount());
@@ -331,10 +355,12 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
         highwayContext.incrementTimers();
 
-        // autoTotem/clearCursorItem pause the state machine while they work, but the stuck/health
-        // watchdogs must run regardless: a cursor stack that can never be placed (full inventory)
-        // used to starve them and freeze the state machine forever with its keys latched.
-        boolean pauseStateMachine = highwayContext.autoTotem() || highwayContext.clearCursorItem();
+        // Offhand rescue/autoTotem/clearCursorItem pause the state machine while they work, but the
+        // stuck/health watchdogs must run regardless: a cursor stack that can never be placed (full
+        // inventory) used to starve them and freeze the state machine forever with its keys latched.
+        // Rescue runs before autoTotem so stranded chests merge onto a loose stack instead of being
+        // swapped into the totem's slot.
+        boolean pauseStateMachine = highwayContext.rescueOffhandEnderChests() || highwayContext.autoTotem() || highwayContext.clearCursorItem();
         if (highwayContext.stuckCheck() || highwayContext.healthCheck() || pauseStateMachine) {
             return;
         }

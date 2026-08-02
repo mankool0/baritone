@@ -21,6 +21,7 @@ import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
 
 public class FarmingEnderChestSwapBack extends State {
     public FarmingEnderChestSwapBack(HighwayState state) {
@@ -33,12 +34,32 @@ public class FarmingEnderChestSwapBack extends State {
             return;
         }
         Item curItem = context.playerContext().player().getOffhandItem().getItem();
-        if (!curItem.equals(context.instantMineOriginalOffhandItem())) {
-            int origItemSlot = context.getItemSlot(Item.getId(context.instantMineOriginalOffhandItem()));
-            context.swapOffhand(origItemSlot);
+        if (curItem.equals(context.instantMineOriginalOffhandItem())) {
             context.resetTimer();
+            context.transitionTo(HighwayState.FarmingEnderChestClear);
             return;
         }
+
+        // Unload the leftover chests merge-first so the reserve lands on an existing partial loose
+        // stack instead of fragmenting into a fresh slot (or the original item's old slot)
+        if (context.stashOffhandEnderChests()) {
+            context.resetTimer();
+            return; // re-check next tick; a merge can leave a remainder in the offhand
+        }
+
+        // Offhand is drained (or the inventory is packed solid): restore the original item
+        if (!context.instantMineOriginalOffhandItem().equals(Items.AIR)) {
+            int origItemSlot = context.getItemSlot(Item.getId(context.instantMineOriginalOffhandItem()));
+            if (origItemSlot != -1) {
+                context.swapOffhand(origItemSlot);
+                context.resetTimer();
+                return;
+            }
+            // Original offhand item is gone (e.g. totem popped mid-farm): settle for an empty hand
+        }
+
+        // Move on rather than retry forever; the tick-level rescue reclaims any leftovers
+        // once space frees up
         context.resetTimer();
         context.transitionTo(HighwayState.FarmingEnderChestClear);
     }

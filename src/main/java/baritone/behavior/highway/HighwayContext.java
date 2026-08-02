@@ -152,6 +152,7 @@ public class HighwayContext {
     private WhiteBlackSchematic liqCheckSchem;
     private BetterBlockPos originBuild;
     private BetterBlockPos firstStartingPos;
+    private BetterBlockPos endPos; // on the highway line at HighwayBuild Y; null = build forever
     private Vec3 originVector = new Vec3(0, 0, 0);
     private Vec3 liqOriginVector = new Vec3(0, 0, 0);
     private Vec3 backPathOriginVector = new Vec3(0, 0, 0);
@@ -202,6 +203,49 @@ public class HighwayContext {
     }
 
     private boolean liquidPathingCanMine = true;
+
+    private int throughWallPlaceStreak = 0;
+    private BlockPos throughWallVerifyPos = null;
+    private int throughWallVerifyAge = 0;
+    private boolean throughWallsSuppressed = false;
+
+    public boolean liquidThroughWalls() {
+        return settings.highwayLiquidRemovalThroughWalls.value && !throughWallsSuppressed;
+    }
+
+    public int throughWallPlaceStreak() {
+        return throughWallPlaceStreak;
+    }
+
+    public void noteThroughWallPlace(BlockPos target) {
+        throughWallPlaceStreak++;
+        if (throughWallVerifyPos == null) {
+            throughWallVerifyPos = target;
+            throughWallVerifyAge = 0;
+        }
+    }
+
+    public void tickThroughWallVerify() {
+        if (throughWallVerifyPos != null && ++throughWallVerifyAge >= 10) {
+            if (getIssueType(throughWallVerifyPos) == HighwayBlockState.Blocks) {
+                throughWallPlaceStreak = 0;
+            }
+            throughWallVerifyPos = null;
+        }
+    }
+
+    public void suppressThroughWalls() {
+        throughWallsSuppressed = true;
+        throughWallPlaceStreak = 0;
+        throughWallVerifyPos = null;
+    }
+
+    public void resetThroughWallDetection() {
+        throughWallsSuppressed = false;
+        throughWallPlaceStreak = 0;
+        throughWallVerifyPos = null;
+    }
+
     private int timer = 0;
 
     public int walkBackTimer() {
@@ -330,6 +374,14 @@ public class HighwayContext {
 
     public void setFirstStartingPos(BetterBlockPos firstStartingPos) {
         this.firstStartingPos = firstStartingPos;
+    }
+
+    public BetterBlockPos endPos() {
+        return endPos;
+    }
+
+    public void setEndPos(BetterBlockPos endPos) {
+        this.endPos = endPos;
     }
 
     public void setOriginVector(Vec3 originVector) {
@@ -850,7 +902,23 @@ public class HighwayContext {
             return new BetterBlockPos((int) ox, yLevel, (int) oz);
         }
         long steps = Math.round(((point.x - ox) * dirX + (point.z - oz) * dirZ) / lenSq);
+        // Mirror of the firstStartingPos clamp above: never allow points past the set end
+        if (endPos != null) {
+            long endSteps = dirX != 0 ? (endPos.getX() - ox) * dirX : (endPos.getZ() - oz) * dirZ;
+            steps = Math.min(steps, endSteps);
+        }
         return new BetterBlockPos((int) (ox + steps * dirX), yLevel, (int) (oz + steps * dirZ));
+    }
+
+    /**
+     * Signed slice count from {@code from} to {@code to} measured on the driving axis, so points on
+     * parallel lines (build/liquid/side-storage) agree on where a given slice ends. Negative means
+     * {@code to} is behind {@code from}.
+     */
+    public int stepsAlongHighway(BlockPos from, BlockPos to) {
+        return highwayDirection.getX() != 0
+                ? (to.getX() - from.getX()) * highwayDirection.getX()
+                : (to.getZ() - from.getZ()) * highwayDirection.getZ();
     }
 
     public int getLargestItemSlot(int itemId) {
@@ -1018,6 +1086,65 @@ public class HighwayContext {
         return false;
     }
 
+    /**
+     * Swap the offhand ender chest stack into the inventory, merging onto a partial loose stack
+     * first so the chests never fragment into an extra slot; falls back to an empty slot. A merge
+     * moves at most (64 - partial) and leaves the remainder in the offhand for a follow-up call.
+     * Returns false when the offhand holds no ender chests or the inventory has no room.
+     */
+    public boolean stashOffhandEnderChests() {
+        Item offhandItem = playerContext.player().getOffhandItem().getItem();
+        if (!(offhandItem instanceof BlockItem) || !(((BlockItem) offhandItem).getBlock() instanceof EnderChestBlock)) {
+            return false;
+        }
+        int targetSlot = getMergeableEnderChestSlot();
+        if (targetSlot == -1) {
+            targetSlot = getItemSlot(Item.getId(Items.AIR));
+        }
+        if (targetSlot == -1) {
+            return false;
+        }
+        swapOffhand(targetSlot);
+        return true;
+    }
+
+    /**
+     * Ender chests belong in the offhand only between PrepEchest and SwapBack; anywhere else they
+     * are leftovers of an interrupted farm session, invisible to every inventory count (all scan
+     * slots 0-35 only).
+     */
+    public boolean rescueOffhandEnderChests() {
+        Item offhandItem = playerContext.player().getOffhandItem().getItem();
+        if (!(offhandItem instanceof BlockItem) || !(((BlockItem) offhandItem).getBlock() instanceof EnderChestBlock)
+                || OFFHAND_OCCUPIED_STATES.contains(currentState.getState())) {
+            return false;
+        }
+        // Same interaction guards as autoTotem: swapOffhand clicks the player inventory
+        if (playerContext.player().hasContainerOpen()
+                || !playerContext.player().containerMenu.getCarried().isEmpty()
+                || playerContext.player().isUsingItem()) {
+            return false;
+        }
+        if (stashOffhandEnderChests()) {
+            timer = 0;
+            return true;
+        }
+        // No partial chest stack and no empty slot: toss a throwaway stack so the next tick's
+        // stash has somewhere to land. Chests always outrank netherrack.
+        int throwawaySlot = getAcceptableThrowawaySlot();
+        if (throwawaySlot == 8) {
+            throwawaySlot = getAcceptableThrowawaySlotNoHotbar();
+        }
+        if (throwawaySlot == -1) {
+            return false;
+        }
+        AbstractContainerMenu menu = playerContext.player().containerMenu;
+        playerContext.playerController().windowClick(menu.containerId, invSlotToMenuSlot(throwawaySlot), 0, ClickType.PICKUP, playerContext.player());
+        playerContext.playerController().windowClick(menu.containerId, -999, 0, ClickType.PICKUP, playerContext.player());
+        timer = 0;
+        return true;
+    }
+
     public boolean clearCursorItem() {
         AbstractContainerMenu curContainer = playerContext.player().containerMenu;
         if (!curContainer.getCarried().isEmpty()) {
@@ -1059,6 +1186,25 @@ public class HighwayContext {
                 return true;
             }
             return true;
+        }
+        return false;
+    }
+
+    /**
+     * True once the open container shows any item in its chest/shulker slots, i.e. the server's
+     * initial content sync has arrived. False for a genuinely empty container too, so callers
+     * should keep a timer fallback rather than waiting on this forever.
+     */
+    public boolean openContainerHasContents() {
+        AbstractContainerMenu menu = playerContext.player().containerMenu;
+        if (menu == playerContext.player().inventoryMenu) {
+            return false;
+        }
+        int containerSlots = menu.slots.size() - 36;
+        for (int i = 0; i < containerSlots; i++) {
+            if (!menu.getSlot(i).getItem().isEmpty()) {
+                return true;
+            }
         }
         return false;
     }
@@ -2084,8 +2230,11 @@ public class HighwayContext {
         Vec3 curPosPlayer = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
         BlockPos startCheckPos = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z), direction, curPosPlayer, LocationType.HighwayBuild);
 
-
-        for (int i = 0; i < 10; i++) {
+        int scanLength = 10;
+        if (endPos != null) {
+            scanLength = Math.min(scanLength, stepsAlongHighway(startCheckPos, endPos) + 1);
+        }
+        for (int i = 0; i < scanLength; i++) {
             BlockPos curPos = startCheckPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
             for (int y = 0; y < schematic.heightY(); y++) {
                 for (int z = 0; z < schematic.lengthZ(); z++) {
@@ -2121,6 +2270,40 @@ public class HighwayContext {
         return 0;
     }
 
+    public boolean isHighwayEndComplete() {
+        if (endPos == null) {
+            return false;
+        }
+        Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
+        Vec3 curPosPlayer = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
+        // feetClosest is clamped to the end: even if we wandered past the end the scan still covers
+        // the final checkBackDistance slices instead of degenerating
+        BetterBlockPos feetClosest = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z), direction, curPosPlayer, LocationType.HighwayBuild);
+        Vec3 curPosBack = new Vec3(feetClosest.getX() + (highwayCheckBackDistance * -highwayDirection.getX()), feetClosest.getY(), feetClosest.getZ() + (highwayCheckBackDistance * -highwayDirection.getZ()));
+        BlockPos startCheckPos = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z), direction, curPosBack, LocationType.HighwayBuild);
+        BlockPos startCheckPosLiq = getClosestPoint(new Vec3(liqOriginVector.x, liqOriginVector.y, liqOriginVector.z), direction, curPosBack, LocationType.ShulkerEchestInteraction);
+        int scanDist = stepsAlongHighway(startCheckPos, endPos) + 1;
+        if (!isStretchLoaded(startCheckPos, schematic.widthX(), schematic.lengthZ(), scanDist)
+                || !isStretchLoaded(startCheckPosLiq, liqCheckSchem.widthX(), liqCheckSchem.lengthZ(), scanDist)) {
+            return false;
+        }
+        return isHighwayCorrect(startCheckPos, startCheckPosLiq, scanDist, false) == HighwayBlockState.Air;
+    }
+
+    private boolean isStretchLoaded(BlockPos startPos, int widthX, int lengthZ, int distanceToCheck) {
+        for (int i = 1; i < distanceToCheck; i++) {
+            BlockPos curPos = startPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
+            for (int z = 0; z < lengthZ; z++) {
+                for (int x = 0; x < widthX; x++) {
+                    if (!baritone.bsi.worldContainsLoadedChunk(x + curPos.getX(), z + curPos.getZ())) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
     public boolean canWalkOnFloorAhead() {
         BetterBlockPos feet = playerContext.playerFeet();
         int dirX = highwayDirection.getX();
@@ -2142,6 +2325,10 @@ public class HighwayContext {
 
     public HighwayBlockState isHighwayCorrect(BlockPos startPos, BlockPos startPosLiq, int distanceToCheck, boolean renderLiquidScan) {
         // startPos needs to be in center of highway
+        if (endPos != null) {
+            // Terrain past the end stays unbuilt; scanning it would trigger endless fixes
+            distanceToCheck = Math.min(distanceToCheck, stepsAlongHighway(startPos, endPos) + 1);
+        }
         renderLockBuilding.lock();
         renderBlocksBuilding.clear();
         lastMismatches.clear();
@@ -2228,6 +2415,9 @@ public class HighwayContext {
     }
 
     public BlockPos findFirstLiquidGround(BlockPos startPos, int distanceToCheck, boolean renderCheckedBlocks) {
+        if (endPos != null) {
+            distanceToCheck = Math.min(distanceToCheck, stepsAlongHighway(startPos, endPos) + 1);
+        }
         if (renderCheckedBlocks) {
             BlockPos slice = startPos.offset(highwayDirection.getX(), 0, highwayDirection.getZ());
             AABB area = new AABB(slice.getX(), slice.getY(), slice.getZ(),
@@ -2316,6 +2506,31 @@ public class HighwayContext {
         }
     }
 
+    // A pool is enclosed when no block of it (source or flowing) touches air: digging hasn't
+    // opened it up yet and nothing can flow out
+    public boolean isPoolEnclosed(ArrayList<BlockPos> sourceBlocks, ArrayList<BlockPos> flowingBlocks) {
+        for (BlockPos pos : sourceBlocks) {
+            if (touchesAir(pos)) {
+                return false;
+            }
+        }
+        for (BlockPos pos : flowingBlocks) {
+            if (touchesAir(pos)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean touchesAir(BlockPos pos) {
+        for (Direction dir : Direction.values()) {
+            if (getIssueType(pos.relative(dir)) == HighwayBlockState.Air) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public int checkBackTimer() {
         return checkBackTimer;
     }
@@ -2383,7 +2598,26 @@ public class HighwayContext {
             return PlaceResult.CantPlace;
         }
 
+        for (BlockHitResult blockHitResult : findThroughWallsPlaceHits(pos, p_Distance)) {
+            if (clickFace(blockHitResult, packetSwing, hand) == PlaceResult.Placed)
+                return PlaceResult.Placed;
+        }
+        return PlaceResult.CantPlace;
+    }
+
+    public boolean placeAimable(BlockPos pos, float p_Distance) {
+        return findPlaceRotation(pos, p_Distance) != null;
+    }
+
+    public boolean placeThroughWallsAimable(BlockPos pos, float p_Distance) {
+        return !findThroughWallsPlaceHits(pos, p_Distance).isEmpty();
+    }
+
+    // Placement candidates when line of sight doesn't matter: every face of a solid, non-fluid
+    // neighbor that points into pos and whose center is within reach, visible or not
+    private List<BlockHitResult> findThroughWallsPlaceHits(BlockPos pos, float p_Distance) {
         final Vec3 eyesPos = getEyesPos();
+        final List<BlockHitResult> hits = new ArrayList<>();
 
         for (final Direction side : Direction.values())
         {
@@ -2394,23 +2628,15 @@ public class HighwayContext {
                 continue;
 
             VoxelShape collisionShape = playerContext.world().getBlockState(neighbor).getCollisionShape(playerContext.world(), neighbor);
-            boolean hasCollision = collisionShape != Shapes.empty();
-            if (hasCollision)
-            {
-                final Vec3 hitVec = new Vec3(neighbor.getX(), neighbor.getY(), neighbor.getZ()).add(0.5, 0.5, 0.5).add(new Vec3(side2.getStepX(), side2.getStepY(), side2.getStepZ()).scale(0.5));
-                if (eyesPos.distanceTo(hitVec) <= p_Distance)
-                {
-                    BlockHitResult blockHitResult = new BlockHitResult(hitVec, side2, neighbor, false);
-                    if (clickFace(blockHitResult, packetSwing, hand) == PlaceResult.Placed)
-                        return PlaceResult.Placed;
-                }
+            if (collisionShape == Shapes.empty())
+                continue;
+
+            final Vec3 hitVec = new Vec3(neighbor.getX(), neighbor.getY(), neighbor.getZ()).add(0.5, 0.5, 0.5).add(new Vec3(side2.getStepX(), side2.getStepY(), side2.getStepZ()).scale(0.5));
+            if (eyesPos.distanceTo(hitVec) <= p_Distance) {
+                hits.add(new BlockHitResult(hitVec, side2, neighbor, false));
             }
         }
-        return PlaceResult.CantPlace;
-    }
-
-    public boolean placeAimable(BlockPos pos, float p_Distance) {
-        return findPlaceRotation(pos, p_Distance) != null;
+        return hits;
     }
 
     private Rotation findPlaceRotation(BlockPos pos, float p_Distance) {

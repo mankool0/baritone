@@ -45,6 +45,13 @@ public class Nothing extends State {
         Vec3 curPos = new Vec3(context.playerContext().playerFeet().getX() + (context.highwayCheckBackDistance() * -context.highwayDirection().getX()), context.playerContext().playerFeet().getY(), context.playerContext().playerFeet().getZ() + (context.highwayCheckBackDistance() * -context.highwayDirection().getZ())); // Go back a bit to clear up our mess
         context.setOriginBuild(context.getClosestPoint(origin, direction, curPos, LocationType.HighwayBuild));
 
+        if (context.endPos() != null) {
+            // Bound the repeat so the builder never places past the end slice; originBuild is
+            // clamped to the end, so this is always >= 1
+            context.settings().buildRepeatCount.value = context.stepsAlongHighway(context.originBuild(), context.endPos()) + 1;
+        } else {
+            context.settings().buildRepeatCount.value = -1;
+        }
 
         context.baritone().getPathingBehavior().cancelEverything();
 

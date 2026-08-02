@@ -24,6 +24,8 @@ public interface INetherHighwayBuilderBehavior extends IBehavior {
 
     void build(int startX, int startZ, Vec3i direct, boolean selfSolve, boolean pave);
 
+    void build(int startX, int startZ, Vec3i direct, boolean selfSolve, boolean pave, Vec3i endCoords);
+
     void stop();
 
     void printStatus();

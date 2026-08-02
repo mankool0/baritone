@@ -66,9 +66,20 @@ public class HighwayBuilderCommands {
                 }
                 logDirect("origX: " + origX + " origZ: " + origZ);
 
+                Vec3i endCoords = null;
+                if (args.has(2)) {
+                    int endX = args.getAs(Integer.class);
+                    int endZ = args.getAs(Integer.class);
+                    endCoords = new Vec3i(endX, 0, endZ);
+                    logDirect("End: " + endX + ", " + endZ);
+                }
+                if (args.hasAny()) {
+                    logDirect("Ignoring leftover arguments (end coords need both <endX> <endZ>)");
+                }
+
                 logDirect("Calculating build location");
 
-                baritone.getNetherHighwayBuilderBehavior().build(origX, origZ, new Vec3i(xDir, 0, zDir), selfSolve, doPaving);
+                baritone.getNetherHighwayBuilderBehavior().build(origX, origZ, new Vec3i(xDir, 0, zDir), selfSolve, doPaving, endCoords);
             }
 
             @Override
@@ -89,7 +100,8 @@ public class HighwayBuilderCommands {
                         "Usage:",
                         "> nhwbuild - <dirX> <dirZ> - Start building in specified direction. Ex. `1 0` will build +X highway",
                         "> nhwbuild - <dirX> <dirZ> <pave> - Where pave is true if you want to pave with obsidian. Default is false",
-                        "> nhwbuild - <dirX> <dirZ> <pave> <selfSolve> <origX> <origZ> - Where selfSolve is false if you want a custom origin. Default is true"
+                        "> nhwbuild - <dirX> <dirZ> <pave> <selfSolve> <origX> <origZ> - Where selfSolve is false if you want a custom origin. Default is true",
+                        "> nhwbuild - <dirX> <dirZ> <pave> <selfSolve> [<origX> <origZ>] <endX> <endZ> - Stop once the highway is built through the end coords"
                 );
             }
         };
