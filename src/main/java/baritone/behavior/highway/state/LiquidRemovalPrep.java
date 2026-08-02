@@ -81,7 +81,14 @@ public class LiquidRemovalPrep extends State {
         // Get the closest point
         if (!context.sourceBlocks().isEmpty()) {
             context.baritone().getPathingBehavior().cancelEverything();
-            context.transitionTo(HighwayState.LiquidRemovalPathingBack);
+            if (context.liquidThroughWalls()
+                    && context.isPoolEnclosed(context.sourceBlocks(), flowingBlocks)) {
+                // Sealed pool: fill it through the cover from here, no retreat or gapple needed
+                Helper.HELPER.logDebug("Sealed lava pool, filling through cover");
+                context.transitionTo(HighwayState.LiquidRemovalPathing);
+            } else {
+                context.transitionTo(HighwayState.LiquidRemovalPathingBack);
+            }
         } else {
             context.transitionTo(HighwayState.LiquidRemovalPrepWait);
         }

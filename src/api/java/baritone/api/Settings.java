@@ -1572,6 +1572,12 @@ public final class Settings {
     public final Setting<Integer> highwayFireRestMinDuration = new Setting<>(1200);
 
     /**
+     * If enabled, liquid removal places blocks without requiring line of sight and without
+     * rotating, limited only by normal block reach distance
+     */
+    public final Setting<Boolean> highwayLiquidRemovalThroughWalls = new Setting<>(true);
+
+    /**
      * Pickaxe threshold for acquiring more pickaxes
      */
     public final Setting<Integer> highwayPicksThreshold = new Setting<>(1);

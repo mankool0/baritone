@@ -203,6 +203,49 @@ public class HighwayContext {
     }
 
     private boolean liquidPathingCanMine = true;
+
+    private int throughWallPlaceStreak = 0;
+    private BlockPos throughWallVerifyPos = null;
+    private int throughWallVerifyAge = 0;
+    private boolean throughWallsSuppressed = false;
+
+    public boolean liquidThroughWalls() {
+        return settings.highwayLiquidRemovalThroughWalls.value && !throughWallsSuppressed;
+    }
+
+    public int throughWallPlaceStreak() {
+        return throughWallPlaceStreak;
+    }
+
+    public void noteThroughWallPlace(BlockPos target) {
+        throughWallPlaceStreak++;
+        if (throughWallVerifyPos == null) {
+            throughWallVerifyPos = target;
+            throughWallVerifyAge = 0;
+        }
+    }
+
+    public void tickThroughWallVerify() {
+        if (throughWallVerifyPos != null && ++throughWallVerifyAge >= 10) {
+            if (getIssueType(throughWallVerifyPos) == HighwayBlockState.Blocks) {
+                throughWallPlaceStreak = 0;
+            }
+            throughWallVerifyPos = null;
+        }
+    }
+
+    public void suppressThroughWalls() {
+        throughWallsSuppressed = true;
+        throughWallPlaceStreak = 0;
+        throughWallVerifyPos = null;
+    }
+
+    public void resetThroughWallDetection() {
+        throughWallsSuppressed = false;
+        throughWallPlaceStreak = 0;
+        throughWallVerifyPos = null;
+    }
+
     private int timer = 0;
 
     public int walkBackTimer() {
@@ -2463,6 +2506,31 @@ public class HighwayContext {
         }
     }
 
+    // A pool is enclosed when no block of it (source or flowing) touches air: digging hasn't
+    // opened it up yet and nothing can flow out
+    public boolean isPoolEnclosed(ArrayList<BlockPos> sourceBlocks, ArrayList<BlockPos> flowingBlocks) {
+        for (BlockPos pos : sourceBlocks) {
+            if (touchesAir(pos)) {
+                return false;
+            }
+        }
+        for (BlockPos pos : flowingBlocks) {
+            if (touchesAir(pos)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean touchesAir(BlockPos pos) {
+        for (Direction dir : Direction.values()) {
+            if (getIssueType(pos.relative(dir)) == HighwayBlockState.Air) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public int checkBackTimer() {
         return checkBackTimer;
     }
@@ -2530,7 +2598,26 @@ public class HighwayContext {
             return PlaceResult.CantPlace;
         }
 
+        for (BlockHitResult blockHitResult : findThroughWallsPlaceHits(pos, p_Distance)) {
+            if (clickFace(blockHitResult, packetSwing, hand) == PlaceResult.Placed)
+                return PlaceResult.Placed;
+        }
+        return PlaceResult.CantPlace;
+    }
+
+    public boolean placeAimable(BlockPos pos, float p_Distance) {
+        return findPlaceRotation(pos, p_Distance) != null;
+    }
+
+    public boolean placeThroughWallsAimable(BlockPos pos, float p_Distance) {
+        return !findThroughWallsPlaceHits(pos, p_Distance).isEmpty();
+    }
+
+    // Placement candidates when line of sight doesn't matter: every face of a solid, non-fluid
+    // neighbor that points into pos and whose center is within reach, visible or not
+    private List<BlockHitResult> findThroughWallsPlaceHits(BlockPos pos, float p_Distance) {
         final Vec3 eyesPos = getEyesPos();
+        final List<BlockHitResult> hits = new ArrayList<>();
 
         for (final Direction side : Direction.values())
         {
@@ -2541,23 +2628,15 @@ public class HighwayContext {
                 continue;
 
             VoxelShape collisionShape = playerContext.world().getBlockState(neighbor).getCollisionShape(playerContext.world(), neighbor);
-            boolean hasCollision = collisionShape != Shapes.empty();
-            if (hasCollision)
-            {
-                final Vec3 hitVec = new Vec3(neighbor.getX(), neighbor.getY(), neighbor.getZ()).add(0.5, 0.5, 0.5).add(new Vec3(side2.getStepX(), side2.getStepY(), side2.getStepZ()).scale(0.5));
-                if (eyesPos.distanceTo(hitVec) <= p_Distance)
-                {
-                    BlockHitResult blockHitResult = new BlockHitResult(hitVec, side2, neighbor, false);
-                    if (clickFace(blockHitResult, packetSwing, hand) == PlaceResult.Placed)
-                        return PlaceResult.Placed;
-                }
+            if (collisionShape == Shapes.empty())
+                continue;
+
+            final Vec3 hitVec = new Vec3(neighbor.getX(), neighbor.getY(), neighbor.getZ()).add(0.5, 0.5, 0.5).add(new Vec3(side2.getStepX(), side2.getStepY(), side2.getStepZ()).scale(0.5));
+            if (eyesPos.distanceTo(hitVec) <= p_Distance) {
+                hits.add(new BlockHitResult(hitVec, side2, neighbor, false));
             }
         }
-        return PlaceResult.CantPlace;
-    }
-
-    public boolean placeAimable(BlockPos pos, float p_Distance) {
-        return findPlaceRotation(pos, p_Distance) != null;
+        return hits;
     }
 
     private Rotation findPlaceRotation(BlockPos pos, float p_Distance) {

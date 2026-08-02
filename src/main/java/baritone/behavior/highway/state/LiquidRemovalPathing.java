@@ -53,7 +53,18 @@ public class LiquidRemovalPathing extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.timer() < 10) {
+        boolean throughWalls = context.liquidThroughWalls();
+        if (context.timer() < (throughWalls ? 1 : 10)) {
+            return;
+        }
+
+        context.tickThroughWallVerify();
+        if (throughWalls && context.throughWallPlaceStreak() >= 60) {
+            Helper.HELPER.logDirect("Server keeps reverting through-wall placements. Finishing this removal with line-of-sight placing.");
+            context.suppressThroughWalls();
+            context.baritone().getInputOverrideHandler().clearAllKeys();
+            context.transitionTo(HighwayState.LiquidRemovalPrep);
+            context.resetTimer();
             return;
         }
 
@@ -73,6 +84,16 @@ public class LiquidRemovalPathing extends State {
             return;
         }
 
+        // The sealed-pool route enters without fire resistance; if we still caught fire the
+        // pool must have breached, so eat a gapple (that flow returns here when done)
+        if (throughWalls && fireRest == null
+                && (context.playerContext().player().isOnFire() || context.playerContext().player().isInLava())) {
+            Helper.HELPER.logDirect("Caught fire while clearing liquids, eating a gapple.");
+            context.baritone().getInputOverrideHandler().clearAllKeys();
+            context.transitionTo(HighwayState.LiquidRemovalGapplePrep);
+            context.resetTimer();
+            return;
+        }
 
         if (context.sourceBlocks().isEmpty()) {
             context.transitionTo(HighwayState.Nothing);
@@ -127,7 +148,25 @@ public class LiquidRemovalPathing extends State {
         }
         boolean aimPaused = aimWaitTicks > AIM_WAIT_MAX;
 
-        boolean fillReachable = context.placeAimable(context.sourceBlocks().getFirst(), (float) context.playerContext().playerController().getBlockReachDistance());
+        BlockPos fillTarget = context.sourceBlocks().getFirst();
+        boolean fillReachable;
+        if (throughWalls) {
+            // No line of sight needed, so fill whichever source is already within reach while
+            // the movement below keeps closing in on the rest
+            fillReachable = false;
+            for (BlockPos source : context.sourceBlocks()) {
+                if (context.getIssueType(source) == HighwayBlockState.Blocks) {
+                    continue; // already filled
+                }
+                if (context.placeThroughWallsAimable(source, (float) context.playerContext().playerController().getBlockReachDistance())) {
+                    fillTarget = source;
+                    fillReachable = true;
+                    break;
+                }
+            }
+        } else {
+            fillReachable = context.placeAimable(fillTarget, (float) context.playerContext().playerController().getBlockReachDistance());
+        }
         if (fillReachable && supportNeeded) {
             context.setLiquidPathingCanMine(false);
         }
@@ -149,7 +188,10 @@ public class LiquidRemovalPathing extends State {
             if (Item.getId(stack.getItem()) == Item.getId(Blocks.NETHERRACK.asItem())) {
                 context.playerContext().player().getInventory().selected = netherRackSlot;
             }
-            if (context.place(context.sourceBlocks().getFirst(), (float) context.playerContext().playerController().getBlockReachDistance(), true, false, InteractionHand.MAIN_HAND) == HighwayContext.PlaceResult.Placed) {
+            if (context.place(fillTarget, (float) context.playerContext().playerController().getBlockReachDistance(), !throughWalls, false, InteractionHand.MAIN_HAND) == HighwayContext.PlaceResult.Placed) {
+                if (throughWalls) {
+                    context.noteThroughWallPlace(fillTarget);
+                }
                 aimWaitTicks = 0;
                 context.resetTimer();
             } else {
@@ -175,6 +217,12 @@ public class LiquidRemovalPathing extends State {
                 for (int z = -1; z <= 1; z++) {
                     BlockPos tempLoc = new BlockPos(context.playerContext().playerFeet().x + x, context.playerContext().playerFeet().y, context.playerContext().playerFeet().z + z);
                     for (int i = 0; i < context.settings().highwayHeight.value; i++) {
+                        // Never open unfilled lava when filling through walls: the block stays
+                        // as cover until the lava behind it is placed over, which frees it up
+                        // for mining on a later pass
+                        if (throughWalls && hasLiquidNeighbor(context, tempLoc.above(i))) {
+                            continue;
+                        }
                         possibleIssuePosList.add(tempLoc.above(i));
                     }
                 }
@@ -198,7 +246,10 @@ public class LiquidRemovalPathing extends State {
 
             if (!aimPaused) {
                 for (BlockPos placeAt : placeAtList) {
-                    if (!context.placeAimable(placeAt, (float) context.playerContext().playerController().getBlockReachDistance())) {
+                    boolean floorReachable = throughWalls
+                            ? context.placeThroughWallsAimable(placeAt, (float) context.playerContext().playerController().getBlockReachDistance())
+                            : context.placeAimable(placeAt, (float) context.playerContext().playerController().getBlockReachDistance());
+                    if (!floorReachable) {
                         continue;
                     }
 
@@ -224,8 +275,11 @@ public class LiquidRemovalPathing extends State {
                             lastZ + (context.playerContext().player().getZ() - lastZ) * context.playerContext().minecraft().getDeltaTracker().getGameTimeDeltaPartialTick(true));
                     BetterBlockPos originPos = new BetterBlockPos(pos.x, pos.y+0.5f, pos.z);
                     double l_Offset = pos.y - originPos.getY();
-                    HighwayContext.PlaceResult placeResult = context.place(placeAt, (float) context.playerContext().playerController().getBlockReachDistance(), true, l_Offset == -0.5f, InteractionHand.MAIN_HAND);
+                    HighwayContext.PlaceResult placeResult = context.place(placeAt, (float) context.playerContext().playerController().getBlockReachDistance(), !throughWalls, l_Offset == -0.5f, InteractionHand.MAIN_HAND);
                     if (placeResult == HighwayContext.PlaceResult.Placed) {
+                        if (throughWalls) {
+                            context.noteThroughWallPlace(placeAt);
+                        }
                         aimWaitTicks = 0;
                         context.resetTimer();
                         return;
@@ -295,6 +349,9 @@ public class LiquidRemovalPathing extends State {
             // Find the first obstructing block we can break
             for (BlockPos checkPos : checkPositions) {
                 if (context.getIssueType(checkPos) == HighwayBlockState.Blocks) {
+                    if (throughWalls && hasLiquidNeighbor(context, checkPos)) {
+                        continue; // still cover for unfilled lava, fill through it instead
+                    }
                     Optional<Rotation> breakRotation = RotationUtils.reachable(context.playerContext(), checkPos, context.playerContext().playerController().getBlockReachDistance());
                     if (breakRotation.isPresent()) {
                         blockToBreak = checkPos;
@@ -357,7 +414,16 @@ public class LiquidRemovalPathing extends State {
         //timer = 0;
     }
 
-    private BlockPos findSupportBlockRecursive(HighwayContext context, BlockPos targetPos, 
+    private static boolean hasLiquidNeighbor(HighwayContext context, BlockPos pos) {
+        for (Direction dir : Direction.values()) {
+            if (context.getIssueType(pos.relative(dir)) == HighwayBlockState.Liquids) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private BlockPos findSupportBlockRecursive(HighwayContext context, BlockPos targetPos,
                                                 BlockPos playerPos, int dx, int dz, 
                                                 int depth, int maxDepth) {
         if (depth >= maxDepth) {

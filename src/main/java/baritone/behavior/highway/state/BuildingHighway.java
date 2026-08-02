@@ -178,6 +178,7 @@ public class BuildingHighway extends State {
 
         if (context.checkBackTimer() >= 10) {
             context.resetCheckBackTimer();
+            context.resetThroughWallDetection();
             // Time to check highway for correctness
             Vec3 direction = new Vec3(context.highwayDirection().getX(), context.highwayDirection().getY(), context.highwayDirection().getZ());
 
@@ -198,7 +199,10 @@ public class BuildingHighway extends State {
             if (context.baritone().getBuilderProcess().isPaused()) {
                 curState = context.isHighwayCorrect(startCheckPos, startCheckPosLiq, tempCheckBackDist + 8, context.settings().highwayRenderLiquidScanArea.value); // Also checking a few blocks in front of us
             } else {
-                curState = context.isHighwayCorrect(startCheckPos, startCheckPosLiq, tempCheckBackDist + 5, context.settings().highwayRenderLiquidScanArea.value);
+                // Through-wall filling must detect sealed pockets before their cover comes into
+                // break reach, so scan a few blocks farther ahead
+                int scanAhead = context.liquidThroughWalls() ? 8 : 5;
+                curState = context.isHighwayCorrect(startCheckPos, startCheckPosLiq, tempCheckBackDist + scanAhead, context.settings().highwayRenderLiquidScanArea.value);
             }
             if (curState == HighwayBlockState.Liquids) {
                 Helper.HELPER.logDirect("Removing liquids.");
