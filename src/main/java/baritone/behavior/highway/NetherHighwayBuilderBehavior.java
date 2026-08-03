@@ -369,7 +369,10 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         if (settings.highwayEndDistance.value != -1) {
             ctx.minecraft().options.keyUp.setDown(highwayContext.getHighwayLengthFront() >= settings.highwayEndDistance.value
                     && highwayContext.currentState().getState() == HighwayState.BuildingHighway
-                    && highwayContext.canWalkOnFloorAhead());
+                    && highwayContext.canWalkOnFloorAhead()
+                    // a pathing pause can't lift this real key, so release it ourselves while an
+                    // inventory move waits for a tick without movement input
+                    && !baritone.getInventoryPauserProcess().calmPausePending());
         }
 
         highwayContext.handle();

@@ -139,6 +139,16 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
      */
     private static final int PRINTER_PATH_PROTECT_LENGTH = 24;
 
+    /**
+     * Consecutive unverified no-rotation placements before the mode suppresses itself.
+     */
+    private static final int PRINTER_NO_ROTATE_MAX_STREAK = 60;
+
+    /**
+     * Ticks before a no-rotation probe placement is re-checked against the world.
+     */
+    private static final int PRINTER_NO_ROTATE_VERIFY_TICKS = 10;
+
     private int printerPlaceCooldown;
     private int printerBreakCooldown;
     private int printerBreakGrace;
@@ -149,6 +159,11 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
      * cleared for this tick, so it lines up with the impulses the last physics step actually used.
      */
     private boolean printerMovementForced;
+    private int printerNoRotateStreak;
+    private BetterBlockPos printerNoRotateVerifyPos;
+    private int printerNoRotateVerifyAge;
+    private boolean printerNoRotateSuppressed;
+    private int printerNoRotateSuppressedTicks;
 
     private record PrinterAction(boolean placed, boolean broke) {
 
@@ -223,6 +238,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         this.numRepeats = 0;
         this.observedCompleted = new LongOpenHashSet();
         this.incorrectPositions = null;
+        printerResetNoRotateDetection();
     }
 
     public void resume() {
@@ -526,6 +542,28 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         if (printerBreakGrace > 0) {
             printerBreakGrace--;
         }
+        if (Baritone.settings().printerNoRotate.value && printerNoRotateSuppressed) {
+            int retryTicks = Baritone.settings().printerNoRotateRetryTicks.value;
+            if (retryTicks > 0 && ++printerNoRotateSuppressedTicks >= retryTicks) {
+                // transient causes (like a lag-spike setback window eating placements) clear on
+                // their own, so probe again instead of staying suppressed for the whole build
+                logDebug("Retrying no-rotation printing after suppression");
+                printerResetNoRotateDetection();
+            }
+        }
+        if (Baritone.settings().printerNoRotate.value && !printerNoRotateSuppressed) {
+            printerTickNoRotateVerify(bcc); // may rescue the streak before the check below
+            if (printerNoRotateStreak >= PRINTER_NO_ROTATE_MAX_STREAK) {
+                logDirect("Server keeps reverting no-rotation placements. Printer falling back to rotation-based mode.");
+                printerNoRotateSuppressed = true;
+                printerNoRotateStreak = 0;
+                printerNoRotateVerifyPos = null;
+                printerNoRotateSuppressedTicks = 0;
+                // fall through to the rotation-based path this same tick
+            } else {
+                return printerFireNoRotate(bcc, mayPlace);
+            }
+        }
         PrinterAction action = printerFire(bcc, mayPlace);
         printerAim(bcc, printerMovementForced, mayPlace);
         return action;
@@ -572,6 +610,10 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             }
             break;
         }
+        return printerFinish(placed, broke);
+    }
+
+    private PrinterAction printerFinish(boolean placed, boolean broke) {
         if (broke) {
             printerBreakCooldown = Math.max(1, Baritone.settings().printerBreakDelay.value);
         }
@@ -582,6 +624,114 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             baritone.getInputOverrideHandler().suppressClicksThisTick();
         }
         return new PrinterAction(placed, broke);
+    }
+
+    private PrinterAction printerFireNoRotate(BuilderCalculationContext bcc, boolean mayPlace) {
+        if (printerInventoryUnsettled()) {
+            return PrinterAction.NONE;
+        }
+        double reach = ctx.playerController().getBlockReachDistance();
+        double reachSq = reach * reach;
+        Vec3 eye = ctx.player().getEyePosition(1.0f);
+        Vec3 predictedEye = eye.add(ctx.player().getDeltaMovement());
+        // only used to predict getStateForPlacement orientation for directional blocks
+        Rotation rot = baritone.getLookBehavior().getServerRotation().orElse(ctx.playerRotations());
+        int breaksLeft = printerBreakCooldown <= 0 ? Math.max(1, Baritone.settings().multiBreak.value) : 0;
+        int placesLeft = mayPlace && printerPlaceCooldown <= 0 ? Math.max(1, Baritone.settings().printerMultiPlace.value) : 0;
+
+        List<BetterBlockPos> candidates = new ArrayList<>(incorrectPositions);
+        double maxDistSq = (reach + 1) * (reach + 1); // same block-center slack as printerAim
+        candidates.removeIf(pos -> eye.distanceToSqr(VecUtils.getBlockPosCenter(pos)) > maxDistSq);
+        candidates.sort(Comparator.comparingDouble(pos -> eye.distanceToSqr(VecUtils.getBlockPosCenter(pos))));
+
+        boolean placed = false;
+        boolean broke = false;
+        int placeSlot = -1;
+
+        // break pass first; printerTryBreak re-checks every gate (breakAllowed, breakSafe,
+        // wrong-block, instant-only)
+        for (BetterBlockPos pos : candidates) {
+            if (breaksLeft <= 0) {
+                break;
+            }
+            Vec3 center = VecUtils.getBlockPosCenter(pos);
+            Direction face = Direction.getApproximateNearest(eye.subtract(center)); // face pointing back at the eye
+            Vec3 hitVec = center.add(face.getStepX() * 0.5, face.getStepY() * 0.5, face.getStepZ() * 0.5);
+            if (eye.distanceToSqr(hitVec) > reachSq || predictedEye.distanceToSqr(hitVec) > reachSq) {
+                continue;
+            }
+            BlockHitResult bhr = new BlockHitResult(hitVec, face, new BlockPos(pos.x, pos.y, pos.z), false);
+            if (printerTryBreak(bcc, bhr, pos)) {
+                broke = true;
+                breaksLeft--;
+                // candidate stays: the place pass may fill this same cell this tick
+            }
+        }
+
+        // place pass
+        for (BetterBlockPos pos : candidates) {
+            if (placesLeft <= 0) {
+                break;
+            }
+            BlockState curr = bcc.bsi.get0(pos);
+            if (!(curr.getBlock() instanceof AirBlock) && !(curr.getBlock() instanceof LiquidBlock)
+                    && !MovementHelper.isReplaceable(pos.x, pos.y, pos.z, curr, bcc.bsi)) {
+                continue; // needs breaking, not placing
+            }
+            for (Direction d : Direction.values()) { // DOWN first: click the UP face of the support below
+                BetterBlockPos neighbor = pos.relative(d);
+                if (!MovementHelper.canPlaceAgainst(bcc.bsi, neighbor)) {
+                    continue;
+                }
+                Direction face = d.getOpposite();
+                Vec3 hitVec = VecUtils.getBlockPosCenter(neighbor)
+                        .add(face.getStepX() * 0.5, face.getStepY() * 0.5, face.getStepZ() * 0.5);
+                if (eye.distanceToSqr(hitVec) > reachSq || predictedEye.distanceToSqr(hitVec) > reachSq) {
+                    continue;
+                }
+                // plain BlockPos on purpose: the hit result flows into vanilla world mutation, and
+                // BetterBlockPos's different hashCode must not leak into the block entity map
+                BlockHitResult bhr = new BlockHitResult(hitVec, face, new BlockPos(neighbor.x, neighbor.y, neighbor.z), false);
+                int usedSlot = printerTryPlace(bcc, bhr, neighbor, rot, placed ? placeSlot : -1);
+                if (usedSlot >= 0) {
+                    placed = true;
+                    placeSlot = usedSlot;
+                    placesLeft--;
+                    printerNoteNoRotatePlace(pos);
+                    break; // next candidate
+                }
+            }
+        }
+        return printerFinish(placed, broke);
+    }
+
+    private void printerNoteNoRotatePlace(BetterBlockPos target) {
+        printerNoRotateStreak++;
+        if (printerNoRotateVerifyPos == null) {
+            printerNoRotateVerifyPos = target;
+            printerNoRotateVerifyAge = 0;
+        }
+    }
+
+    private void printerTickNoRotateVerify(BuilderCalculationContext bcc) {
+        if (printerNoRotateVerifyPos == null || ++printerNoRotateVerifyAge < PRINTER_NO_ROTATE_VERIFY_TICKS) {
+            return;
+        }
+        BetterBlockPos probe = printerNoRotateVerifyPos;
+        BlockState curr = bcc.bsi.get0(probe);
+        BlockState desired = bcc.getSchematic(probe.x, probe.y, probe.z, curr);
+        if (valid(curr, desired, false)) { // a probe that scrolled out of the schematic can't count as a rejection
+            printerNoRotateStreak = 0;
+        }
+        printerNoRotateVerifyPos = null;
+    }
+
+    private void printerResetNoRotateDetection() {
+        printerNoRotateSuppressed = false;
+        printerNoRotateStreak = 0;
+        printerNoRotateVerifyPos = null;
+        printerNoRotateVerifyAge = 0;
+        printerNoRotateSuppressedTicks = 0;
     }
 
     private boolean printerTryBreak(BuilderCalculationContext bcc, BlockHitResult bhr, BetterBlockPos clicked) {
@@ -1046,7 +1196,20 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                             // a move is already in flight; hold instead of clicking again
                             return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
                         }
-                        if (!baritone.getInventoryBehavior().attemptToPutOnHotbar(i, usefulSlots::contains)) {
+                        boolean requested;
+                        if (Baritone.settings().fillEmptyHotbarSlots.value) {
+                            // pull every matching stack the empty slots have room for, not just this one
+                            List<Integer> sources = new ArrayList<>();
+                            for (int j = i; j < 36; j++) {
+                                if (valid(approxPlaceable.get(j), desired, true)) {
+                                    sources.add(j);
+                                }
+                            }
+                            requested = baritone.getInventoryBehavior().attemptToFillHotbarFrom(sources, usefulSlots::contains);
+                        } else {
+                            requested = baritone.getInventoryBehavior().attemptToPutOnHotbar(i, usefulSlots::contains);
+                        }
+                        if (!requested) {
                             // awaiting inventory move, so pause
                             return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
                         }
@@ -1552,6 +1715,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         legitBreakSessionLastTick = false;
         printerBreakStarvation = 0;
         printerMovementForced = false;
+        printerResetNoRotateDetection();
     }
 
     @Override

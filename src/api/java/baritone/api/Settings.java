@@ -98,9 +98,21 @@ public final class Settings {
     public final Setting<Integer> ticksBetweenInventoryMoves = new Setting<>(1);
 
     /**
+     * When the builder restocks a needed block from the main inventory and the hotbar has empty
+     * slots, move a matching stack into every empty slot
+     */
+    public final Setting<Boolean> fillEmptyHotbarSlots = new Setting<>(true);
+
+    /**
      * Come to a halt before doing any inventory moves. Intended for anticheat such as 2b2t
      */
     public final Setting<Boolean> inventoryMoveOnlyIfStationary = new Setting<>(false);
+
+    /**
+     * Before any inventory move, wait for one tick whose outgoing packets carried no sprint and no
+     * held movement keys
+     */
+    public final Setting<Boolean> inventoryMoveOnlyIfCalm = new Setting<>(false);
 
     /**
      * Disable baritone's auto-tool at runtime, but still assume that another mod will provide auto tool functionality
@@ -1868,6 +1880,19 @@ public final class Settings {
      * printer is enabled.
      */
     public final Setting<Integer> highwayPrinterLookahead = new Setting<>(4);
+
+    /**
+     * The printer places and instant-breaks without any rotation requirement, limited only by
+     * normal block reach distance; If the server keeps reverting placements, the printer falls
+     * back to rotation-based mode for {@link #printerNoRotateRetryTicks} ticks.
+     */
+    public final Setting<Boolean> printerNoRotate = new Setting<>(false);
+
+    /**
+     * After the printer suppressed no-rotation mode because the server kept reverting placements,
+     * try the mode again this many ticks later. 0 never retries within a build.
+     */
+    public final Setting<Integer> printerNoRotateRetryTicks = new Setting<>(600);
 
     /**
      * A map of lowercase setting field names to their respective setting

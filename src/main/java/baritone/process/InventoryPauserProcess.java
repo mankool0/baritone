@@ -27,6 +27,8 @@ public class InventoryPauserProcess extends BaritoneProcessHelper {
     boolean pauseRequestedLastTick;
     boolean safeToCancelLastTick;
     int ticksOfStationary;
+    int ticksOfCalm;
+    int calmPauseTicks;
 
     public InventoryPauserProcess(Baritone baritone) {
         super(baritone);
@@ -53,10 +55,42 @@ public class InventoryPauserProcess extends BaritoneProcessHelper {
         return safeToCancelLastTick && ticksOfStationary > 1;
     }
 
+    private boolean calmNow() {
+        return !ctx.player().isSprinting()
+                && ctx.player().input.forwardImpulse == 0
+                && ctx.player().input.leftImpulse == 0;
+    }
+
+    /**
+     * Quick variant of {@link #stationaryForInventoryMove()}: only needs one tick whose outgoing
+     * packets carried no sprint and no movement keys; momentum is fine.
+     */
+    public boolean calmForInventoryMove() {
+        if (safeToCancelLastTick && ticksOfCalm >= 1) {
+            calmPauseTicks = 0;
+            return true;
+        }
+        calmPauseTicks = 2; // self-decays in onTick, so an abandoned request can't pause forever
+        return false;
+    }
+
+    /**
+     * @return whether whoever holds real movement keys (the highway's forward walk) should release
+     * them this tick so an inventory move can happen against a calm server-visible state
+     */
+    public boolean calmPausePending() {
+        return calmPauseTicks > 0;
+    }
+
     @Override
     public PathingCommand onTick(boolean calcFailed, boolean isSafeToCancel) {
         //logDebug(pauseRequestedLastTick + " " + safeToCancelLastTick + " " + ticksOfStationary);
         safeToCancelLastTick = isSafeToCancel;
+        if (calmNow()) {
+            ticksOfCalm++;
+        } else {
+            ticksOfCalm = 0;
+        }
         if (pauseRequestedLastTick) {
             pauseRequestedLastTick = false;
             if (stationaryNow()) {
@@ -65,6 +99,14 @@ public class InventoryPauserProcess extends BaritoneProcessHelper {
             return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
         }
         ticksOfStationary = 0;
+        if (calmPauseTicks > 0) {
+            calmPauseTicks--;
+            if (!(safeToCancelLastTick && ticksOfCalm >= 1)) {
+                return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+            }
+            // calm reached: defer so the process that wants the move can tick and click this
+            // tick, while the click still compares against the calm state just sent
+        }
         return new PathingCommand(null, PathingCommandType.DEFER);
     }
 

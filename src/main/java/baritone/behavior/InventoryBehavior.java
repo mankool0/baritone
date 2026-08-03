@@ -39,6 +39,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.OptionalInt;
 import java.util.Random;
 import java.util.function.Predicate;
@@ -96,6 +97,31 @@ public final class InventoryBehavior extends Behavior implements Helper {
         return true;
     }
 
+    public boolean attemptToFillHotbarFrom(List<Integer> inMainInvy, Predicate<Integer> disallowedHotbar) {
+        if (inMainInvy.isEmpty()) {
+            return true;
+        }
+        List<Integer> empties = new ArrayList<>();
+        for (int i = 1; i < 8; i++) { // 0 and 8 stay reserved for the pickaxe and throwaway
+            if (ctx.player().getInventory().items.get(i).isEmpty() && !disallowedHotbar.test(i)) {
+                empties.add(i);
+            }
+        }
+        if (empties.isEmpty()) {
+            return attemptToPutOnHotbar(inMainInvy.get(0), disallowedHotbar);
+        }
+        if (!inventoryMoveAllowedNow()) {
+            return false;
+        }
+        int moves = Math.min(empties.size(), inMainInvy.size());
+        for (int m = 0; m < moves; m++) {
+            clickSwap(inMainInvy.get(m), empties.get(m));
+        }
+        ticksSinceLastInventoryMove = 0;
+        lastTickRequestedMove = null;
+        return true;
+    }
+
     public OptionalInt getTempHotbarSlot(Predicate<Integer> disallowedHotbar) {
         // we're using 0 and 8 for pickaxe and throwaway
         ArrayList<Integer> candidates = new ArrayList<>();
@@ -119,6 +145,16 @@ public final class InventoryBehavior extends Behavior implements Helper {
 
     private boolean requestSwapWithHotBar(int inInventory, int inHotbar) {
         lastTickRequestedMove = new int[]{inInventory, inHotbar};
+        if (!inventoryMoveAllowedNow()) {
+            return false;
+        }
+        clickSwap(inInventory, inHotbar);
+        ticksSinceLastInventoryMove = 0;
+        lastTickRequestedMove = null;
+        return true;
+    }
+
+    private boolean inventoryMoveAllowedNow() {
         if (ticksSinceLastInventoryMove < Baritone.settings().ticksBetweenInventoryMoves.value) {
             logDebug("Inventory move requested but delaying " + ticksSinceLastInventoryMove + " " + Baritone.settings().ticksBetweenInventoryMoves.value);
             return false;
@@ -127,10 +163,15 @@ public final class InventoryBehavior extends Behavior implements Helper {
             logDebug("Inventory move requested but delaying until stationary");
             return false;
         }
-        ctx.playerController().windowClick(ctx.player().inventoryMenu.containerId, inInventory < 9 ? inInventory + 36 : inInventory, inHotbar, ClickType.SWAP, ctx.player());
-        ticksSinceLastInventoryMove = 0;
-        lastTickRequestedMove = null;
+        if (Baritone.settings().inventoryMoveOnlyIfCalm.value && !baritone.getInventoryPauserProcess().calmForInventoryMove()) {
+            logDebug("Inventory move requested but waiting for a tick without sprint/input");
+            return false;
+        }
         return true;
+    }
+
+    private void clickSwap(int inInventory, int inHotbar) {
+        ctx.playerController().windowClick(ctx.player().inventoryMenu.containerId, inInventory < 9 ? inInventory + 36 : inInventory, inHotbar, ClickType.SWAP, ctx.player());
     }
 
     private int firstValidThrowaway() { // TODO offhand idk
