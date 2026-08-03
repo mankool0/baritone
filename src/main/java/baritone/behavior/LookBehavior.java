@@ -98,6 +98,14 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
         return Optional.ofNullable(this.serverRotation);
     }
 
+    public boolean hasTargetThisTick() {
+        return this.target != null;
+    }
+
+    public boolean hasInteractTargetThisTick() {
+        return this.target != null && this.target.interact;
+    }
+
     @Override
     public IAimProcessor getAimProcessor() {
         return this.processor;

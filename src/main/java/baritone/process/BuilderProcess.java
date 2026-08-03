@@ -1220,6 +1220,11 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             }
         }
 
+        if (printerAction.acted() && isSafeToCancel
+                && Baritone.settings().highwayEndDistance.value != -1
+                && baritone.getNetherHighwayBuilderBehavior().isBuildingHighwayState()) {
+            return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
+        }
         Goal goal = assemble(bcc, approxPlaceable.subList(0, 9));
         if (goal == null) {
             goal = assemble(bcc, approxPlaceable, true); // we're far away, so assume that we have our whole inventory to recalculate placeable properly

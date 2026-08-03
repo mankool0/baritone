@@ -1779,6 +1779,13 @@ public final class Settings {
     public final Setting<Integer> highwayEndDistance = new Setting<>(-1);
 
     /**
+     * Sprint while walking toward the end of the highway. Only worth enabling when the server
+     * lets {@link #multiBreak}/{@link #printerMultiPlace} clear more than one block per tick;
+     * otherwise the printer caps the pace anyway and sprinting just burns hunger.
+     */
+    public final Setting<Boolean> highwaySprint = new Setting<>(false);
+
+    /**
      * If enabled, when the bot falls below the highway it will recover by pathing back to an
      * already-built spot behind it
      */

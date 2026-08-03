@@ -22,6 +22,7 @@ import baritone.api.BaritoneAPI;
 import baritone.api.behavior.INetherHighwayBuilderBehavior;
 import baritone.api.event.events.PacketEvent;
 import baritone.api.event.events.RenderEvent;
+import baritone.api.event.events.SprintStateEvent;
 import baritone.api.event.events.TickEvent;
 import baritone.api.event.events.type.EventState;
 import baritone.api.pathing.goals.*;
@@ -94,6 +95,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     public static boolean suppressHitResult = false;
 
     private final HighwayContext highwayContext;
+
+    private boolean walkKeyHeld = false;
 
 
     public NetherHighwayBuilderBehavior(Baritone baritone) {
@@ -329,6 +332,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         highwayContext.setRepeatCheck(false);
         highwayContext.resetRecovery(); // restore any settings (e.g. allowSwimThroughLava) overridden during recovery
         highwayContext.transitionTo(HighwayState.Nothing);
+        setWalkForward(false);
         baritone.getPathingBehavior().cancelEverything();
         highwayContext.setFirstStartingPos(null);
         highwayContext.setOriginBuild(null);
@@ -350,6 +354,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     @Override
     public void onTick(TickEvent event) {
         if (highwayContext.paused() || highwayContext.schematic() == null || ctx.player() == null || ctx.player().getInventory().isEmpty() || event.getType() == TickEvent.Type.OUT) {
+            setWalkForward(false); // never leave the walk key latched while the state machine isn't driving
             return;
         }
 
@@ -362,20 +367,51 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         // swapped into the totem's slot.
         boolean pauseStateMachine = highwayContext.rescueOffhandEnderChests() || highwayContext.autoTotem() || highwayContext.clearCursorItem();
         if (highwayContext.stuckCheck() || highwayContext.healthCheck() || pauseStateMachine) {
+            setWalkForward(false);
             return;
         }
 
         // Handle distance to keep from end of highway
+        boolean walk = false;
         if (settings.highwayEndDistance.value != -1) {
-            ctx.minecraft().options.keyUp.setDown(highwayContext.getHighwayLengthFront() >= settings.highwayEndDistance.value
+            walk = highwayContext.getHighwayLengthFront() >= settings.highwayEndDistance.value
                     && highwayContext.currentState().getState() == HighwayState.BuildingHighway
                     && highwayContext.canWalkOnFloorAhead()
                     // a pathing pause can't lift this real key, so release it ourselves while an
                     // inventory move waits for a tick without movement input
-                    && !baritone.getInventoryPauserProcess().calmPausePending());
+                    && !baritone.getInventoryPauserProcess().calmPausePending();
+            if (walk) {
+                if (!highwayContext.paving() && baritone.getLookBehavior().hasInteractTargetThisTick()) {
+                    // in a tunnel, walking while something aims at a block veers toward the aim;
+                    // stand still for the interaction instead
+                    walk = false;
+                } else if (!baritone.getLookBehavior().hasTargetThisTick() && !baritone.getPathingBehavior().isPathing()) {
+                    // nothing owns the look this tick; without this the held key walks wherever
+                    // the last rotation happened to leave the camera
+                    highwayContext.faceHighwayDirection();
+                }
+            }
         }
+        setWalkForward(walk);
 
         highwayContext.handle();
+    }
+
+    private void setWalkForward(boolean walk) {
+        if (walk) {
+            walkKeyHeld = true;
+            ctx.minecraft().options.keyUp.setDown(true);
+        } else if (walkKeyHeld) {
+            walkKeyHeld = false;
+            ctx.minecraft().options.keyUp.setDown(false);
+        }
+    }
+
+    @Override
+    public void onPlayerSprintState(SprintStateEvent event) {
+        if (walkKeyHeld && settings.highwaySprint.value && !baritone.getPathingBehavior().isPathing()) {
+            event.setState(true);
+        }
     }
 
     @Override

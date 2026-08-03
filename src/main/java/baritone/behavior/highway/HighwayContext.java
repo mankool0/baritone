@@ -257,6 +257,7 @@ public class HighwayContext {
     private int stuckTimer = 0;
     private float cachedHealth = 0.0f;
     private float cachedAbsorption = 0.0f;
+    private boolean walkCentering = false;
 
     public boolean instantMineCalibrated() {
         return instantMineCalibrated;
@@ -2320,6 +2321,57 @@ public class HighwayContext {
                     && MovementHelper.canWalkOn(baritone.bsi, feet.x, floorY, feet.z + dirZ);
         }
         return true;
+    }
+
+    public void faceHighwayDirection() {
+        double dirX = highwayDirection.getX();
+        double dirZ = highwayDirection.getZ();
+        double len = Math.sqrt(dirX * dirX + dirZ * dirZ);
+        if (len == 0) {
+            return;
+        }
+        dirX /= len;
+        dirZ /= len;
+        float yaw = (float) Math.toDegrees(Math.atan2(-dirX, dirZ));
+
+        // Both schematic layouts put the walk lane at cross-axis offsets [1, highwayWidth] from
+        // the slice origin, so the lane center sits at origin + 1 + width/2 on the cross axis
+        Vec3 playerPos = playerContext.player().position();
+        BetterBlockPos sliceOrigin = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z),
+                new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ()), playerPos, LocationType.HighwayBuild);
+        double laneCenterOffset = 1 + settings.highwayWidth.value / 2.0;
+        boolean crossAxisZ = (highwayDirection.getZ() == 0 && Math.abs(highwayDirection.getX()) == 1)
+                || (highwayDirection.getX() == 1 && highwayDirection.getZ() == 1)
+                || (highwayDirection.getX() == -1 && highwayDirection.getZ() == -1);
+        double centerX = crossAxisZ ? sliceOrigin.x + 0.5 : sliceOrigin.x + laneCenterOffset;
+        double centerZ = crossAxisZ ? sliceOrigin.z + laneCenterOffset : sliceOrigin.z + 0.5;
+
+        // Signed offset toward the yaw+90 side; steering by -offset walks it back toward zero
+        double lateral = (playerPos.x - centerX) * -dirZ + (playerPos.z - centerZ) * dirX;
+
+        double halfLane = settings.highwayWidth.value / 2.0;
+        if (highwayDirection.getX() != 0 && highwayDirection.getZ() != 0) {
+            halfLane /= Math.sqrt(2); // diagonal corridors are measured perpendicular to travel
+        }
+
+        double engage = Math.max(0.3, Math.min(0.75, halfLane - 0.6));
+        double release = engage * 0.4;
+        if (Math.abs(lateral) > (walkCentering ? release : engage)) {
+            walkCentering = true;
+            // 10 degrees of steer per block of offset, capped at 20 so the angle stays shallow
+            yaw -= (float) Math.max(-20.0, Math.min(20.0, lateral * 10.0));
+        } else {
+            walkCentering = false;
+        }
+        playerContext.player().setYRot(yaw);
+
+        // Let a pitch parked by chest opening or block aims drift back to a natural level
+        float pitch = playerContext.player().getXRot();
+        if (pitch > 10) {
+            playerContext.player().setXRot(pitch - 1);
+        } else if (pitch < -20) {
+            playerContext.player().setXRot(pitch + 1);
+        }
     }
 
 
