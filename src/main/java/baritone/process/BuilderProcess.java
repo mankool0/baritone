@@ -656,10 +656,11 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             }
             Vec3 center = VecUtils.getBlockPosCenter(pos);
             Direction face = Direction.getApproximateNearest(eye.subtract(center)); // face pointing back at the eye
-            Vec3 hitVec = center.add(face.getStepX() * 0.5, face.getStepY() * 0.5, face.getStepZ() * 0.5);
-            if (eye.distanceToSqr(hitVec) > reachSq || predictedEye.distanceToSqr(hitVec) > reachSq) {
+            AABB cell = new AABB(pos);
+            if (cell.distanceToSqr(eye) > reachSq || cell.distanceToSqr(predictedEye) > reachSq) {
                 continue;
             }
+            Vec3 hitVec = center.add(face.getStepX() * 0.5, face.getStepY() * 0.5, face.getStepZ() * 0.5);
             BlockHitResult bhr = new BlockHitResult(hitVec, face, new BlockPos(pos.x, pos.y, pos.z), false);
             if (printerTryBreak(bcc, bhr, pos)) {
                 broke = true;
@@ -931,7 +932,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     }
 
     /**
-     * Never dig out our own support or anything the current path is about to walk on.
+     * Never dig out our own support or the floor the current path is about to walk on.
      */
     private boolean printerBreakSafe(BlockPos pos) {
         BetterBlockPos feet = ctx.playerFeet();
@@ -946,7 +947,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             int end = Math.min(positions.size(), current.getPosition() + PRINTER_PATH_PROTECT_LENGTH);
             for (int i = start; i < end; i++) {
                 BetterBlockPos p = positions.get(i);
-                if (pos.equals(p) || pos.equals(p.below())) {
+                if (pos.equals(p.below())) {
                     return false;
                 }
             }
@@ -1150,9 +1151,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                 if (ctx.isLookingAt(pos)) {
                     baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_LEFT, true);
                 }
-                // keep blockBreakSpeed spacing between this (possibly multi-tick) break and the
-                // printer's next dig
-                printerBreakGrace = Math.max(printerBreakGrace, Math.max(1, Baritone.settings().blockBreakSpeed.value));
+                if (!printerCanInstaBreak(bcc.get(pos), pos)) {
+                    printerBreakGrace = Math.max(printerBreakGrace, Math.max(1, Baritone.settings().blockBreakSpeed.value));
+                }
             }
 
             return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
