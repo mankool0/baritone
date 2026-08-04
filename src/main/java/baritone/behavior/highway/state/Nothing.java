@@ -17,7 +17,9 @@
 
 package baritone.behavior.highway.state;
 
+import baritone.api.pathing.goals.GoalBlock;
 import baritone.api.schematic.ISchematic;
+import baritone.api.utils.BetterBlockPos;
 import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.enums.HighwayState;
@@ -60,7 +62,9 @@ public class Nothing extends State {
         ISchematic buildSchem = context.schematic();
         BlockPos buildOrigin = context.originBuild();
         int lookahead = context.settings().highwayPrinterLookahead.value;
-        if (context.settings().printer.value && lookahead > 1) {
+        int slicesToEnd = context.settings().buildRepeatCount.value;
+        boolean nearEnd = slicesToEnd != -1 && slicesToEnd <= context.highwayCheckBackDistance() + 2 * lookahead + 2;
+        if (context.settings().printer.value && lookahead > 1 && !nearEnd) {
             int stepX = context.highwayDirection().getX();
             int stepZ = context.highwayDirection().getZ();
             buildSchem = context.schematic().repeated(stepX, 0, stepZ, lookahead);
@@ -68,6 +72,9 @@ public class Nothing extends State {
             // the builder only repeats once the whole region is correct, so advance by the full
             // window width or each repeat would just re-expose slices it already built
             context.settings().buildRepeat.value = new Vec3i(stepX * lookahead, 0, stepZ * lookahead);
+            if (slicesToEnd != -1) {
+                context.settings().buildRepeatCount.value = slicesToEnd / lookahead;
+            }
         }
         context.baritone().getBuilderProcess().build("netherHighway", buildSchem, buildOrigin);
 
