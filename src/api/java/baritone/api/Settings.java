@@ -1725,6 +1725,12 @@ public final class Settings {
     public final Setting<Double> highwayMobMaxAggroRange = new Setting<>(24.0);
 
     /**
+     * Attack the engaged mob during highway mob combat. Off by default: combat normally only chases
+     * the mob and expects an external killaura module to do the hitting. Enable if not using one.
+     */
+    public final Setting<Boolean> highwayMobCombatAttack = new Setting<>(false);
+
+    /**
      * Avoid placing and breaking refill shulker boxes while a piglin that could steal the dropped box
      * (a baby, or any piglin with an empty main hand) is within this range of the spot. Placement prep
      * shifts the spot further back along the highway; the mining states wait for the piglin to wander

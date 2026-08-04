@@ -56,6 +56,13 @@ public class MobCombat extends State {
         Entity target = mob.get();
         context.setCurrentMobTarget(target);
 
+        // Only aim-and-swing in melee range; a forced look target further out would fight the
+        // pathing rotations while we're still closing in
+        if (context.settings().highwayMobCombatAttack.value
+                && context.playerContext().player().distanceToSqr(target) <= 3.0 * 3.0) {
+            context.attackEntity(target);
+        }
+
         // Mirror FollowProcess.towards()
         BlockPos pos;
         if (Baritone.settings().followOffsetDistance.value == 0) {
