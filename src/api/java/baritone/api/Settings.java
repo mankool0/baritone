@@ -1630,6 +1630,19 @@ public final class Settings {
     public final Setting<Integer> highwayEnderChestShulksToHave = new Setting<>(1);
 
     /**
+     * Gapple shulkers to have in inventory during looting. Only used when
+     * highwayStashGappleShulkers is false.
+     */
+    public final Setting<Integer> highwayGappleShulksToHave = new Setting<>(1);
+
+    /**
+     * Keep gapple shulkers in the ender chest instead of the inventory: when gapples run low,
+     * grab a gapple shulker from the ender chest, loot gapples up to highwayGapplesToHave,
+     * and deposit the shulker back into the ender chest.
+     */
+    public final Setting<Boolean> highwayStashGappleShulkers = new Setting<>(true);
+
+    /**
      * Ender chests to loot for obsidian farming
      */
     public final Setting<Integer> highwayEnderChestsToLoot = new Setting<>(64);

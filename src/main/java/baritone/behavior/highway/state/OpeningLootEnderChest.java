@@ -46,8 +46,8 @@ public class OpeningLootEnderChest extends State {
             context.baritone().getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
         } else {
             context.baritone().getInputOverrideHandler().clearAllKeys();
-            context.transitionTo(context.stashingEnderShulker()
-                    ? HighwayState.DepositingStashEnderShulker
+            context.transitionTo(context.stashingShulker()
+                    ? HighwayState.DepositingStashShulker
                     : HighwayState.DepositingLootEnderChestDepletedShulkers);
         }
 

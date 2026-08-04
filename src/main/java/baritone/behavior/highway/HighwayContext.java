@@ -175,8 +175,10 @@ public class HighwayContext {
     private int picksToHave = 5;
     private boolean enderChestHasPickShulks = true;
     private boolean enderChestHasEnderShulks = true;
+    private boolean enderChestHasGappleShulks = true;
     private boolean refillingEnderChests = false;
-    private boolean stashingEnderShulker = false;
+    private boolean refillingGapples = false;
+    private boolean stashingShulker = false;
     private BlockPos enderChestAccessLoc = null;
     private boolean repeatCheck = false;
     private ShulkerType picksToUse;
@@ -826,6 +828,14 @@ public class HighwayContext {
         this.enderChestHasEnderShulks = enderChestHasEnderShulks;
     }
 
+    public boolean enderChestHasGappleShulks() {
+        return enderChestHasGappleShulks;
+    }
+
+    public void setEnderChestHasGappleShulks(boolean enderChestHasGappleShulks) {
+        this.enderChestHasGappleShulks = enderChestHasGappleShulks;
+    }
+
     public boolean refillingEnderChests() {
         return refillingEnderChests;
     }
@@ -834,12 +844,20 @@ public class HighwayContext {
         this.refillingEnderChests = refillingEnderChests;
     }
 
-    public boolean stashingEnderShulker() {
-        return stashingEnderShulker;
+    public boolean refillingGapples() {
+        return refillingGapples;
     }
 
-    public void setStashingEnderShulker(boolean stashingEnderShulker) {
-        this.stashingEnderShulker = stashingEnderShulker;
+    public void setRefillingGapples(boolean refillingGapples) {
+        this.refillingGapples = refillingGapples;
+    }
+
+    public boolean stashingShulker() {
+        return stashingShulker;
+    }
+
+    public void setStashingShulker(boolean stashingShulker) {
+        this.stashingShulker = stashingShulker;
     }
 
     public BlockPos enderChestAccessLoc() {

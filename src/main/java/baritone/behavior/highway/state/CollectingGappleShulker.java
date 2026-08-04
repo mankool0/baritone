@@ -22,6 +22,7 @@ import baritone.api.utils.BetterBlockPos;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
+import baritone.behavior.highway.enums.ShulkerType;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Item;
@@ -53,6 +54,15 @@ public class CollectingGappleShulker extends State {
         }
 
         // No more shulker boxes to find
+        if (context.refillingGapples()) {
+            if (context.settings().highwayStashGappleShulkers.value && context.getShulkerCountInventory(ShulkerType.Gapple) > 0) {
+                context.transitionTo(HighwayState.EnderChestStashPlaceLocPrep); // fetched from storage: put it back
+                return;
+            }
+            // Carry mode, or the shulker emptied out while topping up: nothing to stash
+            context.setRefillingGapples(false);
+            context.setEnderChestAccessLoc(null);
+        }
         context.transitionTo(HighwayState.Nothing);
     }
 }

@@ -64,6 +64,25 @@ public class DepositingLootEnderChestDepletedShulkers extends State {
                     context.setRefillingEnderChests(false);
                     context.transitionTo(HighwayState.Nothing);
                 }
+            } else if (context.refillingGapples()) {
+                // This storage trip grabbed a gapple shulker: go place and loot it.
+                if (context.getShulkerCountInventory(ShulkerType.Gapple) > 0) {
+                    if (context.settings().highwayStashGappleShulkers.value) {
+                        context.setEnderChestAccessLoc(context.placeLoc()); // reuse this access chest for the stash
+                    }
+                    if (context.getPickCountInventory() >= context.settings().highwayPicksThreshold.value) {
+                        context.transitionTo(HighwayState.GappleShulkerPlaceLocPrep); // -> top up gapples
+                    } else {
+                        // A pick-triggered trip piggybacked this grab and we're near out of picks, which
+                        // mining the placed shulker box would need. BuildingHighway runs the pick cycle
+                        // first and then comes back for the gapples; the refill flag survives the detour.
+                        context.transitionTo(HighwayState.Nothing);
+                    }
+                } else {
+                    // Storage had no gapple shulker; abort the refill and let BuildingHighway re-evaluate (it will pause).
+                    context.setRefillingGapples(false);
+                    context.transitionTo(HighwayState.Nothing);
+                }
             } else {
                 context.transitionTo(HighwayState.Nothing);
             }

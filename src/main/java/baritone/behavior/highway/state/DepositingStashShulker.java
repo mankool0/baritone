@@ -25,11 +25,12 @@ import baritone.behavior.highway.enums.ShulkerType;
 import net.minecraft.client.gui.screens.inventory.ContainerScreen;
 
 /**
- * With ender storage open, deposit the (partially depleted) ender chest shulker back into it so it
- * stays in the ender inventory rather than being carried. Ends the digging refill cycle.
+ * With ender storage open, deposit the (partially depleted) shulker back into it so it stays in
+ * the ender inventory rather than being carried. Ends the digging ender chest refill cycle or the
+ * gapple refill cycle, whichever is active.
  */
-public class DepositingStashEnderShulker extends State {
-    public DepositingStashEnderShulker(HighwayState state) {
+public class DepositingStashShulker extends State {
+    public DepositingStashShulker(HighwayState state) {
         super(state);
     }
 
@@ -48,17 +49,32 @@ public class DepositingStashEnderShulker extends State {
             return; // Wait for the initial content sync; a truly empty container proceeds at 40
         }
 
-        if (context.depositShulkerChestSlot(ShulkerType.EnderChest) > 0) {
-            Helper.HELPER.logDirect("Stashed ender chest shulker back into storage.");
+        ShulkerType stashType = context.refillingEnderChests() ? ShulkerType.EnderChest : ShulkerType.Gapple;
+        if (context.depositShulkerChestSlot(stashType) > 0) {
+            Helper.HELPER.logDirect("Stashed " + (stashType == ShulkerType.EnderChest ? "ender chest" : "gapple") + " shulker back into storage.");
             context.resetTimer();
             return;
         }
 
         // Nothing left to deposit (done), or storage was full (keep the shulker and move on)
         context.playerContext().player().closeContainer();
-        context.setStashingEnderShulker(false);
-        context.setRefillingEnderChests(false);
-        context.setEnderChestAccessLoc(null);
+        int shulkerCount = context.getShulkerCountInventory(ShulkerType.Any);
+        if (shulkerCount < context.startShulkerCount()) {
+            // The stashed shulker was carried (and counted) at startup rather than grabbed on this
+            // trip: lower the expectation so we don't go walking back in search of a "lost" shulker.
+            Helper.HELPER.logDirect("Stashed a shulker we started with, lowering startShulkerCount from " + context.startShulkerCount() + " to " + shulkerCount);
+            context.setStartShulkerCount(shulkerCount);
+        }
+        context.setStashingShulker(false);
+        if (stashType == ShulkerType.EnderChest) {
+            context.setRefillingEnderChests(false);
+            if (!context.refillingGapples()) {
+                context.setEnderChestAccessLoc(null); // keep the chest loc when a gapple refill is queued behind us
+            }
+        } else {
+            context.setRefillingGapples(false);
+            context.setEnderChestAccessLoc(null);
+        }
         context.transitionTo(HighwayState.Nothing);
     }
 }

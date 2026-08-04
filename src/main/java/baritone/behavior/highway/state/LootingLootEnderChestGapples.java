@@ -21,6 +21,7 @@ import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
+import baritone.behavior.highway.enums.ShulkerType;
 import net.minecraft.client.gui.screens.inventory.ContainerScreen;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
@@ -45,13 +46,27 @@ public class LootingLootEnderChestGapples extends State {
             return; // Wait for the initial content sync; a truly empty container proceeds at 40
         }
 
-        if (context.getItemCountInventory(Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) < context.settings().highwayGapplesToHave.value) {
-            int gapplesLooted = context.lootGappleChestSlot();
-            if (gapplesLooted > 0) {
-                Helper.HELPER.logDirect("Looted " + gapplesLooted + " gapples");
+        // Already at storage and out of gapples: turn this trip into a gapple refill (grab a
+        // shulker now, top up after the trip, stash it back) instead of taking a second trip
+        if (context.settings().highwayStashGappleShulkers.value && !context.refillingGapples()
+                && context.getShulkerCountInventory(ShulkerType.Gapple) == 0
+                && context.getItemCountInventory(Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) <= context.settings().highwayGapplesThreshold.value) {
+            context.setRefillingGapples(true);
+        }
+
+        int wantShulks = context.settings().highwayStashGappleShulkers.value ? 0 : context.settings().highwayGappleShulksToHave.value;
+        if (context.refillingGapples()) {
+            wantShulks = Math.max(wantShulks, 1); // this trip has to come back with a shulker to loot from
+        }
+
+        if (context.getShulkerCountInventory(ShulkerType.Gapple) < wantShulks) {
+            int gappleShulksLooted = context.lootShulkerChestSlot(ShulkerType.Gapple);
+            if (gappleShulksLooted > 0) {
+                Helper.HELPER.logDirect("Looted " + gappleShulksLooted + " gapple shulker");
             } else {
-                Helper.HELPER.logDirect("No more gapples. Rolling with what we have.");
+                Helper.HELPER.logDirect("No more gapple shulkers. Rolling with what we have.");
                 context.transitionTo(HighwayState.DepositingLootEnderChestDepletedShulkersFinal);
+                context.setEnderChestHasGappleShulks(false);
             }
 
             context.resetTimer();

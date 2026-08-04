@@ -28,8 +28,8 @@ import net.minecraft.world.level.block.EnderChestBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
- * After topping up loose ender chests (digging), decide where to reopen ender storage to stash the
- * ender chest shulker back. Reuses the access chest placed during the earlier grab if it's still there
+ * After topping up loose ender chests (digging) or gapples, decide where to reopen ender storage to
+ * stash the shulker back. Reuses the access chest placed during the earlier grab if it's still there
  * (it was left placed and is only a few blocks away); otherwise finds a fresh, lava-free side spot.
  * Both paths hand off to the shared loot-access chain, which places-or-detects the chest and opens it.
  */
@@ -40,7 +40,7 @@ public class EnderChestStashPlaceLocPrep extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        context.setStashingEnderShulker(true);
+        context.setStashingShulker(true);
         context.settings().buildRepeat.value = new Vec3i(0, 0, 0);
         context.resetTimer();
 
@@ -58,9 +58,10 @@ public class EnderChestStashPlaceLocPrep extends State {
         // No chest to reuse: place a fresh one
         BlockPos safeLoc = context.findSafeSideStorageSpot(7, 25);
         if (safeLoc == null) {
-            Helper.HELPER.logDirect("Couldn't find a spot to stash the ender chest shulker, keeping it for now.");
-            context.setStashingEnderShulker(false);
+            Helper.HELPER.logDirect("Couldn't find a spot to stash the shulker, keeping it for now.");
+            context.setStashingShulker(false);
             context.setRefillingEnderChests(false);
+            context.setRefillingGapples(false);
             context.transitionTo(HighwayState.Nothing);
             return;
         }

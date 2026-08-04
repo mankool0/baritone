@@ -151,15 +151,41 @@ public class BuildingHighway extends State {
 
         if (context.getItemCountInventory(Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) <= context.settings().highwayGapplesThreshold.value) {
             if (context.getShulkerCountInventory(ShulkerType.Gapple) == 0) {
-                Helper.HELPER.logDirect("No more gapples, pausing");
-                context.baritone().getPathingBehavior().cancelEverything();
-                context.setPaused(true);
+                if (context.repeatCheck()) {
+                    if (!context.enderChestHasGappleShulks()) {
+                        Helper.HELPER.logDirect("Out of gapples, refill ender chest and inventory and restart.");
+                        context.baritone().getPathingBehavior().cancelEverything();
+                        context.setPaused(true);
+                        return;
+                    }
+                    Helper.HELPER.logDirect("Out of gapples, fetching a gapple shulker from the ender chest.");
+                    context.setRefillingGapples(true);
+                    context.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);
+                } else {
+                    Helper.HELPER.logDirect("Gapple count is under threshold. Player may still be loading. Waiting 120 ticks");
+                    context.resetTimer();
+                    context.setRepeatCheck(true);
+                }
                 return;
             }
             context.transitionTo(HighwayState.GappleShulkerPlaceLocPrep);
             context.baritone().getPathingBehavior().cancelEverything();
             context.resetTimer();
             return;
+        }
+
+        if (context.refillingGapples()) {
+            // A gapple refill cycle got interrupted after the threshold cleared (e.g. the place/loot
+            // flow bailed because we already had enough): stash the fetched shulker back, or just
+            // drop the flag when there is nothing left to stash.
+            if (context.settings().highwayStashGappleShulkers.value && context.getShulkerCountInventory(ShulkerType.Gapple) > 0) {
+                context.transitionTo(HighwayState.EnderChestStashPlaceLocPrep);
+                context.baritone().getPathingBehavior().cancelEverything();
+                context.resetTimer();
+                return;
+            }
+            context.setRefillingGapples(false);
+            context.setEnderChestAccessLoc(null);
         }
 
         if (context.baritone().getBuilderProcess().isActive() && context.baritone().getBuilderProcess().isPaused() && context.timer() >= 360) {
