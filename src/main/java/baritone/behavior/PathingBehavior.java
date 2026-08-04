@@ -265,7 +265,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         if (goal == null) {
             return false;
         }
-        if (goal.isInGoal(ctx.playerFeet())) {
+        if (goal.isInGoal(ctx.playerFeet()) && goal.isInGoal(expectedSegmentStart)) {
             return false;
         }
         synchronized (pathPlanLock) {
@@ -440,6 +440,14 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
                     if (xDist > 0.8 && zDist > 0.8) {
                         // can't possibly be sneaking off of this one, we're too far away
                         continue;
+                    }
+                    if (possibleSupport.x != feet.x && possibleSupport.z != feet.z) {
+                        BetterBlockPos cornerA = new BetterBlockPos(possibleSupport.x, feet.y, feet.z);
+                        BetterBlockPos cornerB = new BetterBlockPos(feet.x, feet.y, possibleSupport.z);
+                        if (!MovementHelper.canWalkThrough(ctx, cornerA) || !MovementHelper.canWalkThrough(ctx, cornerA.above())
+                                || !MovementHelper.canWalkThrough(ctx, cornerB) || !MovementHelper.canWalkThrough(ctx, cornerB.above())) {
+                            continue;
+                        }
                     }
                     if (MovementHelper.canWalkOn(ctx, possibleSupport.below()) && MovementHelper.canWalkThrough(ctx, possibleSupport) && MovementHelper.canWalkThrough(ctx, possibleSupport.above())) {
                         // this is plausible
