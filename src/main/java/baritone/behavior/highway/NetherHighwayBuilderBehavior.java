@@ -30,6 +30,7 @@ import baritone.api.schematic.CompositeSchematic;
 import baritone.api.schematic.ISchematic;
 import baritone.api.schematic.WhiteBlackSchematic;
 import baritone.api.utils.*;
+import baritone.api.utils.input.Input;
 import baritone.behavior.Behavior;
 import baritone.behavior.highway.enums.HighwayState;
 import baritone.behavior.highway.enums.LocationType;
@@ -40,6 +41,7 @@ import com.mojang.blaze3d.vertex.BufferBuilder;
 import net.minecraft.core.*;
 import net.minecraft.network.protocol.game.ClientboundSystemChatPacket;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.*;
 import net.minecraft.world.level.Level;
@@ -393,25 +395,38 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
         // Handle distance to keep from end of highway
         boolean walk = false;
-        if (settings.highwayEndDistance.value != -1) {
+        if (settings.highwayEndDistance.value != -1 && highwayContext.currentState().getState() == HighwayState.BuildingHighway) {
+            boolean interacting = baritone.getLookBehavior().hasInteractTargetThisTick();
+            boolean pathing = baritone.getPathingBehavior().isPathing();
+            if (!pathing && !interacting && baritone.getInputOverrideHandler().isInputForcedDown(Input.SNEAK)) {
+                // forced sneak left over from a finished stationary placement: with no path
+                // running nothing ever clears it, and a latched movement override keeps the
+                // override movement input installed, which ignores the real walk key entirely
+                baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, false);
+            }
             walk = highwayContext.getHighwayLengthFront() >= settings.highwayEndDistance.value
-                    && highwayContext.currentState().getState() == HighwayState.BuildingHighway
                     && highwayContext.canWalkOnFloorAhead()
                     // never creep into a lit portal waiting for its frame to be mined
                     && highwayContext.noPortalAhead()
-                    // a pathing pause can't lift this real key, so release it ourselves while an
-                    // inventory move waits for a tick without movement input
-                    && !baritone.getInventoryPauserProcess().calmPausePending();
-            if (walk) {
-                if (!highwayContext.paving() && baritone.getLookBehavior().hasInteractTargetThisTick()) {
-                    // in a tunnel, walking while something aims at a block veers toward the aim;
-                    // stand still for the interaction instead
+                    // release the key while an inventory move waits for a tick without movement input
+                    && !baritone.getInventoryPauserProcess().calmPausePending()
+                    // while a segment executes the path executor owns the movement keys; forcing
+                    // the walk key under it would shove the player off the moves it planned
+                    && !pathing;
+            if (walk && interacting) {
+                if (baritone.getInputOverrideHandler().isInputForcedDown(Input.SNEAK)) {
+                    // a stationary sneak-placement needs stillness in either mode
                     walk = false;
-                } else if (!baritone.getLookBehavior().hasTargetThisTick() && !baritone.getPathingBehavior().isPathing()) {
-                    // nothing owns the look this tick; without this the held key walks wherever
-                    // the last rotation happened to leave the camera
-                    highwayContext.faceHighwayDirection();
+                } else if (!highwayContext.paving()) {
+                    walk = baritone.getLookBehavior().getTargetRotation()
+                            .map(rot -> Math.abs(Mth.degreesDifference(rot.getYaw(), highwayContext.highwayDirectionYaw())) <= 50)
+                            .orElse(false);
                 }
+            }
+            if (walk && !baritone.getLookBehavior().hasTargetThisTick()) {
+                // nothing owns the look this tick; without this the held key walks wherever
+                // the last rotation happened to leave the camera
+                highwayContext.faceHighwayDirection();
             }
         }
         setWalkForward(walk);
@@ -423,10 +438,17 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         if (walk) {
             walkKeyHeld = true;
             ctx.minecraft().options.keyUp.setDown(true);
+            baritone.getInputOverrideHandler().setInputForceState(Input.MOVE_FORWARD, true);
         } else if (walkKeyHeld) {
             walkKeyHeld = false;
             ctx.minecraft().options.keyUp.setDown(false);
+            baritone.getInputOverrideHandler().setInputForceState(Input.MOVE_FORWARD, false);
         }
+    }
+
+    @Override
+    public boolean isEndDistanceWalkHeld() {
+        return walkKeyHeld;
     }
 
     @Override

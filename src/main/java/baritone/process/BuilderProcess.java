@@ -1221,9 +1221,10 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             }
         }
 
-        if (printerAction.acted() && isSafeToCancel
-                && Baritone.settings().highwayEndDistance.value != -1
-                && baritone.getNetherHighwayBuilderBehavior().isBuildingHighwayState()) {
+        if (Baritone.settings().highwayEndDistance.value != -1
+                && baritone.getNetherHighwayBuilderBehavior().isBuildingHighwayState()
+                && isSafeToCancel
+                && (printerAction.acted() || baritone.getNetherHighwayBuilderBehavior().isEndDistanceWalkHeld())) {
             return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
         }
         Goal goal = assemble(bcc, approxPlaceable.subList(0, 9));

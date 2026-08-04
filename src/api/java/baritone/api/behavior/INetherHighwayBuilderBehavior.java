@@ -22,6 +22,8 @@ import net.minecraft.core.Vec3i;
 public interface INetherHighwayBuilderBehavior extends IBehavior {
     boolean isBuildingHighwayState();
 
+    boolean isEndDistanceWalkHeld();
+
     boolean isHighwayActive();
 
     void build(int startX, int startZ, Vec3i direct, boolean selfSolve, boolean pave);

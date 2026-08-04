@@ -2421,9 +2421,15 @@ public class HighwayContext {
         Vec3 curPosPlayer = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
         BlockPos startCheckPos = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z), direction, curPosPlayer, LocationType.HighwayBuild);
 
-        int scanLength = 10;
+        // scan far enough that the configured stand-off distance is actually reachable
+        int scanLength = Math.max(10, settings.highwayEndDistance.value);
+        int maxResult = scanLength; // an all-correct scan means "at least this much built ahead"
         if (endPos != null) {
-            scanLength = Math.min(scanLength, stepsAlongHighway(startCheckPos, endPos) + 1);
+            int stepsToEnd = stepsAlongHighway(startCheckPos, endPos);
+            if (stepsToEnd + 1 <= scanLength) {
+                scanLength = stepsToEnd + 1;
+                maxResult = stepsToEnd; // past the last slice there is only the end, not more highway
+            }
         }
         for (int i = 0; i < scanLength; i++) {
             BlockPos curPos = startCheckPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
@@ -2458,7 +2464,9 @@ public class HighwayContext {
             }
         }
 
-        return 0;
+        // the whole scanned stretch is correct; report its length rather than 0 so the walk-creep
+        // keeps moving over long pre-built sections and stops the right distance from the end
+        return maxResult;
     }
 
     public boolean isHighwayEndComplete() {
@@ -2630,6 +2638,11 @@ public class HighwayContext {
     private boolean isPortalCell(int x, int y, int z) {
         return playerContext.world().getBlockState(new BlockPos(x, y, z)).getBlock() instanceof NetherPortalBlock
                 || playerContext.world().getBlockState(new BlockPos(x, y + 1, z)).getBlock() instanceof NetherPortalBlock;
+    }
+
+    /** The yaw that points straight down the highway direction. */
+    public float highwayDirectionYaw() {
+        return (float) Math.toDegrees(Math.atan2(-highwayDirection.getX(), highwayDirection.getZ()));
     }
 
     public void faceHighwayDirection() {

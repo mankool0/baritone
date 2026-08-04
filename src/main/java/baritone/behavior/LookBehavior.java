@@ -106,6 +106,10 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
         return this.target != null && this.target.interact;
     }
 
+    public Optional<Rotation> getTargetRotation() {
+        return this.target == null ? Optional.empty() : Optional.of(this.target.rotation);
+    }
+
     @Override
     public IAimProcessor getAimProcessor() {
         return this.processor;
