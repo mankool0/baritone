@@ -665,6 +665,20 @@ public class HighwayContext {
         return null;
     }
 
+    // True if a solid block sits in our column between head height and the highway walking space
+    public boolean hasHighwayRoofOverhead() {
+        BetterBlockPos feet = playerContext.playerFeet();
+        int highwayFeetY = settings.highwayMainY.value + (paving ? 1 : 0);
+        for (int y = feet.y + 2; y <= highwayFeetY + 1; y++) {
+            BlockState state = baritone.bsi.get0(feet.x, y, feet.z);
+            if (!(state.getBlock() instanceof AirBlock) && !(state.getBlock() instanceof LiquidBlock)
+                    && !MovementHelper.isReplaceable(feet.x, y, feet.z, state, baritone.bsi)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public boolean invalidBlockFixActive() {
         return invalidBlockFixActive;
     }
@@ -900,11 +914,15 @@ public class HighwayContext {
             }
         }
 
-        // Fell off the highway: recover by pathing back to a built spot behind us
+        // Fell off the highway, or got paved over while below it: recover by pathing back to a
+        // built spot behind us
         int highwayFeetY = settings.highwayMainY.value + (paving ? 1 : 0);
+        boolean fellFar = playerContext.playerFeet().y <= highwayFeetY - settings.highwayFallDetectThreshold.value;
+        boolean sealedUnder = playerContext.playerFeet().y < highwayFeetY && hasHighwayRoofOverhead();
         if (settings.highwayFallRecovery.value && currentStateEnum == HighwayState.BuildingHighway
-                && playerContext.playerFeet().y <= highwayFeetY - settings.highwayFallDetectThreshold.value) {
-            Helper.HELPER.logDirect("Fell off the highway (y=" + playerContext.playerFeet().y + "). Recovering.");
+                && (fellFar || sealedUnder)) {
+            Helper.HELPER.logDirect((fellFar ? "Fell off the highway" : "Trapped underneath the highway")
+                    + " (y=" + playerContext.playerFeet().y + "). Recovering.");
             setPreviousState(currentStateEnum);
             resetRecovery();
             baritone.getInputOverrideHandler().clearAllKeys();
