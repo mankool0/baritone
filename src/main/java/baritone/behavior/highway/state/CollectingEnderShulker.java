@@ -54,6 +54,10 @@ public class CollectingEnderShulker extends State {
         }
 
         // No more shulker boxes to find
+        if (context.getShulkerCountInventory(ShulkerType.Any) <= context.preMineShulkerCount()
+                && context.maybeStartThiefHunt(HighwayState.CollectingEnderShulker)) {
+            return; // The mined box never reached the inventory and a piglin is carrying one
+        }
         if (context.paving()) {
             context.transitionTo(HighwayState.GoingToPlaceLocEnderChest); // paving mines the chests into obsidian
         } else if (context.getShulkerCountInventory(ShulkerType.EnderChest) > 0) {

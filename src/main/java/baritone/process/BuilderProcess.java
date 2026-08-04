@@ -891,7 +891,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
 
     /**
      * @param predictedYaw the yaw the movement is expected to hold, used for pitch-only aims. It's
-     *                     only a prediction — {@link #printerFire} re-checks the rotation the
+     *                     only a prediction; {@link #printerFire} re-checks the rotation the
      *                     server actually received before anything is clicked.
      */
     private Rotation printerAimRotation(Vec3 eye, Vec3 point, Rotation current, float predictedYaw, boolean moving) {

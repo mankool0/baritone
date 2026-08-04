@@ -17,12 +17,17 @@
 
 package baritone.behavior.highway.state;
 
+import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
+import baritone.behavior.highway.enums.ShulkerType;
 import net.minecraft.world.level.block.AirBlock;
 
 public class MiningEnderShulker extends State {
+
+    private int guardWaitTicks = 0;
+
     public MiningEnderShulker(HighwayState state) {
         super(state);
     }
@@ -40,6 +45,15 @@ public class MiningEnderShulker extends State {
 
         context.baritone().getPathingBehavior().cancelEverything();
         if (!(context.playerContext().world().getBlockState(context.placeLoc()).getBlock() instanceof AirBlock)) {
+            // Snapshot before the box drops so the collecting state can tell theft from success
+            context.setPreMineShulkerCount(context.getShulkerCountInventory(ShulkerType.Any));
+            if (context.shulkerThiefNear(context.placeLoc(), context.settings().highwayShulkerTheftGuardRadius.value)
+                    && guardWaitTicks++ < context.settings().highwayShulkerTheftGuardMaxWait.value) {
+                if (guardWaitTicks == 1) {
+                    Helper.HELPER.logDirect("Holding off mining the shulker until nearby piglins that could steal it wander off.");
+                }
+                return;
+            }
             context.baritone().getBuilderProcess().clearArea(context.placeLoc(), context.placeLoc());
             context.resetTimer();
             return;

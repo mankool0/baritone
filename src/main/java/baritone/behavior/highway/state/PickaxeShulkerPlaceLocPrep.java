@@ -20,9 +20,7 @@ package baritone.behavior.highway.state;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
-import baritone.behavior.highway.enums.LocationType;
 import net.minecraft.core.Vec3i;
-import net.minecraft.world.phys.Vec3;
 
 public class PickaxeShulkerPlaceLocPrep extends State {
     public PickaxeShulkerPlaceLocPrep(HighwayState state) {
@@ -31,11 +29,7 @@ public class PickaxeShulkerPlaceLocPrep extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        Vec3 curPos = new Vec3(context.playerContext().playerFeet().getX() + (7 * -context.highwayDirection().getX()), context.playerContext().playerFeet().getY(), context.playerContext().playerFeet().getZ() + (7 * -context.highwayDirection().getZ())); // Go back a bit just in case
-        Vec3 direction = new Vec3(context.highwayDirection().getX(), context.highwayDirection().getY(), context.highwayDirection().getZ());
-
-        context.setPlaceLoc(context.getClosestPoint(new Vec3(context.backPathOriginVector().x, context.backPathOriginVector().y, context.backPathOriginVector().z), direction, curPos, LocationType.ShulkerEchestInteraction));
-        // Get the closest point
+        context.setPlaceLoc(context.shulkerPlaceLocClearOfThieves()); // Anchored a bit back, shifted further if piglins could steal the drop
 
         context.settings().buildRepeat.value = new Vec3i(0, 0, 0);
         context.transitionTo(HighwayState.GoingToPlaceLocPickaxeShulker);

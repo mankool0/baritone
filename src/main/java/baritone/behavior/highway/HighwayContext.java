@@ -144,6 +144,13 @@ public class HighwayContext {
     private HighwayState emergencyEatReturnState = HighwayState.Nothing;
     private Entity currentMobTarget = null;
     private BetterBlockPos combatReturnPos = null;
+    private Entity thiefTarget = null;
+    private HighwayState thiefHuntReturnState = null;
+    private BetterBlockPos thiefHuntStartPos = null;
+    private int thiefHuntFailCooldown = 0;
+    private java.util.UUID thiefHuntIgnoredThief = null; // the one thief a failed hunt gave up on; only it is ignored while the cooldown runs
+    private double thiefHuntBestDist = Double.MAX_VALUE; // closest we've ever been to the current hunt target
+    private int preMineShulkerCount = -1; // inventory shulker count snapshotted before a refill box is mined
     private BetterBlockPos recoveryTarget = null;
     private int recoveryExtraBack = 0;
     private Boolean recoverySwimThroughLavaSaved = null; // non-null while we've overridden allowSwimThroughLava for recovery
@@ -521,6 +528,53 @@ public class HighwayContext {
         this.currentMobTarget = entity;
     }
 
+    public Entity thiefTarget() {
+        return thiefTarget;
+    }
+
+    public void setThiefTarget(Entity entity) {
+        this.thiefTarget = entity;
+    }
+
+    public HighwayState thiefHuntReturnState() {
+        return thiefHuntReturnState;
+    }
+
+    public BetterBlockPos thiefHuntStartPos() {
+        return thiefHuntStartPos;
+    }
+
+    public void ignoreThief(Entity thief, int ticks) {
+        this.thiefHuntIgnoredThief = thief.getUUID();
+        this.thiefHuntFailCooldown = ticks;
+    }
+
+    public double thiefHuntBestDist() {
+        return thiefHuntBestDist;
+    }
+
+    public void setThiefHuntBestDist(double dist) {
+        this.thiefHuntBestDist = dist;
+    }
+
+    public int preMineShulkerCount() {
+        return preMineShulkerCount;
+    }
+
+    public void setPreMineShulkerCount(int count) {
+        this.preMineShulkerCount = count;
+    }
+
+    public void resetThiefHunt() {
+        thiefTarget = null;
+        thiefHuntReturnState = null;
+        thiefHuntStartPos = null;
+        thiefHuntFailCooldown = 0;
+        thiefHuntIgnoredThief = null;
+        thiefHuntBestDist = Double.MAX_VALUE;
+        preMineShulkerCount = -1;
+    }
+
     public BetterBlockPos combatReturnPos() {
         return combatReturnPos;
     }
@@ -712,6 +766,97 @@ public class HighwayContext {
                 .min(java.util.Comparator.comparingDouble(e -> e.distanceToSqr(player)));
     }
 
+    // Only an empty main hand can accept a shulker box (Mob.canReplaceCurrentItem; adults always
+    // spawn holding a crossbow or golden sword and a box never beats either). A baby already holding
+    // junk can still swap it for a custom-named box via canReplaceEqualItem, so every baby counts.
+    public boolean isPotentialShulkerThief(Entity entity) {
+        if (!(entity instanceof net.minecraft.world.entity.monster.piglin.Piglin piglin) || !entity.isAlive()) {
+            return false;
+        }
+        return piglin.isBaby() || piglin.getMainHandItem().isEmpty();
+    }
+
+    public boolean shulkerThiefNear(BlockPos pos, double range) {
+        if (range <= 0) {
+            return false;
+        }
+        double rangeSq = range * range;
+        return playerContext.entitiesStream()
+                .filter(this::isPotentialShulkerThief)
+                .anyMatch(e -> e.distanceToSqr(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5) <= rangeSq);
+    }
+
+    public Optional<Entity> findShulkerThief() {
+        return playerContext.entitiesStream()
+                .filter(e -> e instanceof net.minecraft.world.entity.monster.piglin.Piglin && e.isAlive())
+                .filter(e -> shulkerItemList.contains(((net.minecraft.world.entity.monster.piglin.Piglin) e).getMainHandItem().getItem()))
+                .filter(e -> thiefHuntFailCooldown <= 0 || !e.getUUID().equals(thiefHuntIgnoredThief))
+                .min(java.util.Comparator.comparingDouble(e -> e.distanceToSqr(playerContext.player())));
+    }
+
+    public boolean maybeStartThiefHunt(HighwayState returnState) {
+        if (!settings.highwayRecoverStolenShulkers.value) {
+            return false;
+        }
+        Optional<Entity> thief = findShulkerThief();
+        if (thief.isEmpty()) {
+            return false;
+        }
+        Helper.HELPER.logDirect("A piglin is carrying a shulker box, hunting it to get the box back.");
+        thiefTarget = thief.get();
+        thiefHuntReturnState = returnState;
+        thiefHuntStartPos = playerContext.playerFeet();
+        thiefHuntBestDist = Double.MAX_VALUE;
+        baritone.getPathingBehavior().cancelEverything();
+        transitionTo(HighwayState.ShulkerThiefHunt);
+        resetTimer();
+        return true;
+    }
+
+    public void attackEntity(Entity target) {
+        Rotation aim = RotationUtils.calcRotationFromVec3d(playerContext.playerHead(),
+                target.getBoundingBox().getCenter(), playerContext.playerRotations());
+        baritone.getLookBehavior().updateTarget(aim, true);
+
+        if (playerContext.player().getAttackStrengthScale(0.5f) < 1.0f) {
+            return;
+        }
+        Optional<Rotation> serverRotation = baritone.getLookBehavior().getServerRotation();
+        if (serverRotation.isEmpty()) {
+            return;
+        }
+        Vec3 eyes = playerContext.playerHead();
+        Vec3 dir = RotationUtils.calcLookDirectionFromRotation(serverRotation.get());
+        if (target.getBoundingBox().clip(eyes, eyes.add(dir.scale(3.0))).isEmpty()) {
+            return;
+        }
+        playerContext.minecraft().gameMode.attack(playerContext.player(), target);
+        playerContext.player().swing(InteractionHand.MAIN_HAND);
+    }
+
+    public BetterBlockPos shulkerPlaceLocClearOfThieves() {
+        Vec3 origin = new Vec3(backPathOriginVector.x, backPathOriginVector.y, backPathOriginVector.z);
+        Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
+        double radius = settings.highwayShulkerTheftGuardRadius.value;
+        BetterBlockPos firstChoice = null;
+        for (int backOff = 7; backOff <= 31; backOff += 8) {
+            Vec3 curPos = new Vec3(playerContext.playerFeet().getX() + (backOff * -highwayDirection.getX()),
+                    playerContext.playerFeet().getY(),
+                    playerContext.playerFeet().getZ() + (backOff * -highwayDirection.getZ()));
+            BetterBlockPos candidate = getClosestPoint(origin, direction, curPos, LocationType.ShulkerEchestInteraction);
+            if (firstChoice == null) {
+                firstChoice = candidate;
+            }
+            if (!shulkerThiefNear(candidate, radius)) {
+                if (backOff != 7) {
+                    Helper.HELPER.logDirect("Piglins that could steal the shulker are near the placing location, placing it " + (backOff - 7) + " blocks further back.");
+                }
+                return candidate;
+            }
+        }
+        return firstChoice; // every candidate is dirty; the mining guard and the thief hunt cover the rest
+    }
+
     public void handle() {
         HighwayState currentStateEnum = currentState.getState();
         boolean inEmergencyEat = currentStateEnum == HighwayState.EmergencyGapplePrep || currentStateEnum == HighwayState.EmergencyGapplePreEat || currentStateEnum == HighwayState.EmergencyGappleEat;
@@ -731,7 +876,8 @@ public class HighwayContext {
             if (mob.isPresent()) {
                 setPreviousState(currentStateEnum);
                 setCurrentMobTarget(mob.get());
-                setCombatReturnPos(playerContext.playerFeet());
+                // A preempted thief hunt resumes at the thief, not at where combat started
+                setCombatReturnPos(currentStateEnum == HighwayState.ShulkerThiefHunt ? null : playerContext.playerFeet());
                 transitionTo(HighwayState.MobCombat);
                 return;
             }
@@ -774,6 +920,12 @@ public class HighwayContext {
         walkBackTimer++;
         checkBackTimer++;
         stuckTimer++;
+        if (thiefHuntFailCooldown > 0) {
+            thiefHuntFailCooldown--;
+            if (thiefHuntFailCooldown == 0) {
+                thiefHuntIgnoredThief = null;
+            }
+        }
 
         if (invalidBlockFixActive) {
             if (baritone.getPathingBehavior().isPathing()) {
@@ -2387,7 +2539,7 @@ public class HighwayContext {
 
     /**
      * The cell we would want open to step out of the portal we're standing in, even if it's
-     * currently blocked by junk or has nothing under it — the clear+fill target for exit prep.
+     * currently blocked by junk or has nothing under it; the clear+fill target for exit prep.
      */
     public BlockPos portalExitPrepTarget() {
         BetterBlockPos feet = playerContext.playerFeet();

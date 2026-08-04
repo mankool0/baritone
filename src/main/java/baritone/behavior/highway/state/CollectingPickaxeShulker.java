@@ -22,6 +22,7 @@ import baritone.api.utils.BetterBlockPos;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
+import baritone.behavior.highway.enums.ShulkerType;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Item;
@@ -53,6 +54,10 @@ public class CollectingPickaxeShulker extends State {
         }
 
         // No more shulker boxes to find
+        if (context.getShulkerCountInventory(ShulkerType.Any) <= context.preMineShulkerCount()
+                && context.maybeStartThiefHunt(HighwayState.CollectingPickaxeShulker)) {
+            return; // The mined box never reached the inventory and a piglin is carrying one
+        }
         context.transitionTo(HighwayState.Nothing);
     }
 }

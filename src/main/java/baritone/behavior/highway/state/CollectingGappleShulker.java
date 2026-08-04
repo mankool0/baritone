@@ -54,6 +54,10 @@ public class CollectingGappleShulker extends State {
         }
 
         // No more shulker boxes to find
+        if (context.getShulkerCountInventory(ShulkerType.Any) <= context.preMineShulkerCount()
+                && context.maybeStartThiefHunt(HighwayState.CollectingGappleShulker)) {
+            return; // The mined box never reached the inventory and a piglin is carrying one
+        }
         if (context.refillingGapples()) {
             if (context.settings().highwayStashGappleShulkers.value && context.getShulkerCountInventory(ShulkerType.Gapple) > 0) {
                 context.transitionTo(HighwayState.EnderChestStashPlaceLocPrep); // fetched from storage: put it back

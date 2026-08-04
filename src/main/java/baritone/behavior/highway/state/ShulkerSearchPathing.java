@@ -31,10 +31,24 @@ public class ShulkerSearchPathing extends State {
 
     @Override
     public void handle(HighwayContext context) {
+        if (context.getShulkerCountInventory(ShulkerType.Any) >= context.startShulkerCount()) {
+            // Picked the box back up mid-search (e.g. after a thief hunt), no need to keep walking
+            Helper.HELPER.logDirect("Shulker count restored, going back to building.");
+            context.baritone().getPathingBehavior().cancelEverything();
+            context.transitionTo(HighwayState.Nothing);
+            context.resetTimer();
+            return;
+        }
+
         if (context.isShulkerOnGround()) {
             Helper.HELPER.logDirect("Found a missing shulker, going to collection stage.");
             context.baritone().getPathingBehavior().cancelEverything();
             context.transitionTo(HighwayState.ShulkerCollection);
+            return;
+        }
+
+        // The ground scan walks right past a piglin carrying the box, so also check hands
+        if (context.maybeStartThiefHunt(HighwayState.ShulkerSearchPathing)) {
             return;
         }
 

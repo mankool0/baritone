@@ -272,6 +272,9 @@ public class BuildingHighway extends State {
 
         if (context.timer() >= 10 && context.getShulkerCountInventory(ShulkerType.Any) < context.startShulkerCount()) {
             // Lost a shulker somewhere :(
+            if (context.maybeStartThiefHunt(HighwayState.BuildingHighway)) {
+                return; // A piglin is carrying it; get it back before resorting to the ground search
+            }
             Helper.HELPER.logDirect("We lost a shulker somewhere. Going back a maximum of " + context.settings().highwayMaxLostShulkerSearchDist.value + " blocks to look for it.");
             context.transitionTo(HighwayState.ShulkerSearchPrep);
             context.baritone().getPathingBehavior().cancelEverything();

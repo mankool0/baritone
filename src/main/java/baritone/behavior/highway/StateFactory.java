@@ -238,6 +238,9 @@ public class StateFactory {
             case MobCombatReturn -> {
                 return new MobCombatReturn(highwayState);
             }
+            case ShulkerThiefHunt -> {
+                return new ShulkerThiefHunt(highwayState);
+            }
             case FallRecovery -> {
                 return new FallRecovery(highwayState);
             }

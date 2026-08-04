@@ -1725,6 +1725,30 @@ public final class Settings {
     public final Setting<Double> highwayMobMaxAggroRange = new Setting<>(24.0);
 
     /**
+     * Avoid placing and breaking refill shulker boxes while a piglin that could steal the dropped box
+     * (a baby, or any piglin with an empty main hand) is within this range of the spot. Placement prep
+     * shifts the spot further back along the highway; the mining states wait for the piglin to wander
+     * off. Set to 0 to disable both guards.
+     */
+    public final Setting<Double> highwayShulkerTheftGuardRadius = new Setting<>(8.0);
+
+    /**
+     * Max ticks the shulker mining states hold off breaking the box while potential thieves are near,
+     * before breaking anyway.
+     */
+    public final Setting<Integer> highwayShulkerTheftGuardMaxWait = new Setting<>(300);
+
+    /**
+     * Hunt down piglins that grabbed a dropped shulker box.
+     */
+    public final Setting<Boolean> highwayRecoverStolenShulkers = new Setting<>(true);
+
+    /**
+     * Give up a shulker thief hunt when the thief gets this far from where the hunt started.
+     */
+    public final Setting<Double> highwayStolenShulkerChaseRange = new Setting<>(512.0);
+
+    /**
      * Disconnect from the server if lost some health
      */
     public final Setting<Boolean> highwayDcOnHealthLoss = new Setting<>(true);

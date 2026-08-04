@@ -104,6 +104,7 @@ public enum HighwayState {
 
     MobCombat,
     MobCombatReturn,
+    ShulkerThiefHunt,
 
     FallRecovery,
 

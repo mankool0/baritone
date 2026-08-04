@@ -299,6 +299,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         highwayContext.setStashingShulker(false);
         highwayContext.setEnderChestAccessLoc(null);
         highwayContext.setRepeatCheck(false);
+        highwayContext.resetThiefHunt();
         highwayContext.setStartShulkerCount(highwayContext.getShulkerCountInventory(ShulkerType.Any));
         highwayContext.setPaused(false);
         highwayContext.resetThroughWallDetection();
