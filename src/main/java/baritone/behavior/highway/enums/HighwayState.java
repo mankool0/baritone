@@ -107,5 +107,7 @@ public enum HighwayState {
 
     FallRecovery,
 
+    PortalEscape,
+
     InQueue,
 }

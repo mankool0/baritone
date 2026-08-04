@@ -241,6 +241,9 @@ public class StateFactory {
             case FallRecovery -> {
                 return new FallRecovery(highwayState);
             }
+            case PortalEscape -> {
+                return new PortalEscape(highwayState);
+            }
             case InQueue -> {
                 return new InQueue(highwayState);
             }

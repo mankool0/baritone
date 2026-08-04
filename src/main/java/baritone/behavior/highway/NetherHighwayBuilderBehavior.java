@@ -27,63 +27,30 @@ import baritone.api.event.events.TickEvent;
 import baritone.api.event.events.type.EventState;
 import baritone.api.pathing.goals.*;
 import baritone.api.schematic.CompositeSchematic;
-import baritone.api.schematic.FillSchematic;
 import baritone.api.schematic.ISchematic;
 import baritone.api.schematic.WhiteBlackSchematic;
 import baritone.api.utils.*;
-import baritone.api.utils.Rotation;
-import baritone.api.utils.input.Input;
 import baritone.behavior.Behavior;
 import baritone.behavior.highway.enums.HighwayState;
 import baritone.behavior.highway.enums.LocationType;
 import baritone.behavior.highway.enums.ShulkerType;
-import baritone.behavior.highway.state.BuildingHighway;
-import baritone.pathing.movement.MovementHelper;
-import baritone.process.BuilderProcess;
 import baritone.utils.BlockStateInterface;
 import baritone.utils.IRenderer;
 import com.mojang.blaze3d.vertex.BufferBuilder;
-import net.minecraft.client.gui.screens.inventory.ContainerScreen;
-import net.minecraft.client.gui.screens.inventory.ShulkerBoxScreen;
 import net.minecraft.core.*;
-import net.minecraft.core.component.DataComponents;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundSystemChatPacket;
-import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
-import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
-import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
-import net.minecraft.network.protocol.game.ServerboundSwingPacket;
-import net.minecraft.world.ContainerHelper;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.InteractionResult;
-import net.minecraft.world.effect.MobEffectInstance;
-import net.minecraft.world.effect.MobEffects;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.item.ItemEntity;
-import net.minecraft.world.entity.vehicle.Boat;
-import net.minecraft.world.inventory.AbstractContainerMenu;
-import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.*;
-import net.minecraft.world.item.component.CustomData;
-import net.minecraft.world.item.enchantment.Enchantment;
-import net.minecraft.world.item.enchantment.Enchantments;
-import net.minecraft.world.item.enchantment.ItemEnchantments;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
-import net.minecraft.util.Mth;
-import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
 import java.awt.*;
-import java.util.List;
 import java.util.*;
-
-import static baritone.pathing.movement.Movement.HORIZONTALS_BUT_ALSO_DOWN_____SO_EVERY_DIRECTION_EXCEPT_UP;
 
 public final class NetherHighwayBuilderBehavior extends Behavior implements INetherHighwayBuilderBehavior, IRenderer {
 
@@ -98,15 +65,26 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
     private boolean walkKeyHeld = false;
 
+    /** Dimension the build was started in; a mismatch means a portal teleported us away. */
+    private ResourceKey<Level> startDimension = null;
+    private boolean wrongDimension = false;
+    private final PortalReturn portalReturn;
+
 
     public NetherHighwayBuilderBehavior(Baritone baritone) {
         super(baritone);
         this.highwayContext = new HighwayContext(baritone);
+        this.portalReturn = new PortalReturn(highwayContext);
     }
 
     @Override
     public boolean isBuildingHighwayState() {
         return highwayContext.currentState().getState() == HighwayState.BuildingHighway;
+    }
+
+    @Override
+    public boolean isHighwayActive() {
+        return highwayContext.schematic() != null && !highwayContext.paused();
     }
 
     @Override
@@ -121,6 +99,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         highwayContext.setPaving(pave);
         highwayContext.setCachedHealth(ctx.player().getHealth());
         highwayContext.setCachedAbsorption(ctx.player().getAbsorptionAmount());
+        startDimension = ctx.world().dimension();
+        wrongDimension = false;
 
         if (!highwayContext.paving()) {
             // Only digging so any pickaxe works
@@ -330,6 +310,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
         highwayContext.setPaused(true);
         highwayContext.setRepeatCheck(false);
+        wrongDimension = false;
         highwayContext.resetRecovery(); // restore any settings (e.g. allowSwimThroughLava) overridden during recovery
         highwayContext.transitionTo(HighwayState.Nothing);
         setWalkForward(false);
@@ -360,12 +341,48 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
         highwayContext.incrementTimers();
 
+        if (startDimension != null && !highwayContext.isInQueue()) {
+            if (ctx.world().dimension() != startDimension) {
+                if (!wrongDimension) {
+                    wrongDimension = true;
+                    portalReturn.reset();
+                    Helper.HELPER.logDirect("Now in " + ctx.world().dimension().location() + " instead of " + startDimension.location()
+                            + " (portal teleport?). Stepping out of the exit portal and back in to get sent home.");
+                    baritone.getInputOverrideHandler().clearAllKeys();
+                    baritone.getPathingBehavior().cancelEverything();
+                }
+                setWalkForward(false);
+                portalReturn.tick(startDimension);
+                return;
+            }
+            if (wrongDimension) {
+                wrongDimension = false;
+                Helper.HELPER.logDirect("Back in " + startDimension.location() + ", restarting the builder.");
+                baritone.getInputOverrideHandler().clearAllKeys();
+                baritone.getPathingBehavior().cancelEverything();
+                highwayContext.resetTimer();
+                highwayContext.resetStuckTimer();
+                highwayContext.resetWalkBackTimer();
+                highwayContext.resetCheckBackTimer();
+                highwayContext.transitionTo(HighwayState.Nothing);
+            }
+        }
+
+        HighwayState curState = highwayContext.currentState().getState();
+        if (curState != HighwayState.PortalEscape && curState != HighwayState.InQueue && highwayContext.isPlayerInPortal()) {
+            Helper.HELPER.logDirect("Standing inside a nether portal, stepping out.");
+            baritone.getInputOverrideHandler().clearAllKeys();
+            baritone.getPathingBehavior().cancelEverything();
+            highwayContext.transitionTo(HighwayState.PortalEscape);
+        }
+        boolean escaping = highwayContext.currentState().getState() == HighwayState.PortalEscape;
+
         // Offhand rescue/autoTotem/clearCursorItem pause the state machine while they work, but the
         // stuck/health watchdogs must run regardless: a cursor stack that can never be placed (full
         // inventory) used to starve them and freeze the state machine forever with its keys latched.
         // Rescue runs before autoTotem so stranded chests merge onto a loose stack instead of being
         // swapped into the totem's slot.
-        boolean pauseStateMachine = highwayContext.rescueOffhandEnderChests() || highwayContext.autoTotem() || highwayContext.clearCursorItem();
+        boolean pauseStateMachine = !escaping && (highwayContext.rescueOffhandEnderChests() || highwayContext.autoTotem() || highwayContext.clearCursorItem());
         if (highwayContext.stuckCheck() || highwayContext.healthCheck() || pauseStateMachine) {
             setWalkForward(false);
             return;
@@ -377,6 +394,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             walk = highwayContext.getHighwayLengthFront() >= settings.highwayEndDistance.value
                     && highwayContext.currentState().getState() == HighwayState.BuildingHighway
                     && highwayContext.canWalkOnFloorAhead()
+                    // never creep into a lit portal waiting for its frame to be mined
+                    && highwayContext.noPortalAhead()
                     // a pathing pause can't lift this real key, so release it ourselves while an
                     // inventory move waits for a tick without movement input
                     && !baritone.getInventoryPauserProcess().calmPausePending();

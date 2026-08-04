@@ -83,6 +83,7 @@ public class CalculationContext {
     public double jumpPenalty;
     public final double walkOnWaterOnePenalty;
     public final boolean allowWalkOnMagmaBlocks;
+    public boolean avoidNetherPortals;
     public final BetterWorldBorder worldBorder;
 
     public final PrecomputedData precomputedData;
@@ -155,6 +156,7 @@ public class CalculationContext {
         this.jumpPenalty = Baritone.settings().jumpPenalty.value;
         this.walkOnWaterOnePenalty = Baritone.settings().walkOnWaterOnePenalty.value;
         this.allowWalkOnMagmaBlocks = Baritone.settings().allowWalkOnMagmaBlocks.value;
+        this.avoidNetherPortals = baritone.getNetherHighwayBuilderBehavior().isHighwayActive();
         // why cache these things here, why not let the movements just get directly from settings?
         // because if some movements are calculated one way and others are calculated another way,
         // then you get a wildly inconsistent path that isn't optimal for either scenario.

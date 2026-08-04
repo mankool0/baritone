@@ -26,6 +26,7 @@ import baritone.api.schematic.ISchematic;
 import baritone.api.schematic.WhiteBlackSchematic;
 import baritone.api.utils.*;
 import baritone.api.utils.Rotation;
+import baritone.api.utils.input.Input;
 import baritone.behavior.highway.enums.HighwayBlockState;
 import baritone.behavior.highway.enums.HighwayState;
 import baritone.behavior.highway.enums.ShulkerType;
@@ -714,6 +715,7 @@ public class HighwayContext {
         boolean inEmergencyEat = currentStateEnum == HighwayState.EmergencyGapplePrep || currentStateEnum == HighwayState.EmergencyGapplePreEat || currentStateEnum == HighwayState.EmergencyGappleEat;
         boolean inCombat = currentStateEnum == HighwayState.MobCombat || currentStateEnum == HighwayState.MobCombatReturn;
         boolean inRecovery = currentStateEnum == HighwayState.FallRecovery;
+        boolean inPortalEscape = currentStateEnum == HighwayState.PortalEscape;
 
         if (inCombat) {
             int swordSlot = putBestSwordHotbar();
@@ -722,7 +724,7 @@ public class HighwayContext {
             }
         }
 
-        if (!inEmergencyEat && !inCombat && !inRecovery && currentStateEnum != HighwayState.Nothing) {
+        if (!inEmergencyEat && !inCombat && !inRecovery && !inPortalEscape && currentStateEnum != HighwayState.Nothing) {
             java.util.Optional<Entity> mob = findMobTargetingPlayer();
             if (mob.isPresent()) {
                 setPreviousState(currentStateEnum);
@@ -733,7 +735,7 @@ public class HighwayContext {
             }
         }
         boolean inLiquidEat = currentStateEnum == HighwayState.LiquidRemovalGapplePrep || currentStateEnum == HighwayState.LiquidRemovalGapplePreEat || currentStateEnum == HighwayState.LiquidRemovalGappleEat;
-        if (!inEmergencyEat && !inLiquidEat && !inRecovery && (!inCombat || settings.highwayEmergencyEatDuringCombat.value)) {
+        if (!inEmergencyEat && !inLiquidEat && !inRecovery && !inPortalEscape && (!inCombat || settings.highwayEmergencyEatDuringCombat.value)) {
             if (currentStateEnum != HighwayState.Nothing) {
                 float healthThreshold = gappleEatHealthThreshold();
                 int foodThreshold = gappleEatFoodThreshold();
@@ -2323,6 +2325,125 @@ public class HighwayContext {
         return true;
     }
 
+    public boolean isPlayerInPortal() {
+        AABB bb = playerContext.player().getBoundingBox();
+        for (BlockPos pos : BlockPos.betweenClosed((int) Math.floor(bb.minX), (int) Math.floor(bb.minY), (int) Math.floor(bb.minZ),
+                (int) Math.floor(bb.maxX), (int) Math.floor(bb.maxY), (int) Math.floor(bb.maxZ))) {
+            if (playerContext.world().getBlockState(pos).getBlock() instanceof NetherPortalBlock) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * An adjacent cell to step to to get out of the portal we're standing in: walkable at feet and
+     * head height, not another portal cell, with solid ground under it. Exits through the 1-thick
+     * portal plane are tried first, nearest side first.
+     */
+    public BlockPos findPortalEscapeTarget() {
+        return findPortalEscapeTarget(true);
+    }
+
+    /**
+     * @param requireFloor false returns an exit cell even when nothing solid is under it, for
+     *                     callers that will place their own footing (floating exit portals)
+     */
+    public BlockPos findPortalEscapeTarget(boolean requireFloor) {
+        BetterBlockPos feet = playerContext.playerFeet();
+        for (Direction dir : sortedPortalExitDirections()) {
+            int x = feet.x + dir.getStepX();
+            int z = feet.z + dir.getStepZ();
+            if (playerContext.world().getBlockState(new BlockPos(x, feet.y, z)).getBlock() instanceof NetherPortalBlock
+                    || playerContext.world().getBlockState(new BlockPos(x, feet.y + 1, z)).getBlock() instanceof NetherPortalBlock) {
+                continue;
+            }
+            if (MovementHelper.canWalkThrough(baritone.bsi, x, feet.y, z)
+                    && MovementHelper.canWalkThrough(baritone.bsi, x, feet.y + 1, z)
+                    && (!requireFloor || MovementHelper.canWalkOn(baritone.bsi, x, feet.y - 1, z))) {
+                return new BlockPos(x, feet.y, z);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The cell we would want open to step out of the portal we're standing in, even if it's
+     * currently blocked by junk or has nothing under it — the clear+fill target for exit prep.
+     */
+    public BlockPos portalExitPrepTarget() {
+        BetterBlockPos feet = playerContext.playerFeet();
+        for (Direction dir : sortedPortalExitDirections()) {
+            int x = feet.x + dir.getStepX();
+            int z = feet.z + dir.getStepZ();
+            if (playerContext.world().getBlockState(new BlockPos(x, feet.y, z)).getBlock() instanceof NetherPortalBlock
+                    || playerContext.world().getBlockState(new BlockPos(x, feet.y + 1, z)).getBlock() instanceof NetherPortalBlock) {
+                continue;
+            }
+            return new BlockPos(x, feet.y, z);
+        }
+        return null;
+    }
+
+    /** Horizontal exit directions, exits through the 1-thick portal plane first, nearest side first. */
+    private List<Direction> sortedPortalExitDirections() {
+        BetterBlockPos feet = playerContext.playerFeet();
+        BlockState feetState = playerContext.world().getBlockState(feet);
+        BlockState headState = playerContext.world().getBlockState(feet.above());
+        BlockState portalState = feetState.getBlock() instanceof NetherPortalBlock ? feetState
+                : headState.getBlock() instanceof NetherPortalBlock ? headState : null;
+
+        Vec3 pos = playerContext.player().position();
+        List<Direction> candidates = new ArrayList<>(Arrays.asList(Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST));
+        candidates.sort(java.util.Comparator
+                .<Direction>comparingInt(dir -> portalState != null && dir.getAxis() != portalState.getValue(NetherPortalBlock.AXIS) ? 0 : 1)
+                .thenComparingDouble(dir -> {
+                    double dx = feet.x + 0.5 + dir.getStepX() - pos.x;
+                    double dz = feet.z + 0.5 + dir.getStepZ() - pos.z;
+                    return dx * dx + dz * dz;
+                }));
+        return candidates;
+    }
+
+    /** Points the player's yaw at the center of the given cell. */
+    public void faceBlock(BlockPos target) {
+        Vec3 pos = playerContext.player().position();
+        double dx = target.getX() + 0.5 - pos.x;
+        double dz = target.getZ() + 0.5 - pos.z;
+        playerContext.player().setYRot((float) Math.toDegrees(Math.atan2(-dx, dz)));
+    }
+
+    /** Faces the given cell and holds the forward key toward it. */
+    public void walkTowardBlock(BlockPos target) {
+        faceBlock(target);
+        baritone.getInputOverrideHandler().clearAllKeys();
+        baritone.getInputOverrideHandler().setInputForceState(Input.MOVE_FORWARD, true);
+    }
+
+    /** Walk-creep guard: no lit portal blocks in the cells we're about to walk into. */
+    public boolean noPortalAhead() {
+        BetterBlockPos feet = playerContext.playerFeet();
+        int dirX = highwayDirection.getX();
+        int dirZ = highwayDirection.getZ();
+        for (int step = 1; step <= 2; step++) {
+            if (isPortalCell(feet.x + dirX * step, feet.y, feet.z + dirZ * step)) {
+                return false;
+            }
+            // for diagonals also check the two cells the hitbox brushes on the way
+            if (dirX != 0 && dirZ != 0
+                    && (isPortalCell(feet.x + dirX * step, feet.y, feet.z + dirZ * (step - 1))
+                    || isPortalCell(feet.x + dirX * (step - 1), feet.y, feet.z + dirZ * step))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean isPortalCell(int x, int y, int z) {
+        return playerContext.world().getBlockState(new BlockPos(x, y, z)).getBlock() instanceof NetherPortalBlock
+                || playerContext.world().getBlockState(new BlockPos(x, y + 1, z)).getBlock() instanceof NetherPortalBlock;
+    }
+
     public void faceHighwayDirection() {
         double dirX = highwayDirection.getX();
         double dirZ = highwayDirection.getZ();
@@ -2420,6 +2541,10 @@ public class HighwayContext {
                             }
 
                             if (!desiredState.equals(current)) {
+                                if (current.getBlock() instanceof NetherPortalBlock) {
+                                    // unbreakable directly; it pops on its own once the builder mines the frame
+                                    continue;
+                                }
                                 if (!baritone.getBuilderProcess().checkNoEntityCollision(new AABB(new BlockPos(blockX, blockY, blockZ)), playerContext.player())) {
                                     List<Entity> entityList = playerContext.world().getEntities(null, new AABB(new BlockPos(blockX, blockY, blockZ)));
                                     for (Entity entity : entityList) {
@@ -2885,6 +3010,17 @@ public class HighwayContext {
     public int getAcceptableThrowawaySlotNoHotbar() {
         for (Item throwawayItem : settings.acceptableThrowawayItems.value) {
             int slot = getItemSlotNoHotbar(Item.getId(throwawayItem));
+            if (slot != -1) {
+                return slot;
+            }
+        }
+        return -1;
+    }
+
+    /** Puts the first acceptableThrowawayItems block we carry onto the hotbar; returns its slot or -1. */
+    public int putAcceptableThrowawayHotbar() {
+        for (Item throwawayItem : settings.acceptableThrowawayItems.value) {
+            int slot = putItemHotbar(Item.getId(throwawayItem));
             if (slot != -1) {
                 return slot;
             }

@@ -121,11 +121,15 @@ public interface MovementHelper extends ActionCosts, Helper {
     }
 
     static boolean canWalkThrough(CalculationContext context, int x, int y, int z, BlockState state) {
+        if (context.avoidNetherPortals && state.getBlock() instanceof NetherPortalBlock) {
+            // walking through is harmless, but the context doesn't want paths that could stop inside
+            return false;
+        }
         return context.precomputedData.canWalkThrough(context.bsi, x, y, z, state);
     }
 
     static boolean canWalkThrough(CalculationContext context, int x, int y, int z) {
-        return context.precomputedData.canWalkThrough(context.bsi, x, y, z, context.get(x, y, z));
+        return canWalkThrough(context, x, y, z, context.get(x, y, z));
     }
 
     static boolean canWalkThrough(BlockStateInterface bsi, int x, int y, int z, BlockState state) {
@@ -272,6 +276,9 @@ public interface MovementHelper extends ActionCosts, Helper {
     }
 
     static boolean fullyPassable(CalculationContext context, int x, int y, int z, BlockState state) {
+        if (context.avoidNetherPortals && state.getBlock() instanceof NetherPortalBlock) {
+            return false;
+        }
         return context.precomputedData.fullyPassable(context.bsi, x, y, z, state);
     }
 

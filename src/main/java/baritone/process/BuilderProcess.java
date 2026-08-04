@@ -75,6 +75,7 @@ import net.minecraft.world.level.block.FenceGateBlock;
 import net.minecraft.world.level.block.HorizontalDirectionalBlock;
 import net.minecraft.world.level.block.LeverBlock;
 import net.minecraft.world.level.block.LiquidBlock;
+import net.minecraft.world.level.block.NetherPortalBlock;
 import net.minecraft.world.level.block.NoteBlock;
 import net.minecraft.world.level.block.PipeBlock;
 import net.minecraft.world.level.block.RepeaterBlock;
@@ -1805,6 +1806,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         if (desired == null) {
             return true;
         }
+        if (current.getBlock() instanceof NetherPortalBlock) {
+            return true;
+        }
         if (current.getBlock() instanceof LiquidBlock && Baritone.settings().okIfWater.value) {
             return true;
         }
@@ -1847,6 +1851,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
 
             this.jumpPenalty += 10;
             this.backtrackCostFavoringCoefficient = 1;
+            this.avoidNetherPortals = true;
         }
 
         private BlockState getSchematic(int x, int y, int z, BlockState current) {
