@@ -305,6 +305,16 @@ public class HighwayContext {
 
     private Direction instantMineDirection;
 
+    public int lastEchestPlaceTick() {
+        return lastEchestPlaceTick;
+    }
+
+    public void setLastEchestPlaceTick(int lastEchestPlaceTick) {
+        this.lastEchestPlaceTick = lastEchestPlaceTick;
+    }
+
+    private int lastEchestPlaceTick = Integer.MIN_VALUE;
+
     public Item instantMineOriginalOffhandItem() {
         return instantMineOriginalOffhandItem;
     }

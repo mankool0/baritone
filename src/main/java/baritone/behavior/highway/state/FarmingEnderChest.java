@@ -54,6 +54,7 @@ public class FarmingEnderChest extends State {
         }
 
         BlockState state = context.playerContext().world().getBlockState(context.placeLoc());
+        boolean pipelining = false;
 
         if (!(state.getBlock() instanceof AirBlock)) {
             if (!HighwayContext.validPicksList.contains(context.playerContext().player().getItemInHand(InteractionHand.MAIN_HAND).getItem())) {
@@ -69,8 +70,13 @@ public class FarmingEnderChest extends State {
                 return;
             }
 
-            context.instantMineTick(context.placeLoc());
-            return;
+            pipelining = state.is(Blocks.ENDER_CHEST)
+                    && context.lastEchestPlaceTick() == context.playerContext().player().tickCount - 1;
+            if (!pipelining) {
+                context.instantMineTick(context.placeLoc());
+                return;
+            }
+            context.playerContext().world().removeBlock(context.placeLoc(), false);
         }
 
         // placeLoc is clear: decide whether to keep farming or stop.
@@ -89,10 +95,17 @@ public class FarmingEnderChest extends State {
         }
 
         // Nothing placed yet: face the support block and drop a fresh ender chest from the offhand.
-        Optional<Rotation> support = RotationUtils.reachable(context.playerContext(), context.placeLoc().below(), context.playerContext().playerController().getBlockReachDistance());
-        support.ifPresent(rotation -> context.baritone().getLookBehavior().updateTarget(rotation, true));
+        // A pipelining tick keeps its aim on the mine target instead (set by instantMineTick below).
+        if (!pipelining) {
+            Optional<Rotation> support = RotationUtils.reachable(context.playerContext(), context.placeLoc().below(), context.playerContext().playerController().getBlockReachDistance());
+            support.ifPresent(rotation -> context.baritone().getLookBehavior().updateTarget(rotation, true));
+        }
 
         if (context.place(context.placeLoc(), 5.0f, false, false, InteractionHand.OFF_HAND) == HighwayContext.PlaceResult.Placed) {
+            if (pipelining) {
+                context.instantMineTick(context.placeLoc());
+            }
+            context.setLastEchestPlaceTick(context.playerContext().player().tickCount);
             context.resetTimer();
         }
     }
