@@ -124,6 +124,9 @@ public class StateFactory {
             case ShulkerSearchPathing -> {
                 return new ShulkerSearchPathing(highwayState);
             }
+            case MiningMisplacedShulker -> {
+                return new MiningMisplacedShulker(highwayState);
+            }
             case LootEnderChestPlaceLocPrep -> {
                 return new LootEnderChestPlaceLocPrep(highwayState);
             }

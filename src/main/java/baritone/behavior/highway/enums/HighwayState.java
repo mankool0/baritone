@@ -59,6 +59,7 @@ public enum HighwayState {
 
     ShulkerSearchPrep,
     ShulkerSearchPathing,
+    MiningMisplacedShulker,
 
     LootEnderChestPlaceLocPrep,
     GoingToLootEnderChestPlaceLoc,

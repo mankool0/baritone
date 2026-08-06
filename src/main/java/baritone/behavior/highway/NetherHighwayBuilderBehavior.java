@@ -303,6 +303,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         highwayContext.setEnderChestAccessLoc(null);
         highwayContext.setRepeatCheck(false);
         highwayContext.resetThiefHunt();
+        highwayContext.clearLostShulkerRelogAttempt();
         highwayContext.setStartShulkerCount(highwayContext.getShulkerCountInventory(ShulkerType.Any));
         highwayContext.setPaused(false);
         highwayContext.resetThroughWallDetection();

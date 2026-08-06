@@ -52,6 +52,12 @@ public class ShulkerSearchPathing extends State {
             return;
         }
 
+        // A desync-placed box sits in the highway itself, not on the ground; the walk-back
+        // sweeps this window along the whole searched stretch
+        if (context.maybeMineMisplacedShulker(8, 8)) {
+            return;
+        }
+
         if (context.baritone().getCustomGoalProcess().isActive()) {
             return; // Wait to get there
         }

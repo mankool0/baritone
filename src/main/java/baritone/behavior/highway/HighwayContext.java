@@ -188,6 +188,7 @@ public class HighwayContext {
     private ShulkerType picksToUse;
     private BetterBlockPos cachedPlayerFeet = null;
     private int startShulkerCount = 0;
+    private boolean lostShulkerRelogAttempted = false;
 
     public void clearSourceBlocks() {
         sourceBlocks.clear();
@@ -842,6 +843,67 @@ public class HighwayContext {
         transitionTo(HighwayState.ShulkerThiefHunt);
         resetTimer();
         return true;
+    }
+
+    public BlockPos findMisplacedShulkerBox(int distBack, int distAhead) {
+        if (schematic == null) {
+            return null;
+        }
+        Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
+        Vec3 backPos = new Vec3(playerContext.playerFeet().getX() + (distBack * -highwayDirection.getX()),
+                playerContext.playerFeet().getY(),
+                playerContext.playerFeet().getZ() + (distBack * -highwayDirection.getZ()));
+        BlockPos startPos = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z), direction, backPos, LocationType.HighwayBuild);
+        for (int i = 0; i < distBack + distAhead; i++) {
+            BlockPos curPos = startPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
+            for (int y = 0; y < schematic.heightY(); y++) {
+                for (int z = 0; z < schematic.lengthZ(); z++) {
+                    for (int x = 0; x < schematic.widthX(); x++) {
+                        int blockX = x + curPos.getX();
+                        int blockY = y + curPos.getY();
+                        int blockZ = z + curPos.getZ();
+                        if (!baritone.bsi.worldContainsLoadedChunk(blockX, blockZ)) {
+                            continue;
+                        }
+                        if (shulkerBlockList.contains(playerContext.world().getBlockState(new BlockPos(blockX, blockY, blockZ)).getBlock())) {
+                            return new BlockPos(blockX, blockY, blockZ);
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    public boolean maybeMineMisplacedShulker(int distBack, int distAhead) {
+        BlockPos misplaced = findMisplacedShulkerBox(distBack, distAhead);
+        if (misplaced == null) {
+            return false;
+        }
+        Helper.HELPER.logDirect("The missing shulker box got placed into the highway at (" + misplaced.toShortString() + "), mining it back.");
+        setPlaceLoc(misplaced);
+        baritone.getPathingBehavior().cancelEverything();
+        transitionTo(HighwayState.MiningMisplacedShulker);
+        resetTimer();
+        return true;
+    }
+
+    public boolean maybeLostShulkerRelog() {
+        if (!settings.highwayLostShulkerRelog.value || lostShulkerRelogAttempted) {
+            return false;
+        }
+        lostShulkerRelogAttempted = true;
+        Component dcMsg = Component.literal("Lost a shulker box that isn't visible anywhere nearby. Reconnect to resync");
+        Helper.HELPER.logDirect(dcMsg);
+        baritone.getInputOverrideHandler().clearAllKeys();
+        baritone.getPathingBehavior().cancelEverything();
+        transitionTo(HighwayState.Nothing);
+        playerContext.player().connection.getConnection().disconnect(dcMsg);
+        return true;
+    }
+
+    public void clearLostShulkerRelogAttempt() {
+        lostShulkerRelogAttempted = false;
     }
 
     public void attackEntity(Entity target) {

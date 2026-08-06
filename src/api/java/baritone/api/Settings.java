@@ -1764,6 +1764,15 @@ public final class Settings {
     public final Setting<Double> highwayStolenShulkerChaseRange = new Setting<>(512.0);
 
     /**
+     * When a shulker box goes missing and isn't visible anywhere nearby (not on the ground, not
+     * carried by a piglin, not accidentally placed into the highway), disconnect once so a rejoin
+     * resyncs the inventory and world before committing to the long walk-back search. Requires an
+     * auto-reconnect module in the client to get back on; if the box is still missing after
+     * rejoining, the walk-back search runs as usual.
+     */
+    public final Setting<Boolean> highwayLostShulkerRelog = new Setting<>(false);
+
+    /**
      * Disconnect from the server if lost some health
      */
     public final Setting<Boolean> highwayDcOnHealthLoss = new Setting<>(true);
