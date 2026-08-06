@@ -25,6 +25,7 @@ import baritone.behavior.highway.enums.HighwayState;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.AirBlock;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -54,10 +55,13 @@ public class FarmingEnderChest extends State {
         }
 
         BlockState state = context.playerContext().world().getBlockState(context.placeLoc());
-        boolean pipelining = false;
+        boolean chestVisible = !(state.getBlock() instanceof AirBlock);
+        boolean validPick = HighwayContext.validPicksList.contains(context.playerContext().player().getItemInHand(InteractionHand.MAIN_HAND).getItem());
+        boolean pipelining = validPick && context.instantMineCalibrated()
+                && context.lastEchestPlaceTick() == context.playerContext().player().tickCount - 1;
 
-        if (!(state.getBlock() instanceof AirBlock)) {
-            if (!HighwayContext.validPicksList.contains(context.playerContext().player().getItemInHand(InteractionHand.MAIN_HAND).getItem())) {
+        if (chestVisible) {
+            if (!validPick) {
                 return;
             }
 
@@ -66,47 +70,83 @@ public class FarmingEnderChest extends State {
             if (!context.instantMineCalibrated()) {
                 if (context.calibrationBreakTick(context.placeLoc())) {
                     context.setInstantMineCalibrated(true);
+                    context.setEchestPlacedServerSide(false);
                 }
                 return;
             }
 
-            pipelining = state.is(Blocks.ENDER_CHEST)
-                    && context.lastEchestPlaceTick() == context.playerContext().player().tickCount - 1;
-            if (!pipelining) {
+            if (!pipelining || !state.is(Blocks.ENDER_CHEST)) {
                 context.instantMineTick(context.placeLoc());
+                context.setEchestPlacedServerSide(false);
                 return;
             }
-            context.playerContext().world().removeBlock(context.placeLoc(), false);
+        } else {
+            context.setEchestPlacedServerSide(false);
         }
 
-        // placeLoc is clear: decide whether to keep farming or stop.
+        // placeLoc is clear (or gets cleared by this tick's break): decide whether to keep farming.
         Item origItem = context.playerContext().player().getOffhandItem().getItem();
-        if ((context.getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) + context.playerContext().player().getOffhandItem().getCount()) <= context.settings().highwayEnderChestsToKeep.value) {
-            // Out of ender chests to farm, swap the offhand back and move on.
-            context.baritone().getInputOverrideHandler().clearAllKeys();
-            context.setInstantMineCalibrated(false);
-            context.transitionTo(HighwayState.FarmingEnderChestSwapBack);
-            context.resetTimer();
-            return;
-        } else if (!(origItem instanceof BlockItem) || !(((BlockItem) origItem).getBlock().equals(Blocks.ENDER_CHEST))) {
-            context.transitionTo(HighwayState.FarmingEnderChestPrepEchest);
+        boolean outOfChests = (context.getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) + context.playerContext().player().getOffhandItem().getCount()) <= context.settings().highwayEnderChestsToKeep.value;
+        boolean needsEchest = !(origItem instanceof BlockItem) || !(((BlockItem) origItem).getBlock().equals(Blocks.ENDER_CHEST));
+
+        if (outOfChests || needsEchest) {
+            if (chestVisible) {
+                context.instantMineTick(context.placeLoc());
+                context.setEchestPlacedServerSide(false);
+            }
+
+            if (outOfChests) {
+                // Out of ender chests to farm, swap the offhand back and move on.
+                context.baritone().getInputOverrideHandler().clearAllKeys();
+                context.setInstantMineCalibrated(false);
+                context.transitionTo(HighwayState.FarmingEnderChestSwapBack);
+            } else {
+                context.transitionTo(HighwayState.FarmingEnderChestPrepEchest);
+            }
             context.resetTimer();
             return;
         }
 
-        // Nothing placed yet: face the support block and drop a fresh ender chest from the offhand.
-        // A pipelining tick keeps its aim on the mine target instead (set by instantMineTick below).
-        if (!pipelining) {
+        if (pipelining) {
+            if (chestVisible) {
+                // Only the client still sees a chest here: server side this tick's break clears it
+                // (it is sent after this tick's place), so mirror that to get place() past
+                // canBeReplaced.
+                context.playerContext().world().removeBlock(context.placeLoc(), false);
+            }
+        } else {
+            // Nothing placed yet: face the support block and drop a fresh ender chest from the offhand.
+            // A pipelining tick keeps its aim on the mine target instead (set by instantMineTick below).
             Optional<Rotation> support = RotationUtils.reachable(context.playerContext(), context.placeLoc().below(), context.playerContext().playerController().getBlockReachDistance());
             support.ifPresent(rotation -> context.baritone().getLookBehavior().updateTarget(rotation, true));
         }
 
+        boolean refused = context.echestPlacedServerSide();
         if (context.place(context.placeLoc(), 5.0f, false, false, InteractionHand.OFF_HAND) == HighwayContext.PlaceResult.Placed) {
+            if (refused) {
+                restoreOffhandEnderChest(context);
+            }
+            context.setEchestPlacedServerSide(true);
+            context.setLastEchestPlaceTick(context.playerContext().player().tickCount);
             if (pipelining) {
                 context.instantMineTick(context.placeLoc());
+                context.setEchestPlacedServerSide(false);
             }
-            context.setLastEchestPlaceTick(context.playerContext().player().tickCount);
             context.resetTimer();
+        } else if (pipelining && chestVisible) {
+            // Placement fell through after the position was cleared locally: break whatever is still
+            // standing there
+            context.instantMineTick(context.placeLoc());
+            context.setEchestPlacedServerSide(false);
+        }
+    }
+
+    private void restoreOffhandEnderChest(HighwayContext context) {
+        ItemStack offhand = context.playerContext().player().getOffhandItem();
+        if (offhand.isEmpty()) {
+            context.playerContext().player().setItemInHand(InteractionHand.OFF_HAND, new ItemStack(Blocks.ENDER_CHEST.asItem()));
+        } else if (offhand.getItem().equals(Blocks.ENDER_CHEST.asItem())) {
+            offhand.grow(1);
         }
     }
 }
