@@ -23,14 +23,23 @@ import baritone.api.utils.Helper;
 import baritone.utils.ToolSet;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.Direction;
+import net.minecraft.core.Holder;
 import net.minecraft.core.NonNullList;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.item.AxeItem;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.DiggerItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.PickaxeItem;
+import net.minecraft.world.item.ShovelItem;
+import net.minecraft.world.item.enchantment.Enchantment;
+import net.minecraft.world.item.enchantment.EnchantmentEffectComponents;
+import net.minecraft.world.item.enchantment.ItemEnchantments;
+import net.minecraft.world.item.enchantment.effects.EnchantmentAttributeEffect;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.block.Block;
@@ -45,6 +54,11 @@ import java.util.Random;
 import java.util.function.Predicate;
 
 public final class InventoryBehavior extends Behavior implements Helper {
+
+    public static final int SWORD_SLOT = 0;
+    public static final int PICKAXE_SLOT = 1;
+    public static final int SHOVEL_SLOT = 2;
+    public static final int AXE_SLOT = 3;
 
     int ticksSinceLastInventoryMove;
     int[] lastTickRequestedMove; // not everything asks every tick, so remember the request while coming to a halt
@@ -77,14 +91,87 @@ public final class InventoryBehavior extends Behavior implements Helper {
         if (firstValidThrowaway() >= 9) { // aka there are none on the hotbar, but there are some in main inventory
             requestSwapWithHotBar(firstValidThrowaway(), 8);
         }
-        int pick = bestToolAgainst(Blocks.STONE, PickaxeItem.class);
-        if (pick >= 9) {
-            requestSwapWithHotBar(pick, 0);
+        if (Baritone.settings().keepToolsOnHotbar.value) {
+            keepToolAt(bestSwordSlot(), SWORD_SLOT);
+            keepToolAt(bestToolAgainst(Blocks.STONE, PickaxeItem.class), PICKAXE_SLOT);
+            keepToolAt(bestToolAgainst(Blocks.DIRT, ShovelItem.class), SHOVEL_SLOT);
+            keepToolAt(bestToolAgainst(Blocks.OAK_LOG, AxeItem.class), AXE_SLOT);
+        } else {
+            int pick = bestToolAgainst(Blocks.STONE, PickaxeItem.class);
+            if (pick >= 9) {
+                requestSwapWithHotBar(pick, 0);
+            }
         }
         if (lastTickRequestedMove != null) {
             logDebug("Remembering to move " + lastTickRequestedMove[0] + " " + lastTickRequestedMove[1] + " from a previous tick");
             requestSwapWithHotBar(lastTickRequestedMove[0], lastTickRequestedMove[1]);
         }
+    }
+
+    private void keepToolAt(int bestSlot, int hotbarSlot) {
+        if (bestSlot >= 9) {
+            requestSwapWithHotBar(bestSlot, hotbarSlot);
+        }
+    }
+
+    private boolean reservedForTool(int slot) {
+        if (!Baritone.settings().keepToolsOnHotbar.value) {
+            return false;
+        }
+        switch (slot) {
+            case SWORD_SLOT:
+                return bestSwordSlot() != -1;
+            case PICKAXE_SLOT:
+                return bestToolAgainst(Blocks.STONE, PickaxeItem.class) != -1;
+            case SHOVEL_SLOT:
+                return bestToolAgainst(Blocks.DIRT, ShovelItem.class) != -1;
+            case AXE_SLOT:
+                return bestToolAgainst(Blocks.OAK_LOG, AxeItem.class) != -1;
+            default:
+                return false;
+        }
+    }
+
+    // Ordered from highest to lowest priority
+    private static final List<Item> SWORD_PRIORITY = List.of(
+            Items.NETHERITE_SWORD, Items.DIAMOND_SWORD, Items.IRON_SWORD,
+            Items.STONE_SWORD, Items.GOLDEN_SWORD, Items.WOODEN_SWORD
+    );
+
+    /**
+     * Slot 0-35 of the best sword in the inventory, ranked by material with attack enchantments
+     * breaking ties, or -1 if there is none.
+     */
+    public int bestSwordSlot() {
+        NonNullList<ItemStack> invy = ctx.player().getInventory().items;
+        for (Item swordType : SWORD_PRIORITY) {
+            int bestSlot = -1;
+            double bestEnchantBonus = -1;
+            for (int i = 0; i < invy.size(); i++) {
+                ItemStack stack = invy.get(i);
+                if (Item.getId(stack.getItem()) != Item.getId(swordType)) continue;
+                double bonus = swordAttackEnchantBonus(stack);
+                if (bonus > bestEnchantBonus) {
+                    bestEnchantBonus = bonus;
+                    bestSlot = i;
+                }
+            }
+            if (bestSlot != -1) return bestSlot;
+        }
+        return -1;
+    }
+
+    private double swordAttackEnchantBonus(ItemStack stack) {
+        double bonus = 0;
+        ItemEnchantments enchantments = stack.getEnchantments();
+        for (Holder<Enchantment> enchant : enchantments.keySet()) {
+            for (EnchantmentAttributeEffect e : enchant.value().getEffects(EnchantmentEffectComponents.ATTRIBUTES)) {
+                if (e.attribute().is(Attributes.ATTACK_DAMAGE.unwrapKey().get())) {
+                    bonus += e.amount().calculate(enchantments.getLevel(enchant));
+                }
+            }
+        }
+        return bonus;
     }
 
     public boolean attemptToPutOnHotbar(int inMainInvy, Predicate<Integer> disallowedHotbar) {
@@ -102,8 +189,8 @@ public final class InventoryBehavior extends Behavior implements Helper {
             return true;
         }
         List<Integer> empties = new ArrayList<>();
-        for (int i = 1; i < 8; i++) { // 0 and 8 stay reserved for the pickaxe and throwaway
-            if (ctx.player().getInventory().items.get(i).isEmpty() && !disallowedHotbar.test(i)) {
+        for (int i = 1; i < 8; i++) { // 0 and 8 stay reserved for the sword/pickaxe and throwaway
+            if (ctx.player().getInventory().items.get(i).isEmpty() && !reservedForTool(i) && !disallowedHotbar.test(i)) {
                 empties.add(i);
             }
         }
@@ -123,16 +210,16 @@ public final class InventoryBehavior extends Behavior implements Helper {
     }
 
     public OptionalInt getTempHotbarSlot(Predicate<Integer> disallowedHotbar) {
-        // we're using 0 and 8 for pickaxe and throwaway
+        // 0 and 8 are the sword/pickaxe and throwaway, and occupied tool homes are off-limits too
         ArrayList<Integer> candidates = new ArrayList<>();
         for (int i = 1; i < 8; i++) {
-            if (ctx.player().getInventory().items.get(i).isEmpty() && !disallowedHotbar.test(i)) {
+            if (ctx.player().getInventory().items.get(i).isEmpty() && !reservedForTool(i) && !disallowedHotbar.test(i)) {
                 candidates.add(i);
             }
         }
         if (candidates.isEmpty()) {
             for (int i = 1; i < 8; i++) {
-                if (!disallowedHotbar.test(i)) {
+                if (!reservedForTool(i) && !disallowedHotbar.test(i)) {
                     candidates.add(i);
                 }
             }

@@ -24,6 +24,21 @@ public interface INetherHighwayBuilderBehavior extends IBehavior {
 
     boolean isEndDistanceWalkHeld();
 
+    boolean isFixingInvalidBlocks();
+
+    /**
+     * True when the highway cross-section is too wide to work from a single lane, so the builder
+     * has to walk sideways to reach the outer columns.
+     */
+    boolean needsLateralTraverses();
+
+    /**
+     * Signed index of the cross-section column the given block sits in, measured across the highway
+     * from its centre line. Consecutive columns differ by one and steps along the highway don't
+     * change it, so a sideways sweep is just a walk through consecutive values.
+     */
+    int lateralColumn(int x, int z);
+
     boolean isHighwayActive();
 
     void build(int startX, int startZ, Vec3i direct, boolean selfSolve, boolean pave);

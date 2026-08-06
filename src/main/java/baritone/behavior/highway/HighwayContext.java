@@ -53,12 +53,9 @@ import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.*;
 import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.item.component.ItemContainerContents;
-import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.item.enchantment.Enchantment;
-import net.minecraft.world.item.enchantment.EnchantmentEffectComponents;
 import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.item.enchantment.ItemEnchantments;
-import net.minecraft.world.item.enchantment.effects.EnchantmentAttributeEffect;
 import net.minecraft.world.level.ItemLike;
 import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.state.BlockState;
@@ -314,6 +311,16 @@ public class HighwayContext {
     }
 
     private int lastEchestPlaceTick = Integer.MIN_VALUE;
+
+    public boolean echestPlacedServerSide() {
+        return echestPlacedServerSide;
+    }
+
+    public void setEchestPlacedServerSide(boolean echestPlacedServerSide) {
+        this.echestPlacedServerSide = echestPlacedServerSide;
+    }
+
+    private boolean echestPlacedServerSide = false;
 
     public Item instantMineOriginalOffhandItem() {
         return instantMineOriginalOffhandItem;
@@ -1202,50 +1209,13 @@ public class HighwayContext {
     }
 
     public int putBestSwordHotbar() {
-        int itemSlot = getBestSwordSlot();
+        int itemSlot = baritone.getInventoryBehavior().bestSwordSlot();
         if (itemSlot == -1) return -1;
         if (itemSlot >= 9) {
             baritone.getInventoryBehavior().attemptToPutOnHotbar(itemSlot, usefulSlots::contains);
-            itemSlot = getBestSwordSlot();
+            itemSlot = baritone.getInventoryBehavior().bestSwordSlot();
         }
         return itemSlot;
-    }
-
-    // Ordered from highest to lowest priority
-    private static final List<Item> SWORD_PRIORITY = List.of(
-            Items.NETHERITE_SWORD, Items.DIAMOND_SWORD, Items.IRON_SWORD,
-            Items.STONE_SWORD, Items.GOLDEN_SWORD, Items.WOODEN_SWORD
-    );
-
-    private int getBestSwordSlot() {
-        for (Item swordType : SWORD_PRIORITY) {
-            int bestSlot = -1;
-            double bestEnchantBonus = -1;
-            for (int i = 0; i < 36; i++) {
-                ItemStack stack = playerContext.player().getInventory().items.get(i);
-                if (Item.getId(stack.getItem()) != Item.getId(swordType)) continue;
-                double bonus = getSwordAttackEnchantBonus(stack);
-                if (bonus > bestEnchantBonus) {
-                    bestEnchantBonus = bonus;
-                    bestSlot = i;
-                }
-            }
-            if (bestSlot != -1) return bestSlot;
-        }
-        return -1;
-    }
-
-    private double getSwordAttackEnchantBonus(ItemStack stack) {
-        double bonus = 0;
-        ItemEnchantments enchantments = stack.getEnchantments();
-        for (Holder<Enchantment> enchant : enchantments.keySet()) {
-            for (EnchantmentAttributeEffect e : enchant.value().getEffects(EnchantmentEffectComponents.ATTRIBUTES)) {
-                if (e.attribute().is(Attributes.ATTACK_DAMAGE.unwrapKey().get())) {
-                    bonus += e.amount().calculate(enchantments.getLevel(enchant));
-                }
-            }
-        }
-        return bonus;
     }
 
     public void swapOffhand(int slot) {
@@ -2431,6 +2401,20 @@ public class HighwayContext {
         Vec3 curPosPlayer = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
         BlockPos startCheckPos = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z), direction, curPosPlayer, LocationType.HighwayBuild);
 
+        // Only the columns the player can actually work from where they stand count. On a highway
+        // wider than the printer's reach sphere the outer columns are built later from another
+        // lane, so demanding a whole correct cross-section would pin this at 0 forever and the
+        // walk-creep would never engage. On narrow highways the window covers the full section, so
+        // this is exactly the old behaviour.
+        boolean crossZ = schematic.lengthZ() >= schematic.widthX();
+        int crossLen = crossZ ? schematic.lengthZ() : schematic.widthX();
+        int lateral = crossZ ? playerContext.playerFeet().getZ() - startCheckPos.getZ()
+                : playerContext.playerFeet().getX() - startCheckPos.getX();
+        lateral = Math.max(0, Math.min(crossLen - 1, lateral)); // standing off the side still measures a real corridor
+        int corridorReach = (int) Math.ceil(settings.blockReachDistance.value);
+        int crossLo = Math.max(0, lateral - corridorReach);
+        int crossHi = Math.min(crossLen - 1, lateral + corridorReach);
+
         // scan far enough that the configured stand-off distance is actually reachable
         int scanLength = Math.max(10, settings.highwayEndDistance.value);
         int maxResult = scanLength; // an all-correct scan means "at least this much built ahead"
@@ -2445,7 +2429,13 @@ public class HighwayContext {
             BlockPos curPos = startCheckPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
             for (int y = 0; y < schematic.heightY(); y++) {
                 for (int z = 0; z < schematic.lengthZ(); z++) {
+                    if (crossZ && (z < crossLo || z > crossHi)) {
+                        continue;
+                    }
                     for (int x = 0; x < schematic.widthX(); x++) {
+                        if (!crossZ && (x < crossLo || x > crossHi)) {
+                            continue;
+                        }
                         int blockX = x + curPos.getX();
                         int blockY = y + curPos.getY();
                         int blockZ = z + curPos.getZ();
@@ -2648,6 +2638,19 @@ public class HighwayContext {
     private boolean isPortalCell(int x, int y, int z) {
         return playerContext.world().getBlockState(new BlockPos(x, y, z)).getBlock() instanceof NetherPortalBlock
                 || playerContext.world().getBlockState(new BlockPos(x, y + 1, z)).getBlock() instanceof NetherPortalBlock;
+    }
+
+    /**
+     * Signed index of the cross-section column the given block sits in, measured across the highway
+     * from its centre line. Steps along the highway don't change it, on diagonals as well as
+     * straights: the perpendicular of an unnormalised (dx, dz) is exactly one per column and zero
+     * per slice for all eight directions. Any point on the line works as the reference, since a
+     * perpendicular kills the along-line component.
+     */
+    public int lateralColumn(int x, int z) {
+        int ox = (int) Math.round(originVector.x);
+        int oz = (int) Math.round(originVector.z);
+        return -(x - ox) * highwayDirection.getZ() + (z - oz) * highwayDirection.getX();
     }
 
     /** The yaw that points straight down the highway direction. */

@@ -128,6 +128,15 @@ public final class Settings {
     public final Setting<Boolean> autoTool = new Setting<>(true);
 
     /**
+     * Keep the best sword, pickaxe, shovel, and axe from the inventory on fixed hotbar slots
+     * (sword 0, pickaxe 1, shovel 2, axe 3), so every tool type is at hand for autotool and
+     * combat. When disabled, only the best pickaxe is kept, on slot 0.
+     * <p>
+     * Requires {@link #allowInventory}.
+     */
+    public final Setting<Boolean> keepToolsOnHotbar = new Setting<>(true);
+
+    /**
      * It doesn't actually take twenty ticks to place a block, this cost is so high
      * because we want to generally conserve blocks which might be limited.
      * <p>
