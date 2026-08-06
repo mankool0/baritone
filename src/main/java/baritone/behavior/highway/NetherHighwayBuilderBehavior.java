@@ -123,6 +123,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         int highwayWidthOffset = -((Math.round(highwayWidth / 2.0f)) + 1);
         int highwayWidthLiqOffset = -(Math.round(highwayWidth / 2.0f)) - 1;
         int highwayWidthLiqOffsetRail = -(Math.round(highwayWidth / 2.0f)) - 2;
+        int highwayWidthCenterOffset = 1 + (highwayWidth - 1) / 2;
 
         ISchematic obsidSchemBot;
         WhiteBlackSchematic topAir;
@@ -148,7 +149,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 } else {
                     highwayContext.setLiqOriginVector(new Vec3(0, 0, highwayWidthLiqOffset));
                 }
-                highwayContext.setBackPathOriginVector(new Vec3(0, 0, -1));
+                highwayContext.setBackPathOriginVector(new Vec3(0, 0, highwayWidthOffset + highwayWidthCenterOffset));
                 highwayContext.seteChestEmptyShulkOriginVector(new Vec3(0, 0, highwayWidthLiqOffsetRail));
             } else {
                 highwayContext.setOriginVector(new Vec3(startX, 0, startZ - highwayWidthOffset));
@@ -157,7 +158,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 } else {
                     highwayContext.setLiqOriginVector(new Vec3(startX, 0, startZ - highwayWidthLiqOffset));
                 }
-                highwayContext.setBackPathOriginVector(new Vec3(startX, 0, startZ - highwayWidthLiqOffsetRail + 1));
+                highwayContext.setBackPathOriginVector(new Vec3(startX, 0, startZ - highwayWidthOffset + highwayWidthCenterOffset));
                 highwayContext.seteChestEmptyShulkOriginVector(new Vec3(startX, 0, startZ - highwayWidthOffset - 1));
             }
 
@@ -211,7 +212,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 } else {
                     highwayContext.setLiqOriginVector(new Vec3(highwayWidthLiqOffset, 0, 0));
                 }
-                highwayContext.setBackPathOriginVector(new Vec3(-1, 0, 0));
+                highwayContext.setBackPathOriginVector(new Vec3(highwayWidthOffset + highwayWidthCenterOffset, 0, 0));
                 highwayContext.seteChestEmptyShulkOriginVector(new Vec3(highwayWidthLiqOffsetRail, 0, 0));
             } else {
                 highwayContext.setOriginVector(new Vec3(startX - highwayWidthOffset, 0, startZ));
@@ -220,7 +221,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 } else {
                     highwayContext.setLiqOriginVector(new Vec3(startX - highwayWidthLiqOffset, 0, startZ));
                 }
-                highwayContext.setBackPathOriginVector(new Vec3(startX - highwayWidthLiqOffsetRail + 1, 0, startZ));
+                highwayContext.setBackPathOriginVector(new Vec3(startX - highwayWidthOffset + highwayWidthCenterOffset, 0, startZ));
                 highwayContext.seteChestEmptyShulkOriginVector(new Vec3(startX - highwayWidthOffset - 1, 0, startZ));
             }
 
@@ -404,7 +405,10 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 // override movement input installed, which ignores the real walk key entirely
                 baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, false);
             }
-            walk = highwayContext.getHighwayLengthFront() >= settings.highwayEndDistance.value
+            // a dispatched repair needs to path to a block behind us; creeping forward (and
+            // steering back to the lane center) would drag the bot off that path every tick
+            walk = !highwayContext.invalidBlockFixActive()
+                    && highwayContext.getHighwayLengthFront() >= settings.highwayEndDistance.value
                     && highwayContext.canWalkOnFloorAhead()
                     // never creep into a lit portal waiting for its frame to be mined
                     && highwayContext.noPortalAhead()
@@ -449,6 +453,22 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     @Override
     public boolean isEndDistanceWalkHeld() {
         return walkKeyHeld;
+    }
+
+    @Override
+    public boolean isFixingInvalidBlocks() {
+        return highwayContext.invalidBlockFixActive();
+    }
+
+    @Override
+    public int lateralColumn(int x, int z) {
+        return highwayContext.lateralColumn(x, z);
+    }
+
+    @Override
+    public boolean needsLateralTraverses() {
+        int crossWidth = settings.highwayWidth.value + (settings.highwayRail.value ? 2 : 0);
+        return crossWidth > 2 * settings.blockReachDistance.value;
     }
 
     @Override

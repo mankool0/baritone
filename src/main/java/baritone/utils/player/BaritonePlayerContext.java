@@ -46,6 +46,11 @@ public final class BaritonePlayerContext implements IPlayerContext {
     }
 
     @Override
+    public Baritone baritone() {
+        return this.baritone;
+    }
+
+    @Override
     public Minecraft minecraft() {
         return this.mc;
     }

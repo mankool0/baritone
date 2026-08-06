@@ -18,6 +18,7 @@
 package baritone.process;
 
 import baritone.Baritone;
+import baritone.api.behavior.INetherHighwayBuilderBehavior;
 import baritone.api.pathing.goals.Goal;
 import baritone.api.pathing.goals.GoalBlock;
 import baritone.api.pathing.goals.GoalComposite;
@@ -122,7 +123,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private int layer;
     private int numRepeats;
     private List<BlockState> approxPlaceable;
-    private List<BetterBlockPos> toBreakEntity = new ArrayList<>();
+    private Set<BetterBlockPos> toBreakEntity = new LinkedHashSet<>();
     public int stopAtHeight = 0;
 
     /**
@@ -239,6 +240,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         this.numRepeats = 0;
         this.observedCompleted = new LongOpenHashSet();
         this.incorrectPositions = null;
+        this.toBreakEntity.clear();
         printerResetNoRotateDetection();
     }
 
@@ -400,6 +402,40 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             this.side = side;
             this.rot = rot;
         }
+    }
+
+    private Collection<BetterBlockPos> currentStrip() {
+        INetherHighwayBuilderBehavior highway = baritone.getNetherHighwayBuilderBehavior();
+        if (!highway.isBuildingHighwayState() || !highway.needsLateralTraverses()) {
+            return incorrectPositions;
+        }
+        int lowest = Integer.MAX_VALUE;
+        int highest = Integer.MIN_VALUE;
+        for (BetterBlockPos pos : incorrectPositions) {
+            int column = highway.lateralColumn(pos.x, pos.z);
+            lowest = Math.min(lowest, column);
+            highest = Math.max(highest, column);
+        }
+
+        int here = highway.lateralColumn(ctx.playerFeet().x, ctx.playerFeet().z);
+        int band = Baritone.settings().blockReachDistance.value.intValue();
+        boolean upward;
+        if (here - lowest <= band) {
+            upward = true;
+        } else if (highest - here <= band) {
+            upward = false;
+        } else {
+            upward = here - lowest <= highest - here;
+        }
+        int cutoff = upward ? lowest + band : highest - band;
+        List<BetterBlockPos> strip = new ArrayList<>();
+        for (BetterBlockPos pos : incorrectPositions) {
+            int column = highway.lateralColumn(pos.x, pos.z);
+            if (upward ? column <= cutoff : column >= cutoff) {
+                strip.add(pos);
+            }
+        }
+        return strip;
     }
 
     private Optional<Placement> searchForPlacables(BuilderCalculationContext bcc, List<BlockState> desirableOnHotbar) {
@@ -640,7 +676,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         int breaksLeft = printerBreakCooldown <= 0 ? Math.max(1, Baritone.settings().multiBreak.value) : 0;
         int placesLeft = mayPlace && printerPlaceCooldown <= 0 ? Math.max(1, Baritone.settings().printerMultiPlace.value) : 0;
 
-        List<BetterBlockPos> candidates = new ArrayList<>(incorrectPositions);
+        List<BetterBlockPos> candidates = printerCandidates();
         double maxDistSq = (reach + 1) * (reach + 1); // same block-center slack as printerAim
         candidates.removeIf(pos -> eye.distanceToSqr(VecUtils.getBlockPosCenter(pos)) > maxDistSq);
         candidates.sort(Comparator.comparingDouble(pos -> eye.distanceToSqr(VecUtils.getBlockPosCenter(pos))));
@@ -736,8 +772,30 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         printerNoRotateSuppressedTicks = 0;
     }
 
+    private List<BetterBlockPos> printerCandidates() {
+        if (toBreakEntity.isEmpty()) {
+            return new ArrayList<>(incorrectPositions);
+        }
+        Set<BetterBlockPos> candidates = new LinkedHashSet<>(toBreakEntity);
+        candidates.addAll(incorrectPositions);
+        return new ArrayList<>(candidates);
+    }
+
+    private BlockState printerDesired(BuilderCalculationContext bcc, BetterBlockPos pos, BlockState curr) {
+        if (toBreakEntity.contains(pos)) {
+            BlockState air = Blocks.AIR.defaultBlockState();
+            // the same emptiness test toBreakNearPlayer uses, so both paths agree on what's a target
+            return valid(curr, air, false) ? null : air;
+        }
+        if (!incorrectPositions.contains(pos)) {
+            return null;
+        }
+        BlockState desired = bcc.getSchematic(pos.x, pos.y, pos.z, curr);
+        return desired == null || valid(curr, desired, false) ? null : desired;
+    }
+
     private boolean printerTryBreak(BuilderCalculationContext bcc, BlockHitResult bhr, BetterBlockPos clicked) {
-        if (!printerBreakAllowed() || !incorrectPositions.contains(clicked) || !printerBreakSafe(clicked)) {
+        if (!printerBreakAllowed() || !printerBreakSafe(clicked)) {
             return false;
         }
         BlockState state = bcc.bsi.get0(clicked);
@@ -745,8 +803,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                 || MovementHelper.isReplaceable(clicked.x, clicked.y, clicked.z, state, bcc.bsi)) {
             return false;
         }
-        BlockState desired = bcc.getSchematic(clicked.x, clicked.y, clicked.z, state);
-        if (desired == null || valid(state, desired, false)) {
+        if (printerDesired(bcc, clicked, state) == null) {
             return false;
         }
         if (!printerCanInstaBreak(state, clicked)) {
@@ -773,6 +830,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         BetterBlockPos placeAt = BetterBlockPos.from(clicked.relative(bhr.getDirection()));
         if (!incorrectPositions.contains(placeAt)) {
             return -1;
+        }
+        if (toBreakEntity.contains(placeAt)) {
+            return -1; // being cleared for an entity; filling it back in would just fight the break
         }
         if (!MovementHelper.canPlaceAgainst(bcc.bsi, clicked) || printerAvoidClicking(bcc.bsi.get0(clicked))) {
             return -1;
@@ -818,7 +878,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         boolean breakAllowed = printerBreakAllowed();
         List<BlockState> hotbar = approxPlaceable.subList(0, 9);
 
-        List<BetterBlockPos> candidates = new ArrayList<>(incorrectPositions);
+        List<BetterBlockPos> candidates = printerCandidates();
         // measured to the block center, so allow a block's bounding radius (sqrt(3)/2) of slack
         // before discarding it; the exact reach is enforced per hit point further down
         double maxDistSq = (reach + 1) * (reach + 1);
@@ -827,8 +887,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
 
         for (BetterBlockPos pos : candidates) {
             BlockState curr = bcc.bsi.get0(pos);
-            BlockState desired = bcc.getSchematic(pos.x, pos.y, pos.z, curr);
-            if (desired == null || valid(curr, desired, false)) {
+            BlockState desired = printerDesired(bcc, pos, curr);
+            if (desired == null) {
                 continue;
             }
             if (!(curr.getBlock() instanceof AirBlock) && !(curr.getBlock() instanceof LiquidBlock)
@@ -1221,25 +1281,41 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             }
         }
 
+        INetherHighwayBuilderBehavior highway = baritone.getNetherHighwayBuilderBehavior();
         if (Baritone.settings().highwayEndDistance.value != -1
-                && baritone.getNetherHighwayBuilderBehavior().isBuildingHighwayState()
+                && highway.isBuildingHighwayState()
+                && !highway.isFixingInvalidBlocks()
+                && !(highway.needsLateralTraverses() && baritone.getPathingBehavior().isPathing())
                 && isSafeToCancel
-                && (printerAction.acted() || baritone.getNetherHighwayBuilderBehavior().isEndDistanceWalkHeld())) {
+                && (printerAction.acted() || highway.isEndDistanceWalkHeld())) {
             return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
         }
-        Goal goal = assemble(bcc, approxPlaceable.subList(0, 9));
-        if (goal == null) {
-            goal = assemble(bcc, approxPlaceable, true); // we're far away, so assume that we have our whole inventory to recalculate placeable properly
+        // Aim at the strip we're standing in before anything further across the width, so a sweep
+        // finishes what it is on instead of setting off across the highway and leaving holes.
+        Collection<BetterBlockPos> strip = currentStrip();
+        Goal goal = null;
+        if (strip != incorrectPositions) {
+            goal = assemble(bcc, approxPlaceable.subList(0, 9), false, strip);
             if (goal == null) {
-                if (Baritone.settings().skipFailedLayers.value && Baritone.settings().buildInLayers.value && layer * Baritone.settings().layerHeight.value < realSchematic.heightY()) {
-                    logDirect("Skipping layer that I cannot construct! Layer #" + layer);
-                    layer++;
-                    return onTick(calcFailed, isSafeToCancel, recursions + 1);
-                }
-                logDirect("Unable to do it. Pausing. resume to resume, cancel to cancel");
-                paused = true;
-                return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+                goal = assemble(bcc, approxPlaceable, false, strip);
             }
+        }
+        if (goal == null) {
+            // nothing actionable in our own strip; look at the full width rather than give up
+            goal = assemble(bcc, approxPlaceable.subList(0, 9), false, incorrectPositions);
+            if (goal == null) {
+                goal = assemble(bcc, approxPlaceable, true, incorrectPositions); // we're far away, so assume that we have our whole inventory to recalculate placeable properly
+            }
+        }
+        if (goal == null) {
+            if (Baritone.settings().skipFailedLayers.value && Baritone.settings().buildInLayers.value && layer * Baritone.settings().layerHeight.value < realSchematic.heightY()) {
+                logDirect("Skipping layer that I cannot construct! Layer #" + layer);
+                layer++;
+                return onTick(calcFailed, isSafeToCancel, recursions + 1);
+            }
+            logDirect("Unable to do it. Pausing. resume to resume, cancel to cancel");
+            paused = true;
+            return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
         }
         return new PathingCommandContext(goal, PathingCommandType.FORCE_REVALIDATE_GOAL_AND_PATH, bcc);
     }
@@ -1367,11 +1443,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         return true;
     }
 
-    private Goal assemble(BuilderCalculationContext bcc, List<BlockState> approxPlaceable) {
-        return assemble(bcc, approxPlaceable, false);
-    }
-
-    private Goal assemble(BuilderCalculationContext bcc, List<BlockState> approxPlaceable, boolean logMissing) {
+    private Goal assemble(BuilderCalculationContext bcc, List<BlockState> approxPlaceable, boolean logMissing, Collection<BetterBlockPos> candidates) {
         List<BetterBlockPos> placeable = new ArrayList<>();
         List<BetterBlockPos> breakable = new ArrayList<>();
         List<BetterBlockPos> sourceLiquids = new ArrayList<>();
@@ -1381,11 +1453,11 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         AtomicBoolean entityDetected = new AtomicBoolean(false);
         AtomicBoolean boatDetected = new AtomicBoolean(false);
         List<BetterBlockPos> outOfBounds = new ArrayList<>();
-        incorrectPositions.forEach(pos -> {
+        toBreakEntity.clear();
+        candidates.forEach(pos -> {
             BlockState state = bcc.bsi.get0(pos);
             if (state.getBlock() instanceof AirBlock) {
                 // Mine out blocks below if entity in the way
-                toBreakEntity.clear();
                 if (!checkNoEntityCollision(new AABB(pos), ctx.player())) {
                     entityDetected.set(true);
                     int xSize = 1;
@@ -1710,6 +1782,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     @Override
     public void onLostControl() {
         incorrectPositions = null;
+        toBreakEntity.clear();
         name = null;
         schematic = null;
         realSchematic = null;
