@@ -323,6 +323,16 @@ public class HighwayContext {
 
     private boolean echestPlacedServerSide = false;
 
+    public boolean farmPlaceLocResynced() {
+        return farmPlaceLocResynced;
+    }
+
+    public void setFarmPlaceLocResynced(boolean farmPlaceLocResynced) {
+        this.farmPlaceLocResynced = farmPlaceLocResynced;
+    }
+
+    private boolean farmPlaceLocResynced = false;
+
     public Item instantMineOriginalOffhandItem() {
         return instantMineOriginalOffhandItem;
     }
@@ -3129,6 +3139,17 @@ public class HighwayContext {
             }
         }
         return null;
+    }
+
+    // Makes the server resend the true state of pos by right-clicking the block below it:
+    // handleUseItemOn always ends with block updates for the clicked pos AND the pos across the
+    // clicked face, even when the click does nothing. This is the only way to surface ghost air
+    // (a local removeBlock whose server-side dig silently failed) - the server never re-sends a
+    // block without a change. Main hand must not hold anything placeable.
+    public void requestBlockResync(BlockPos pos) {
+        BlockPos support = pos.below();
+        Vec3 hitVec = new Vec3(support.getX() + 0.5, support.getY() + 1.0, support.getZ() + 0.5);
+        playerContext.playerController().processRightClickBlock(playerContext.player(), playerContext.world(), InteractionHand.MAIN_HAND, new BlockHitResult(hitVec, Direction.UP, support, false));
     }
 
     private PlaceResult clickFace(BlockHitResult blockHitResult, boolean packetSwing, InteractionHand hand) {

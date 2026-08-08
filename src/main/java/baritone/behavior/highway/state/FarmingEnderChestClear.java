@@ -20,6 +20,7 @@ package baritone.behavior.highway.state;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.level.block.AirBlock;
 
 public class FarmingEnderChestClear extends State {
@@ -41,11 +42,38 @@ public class FarmingEnderChestClear extends State {
         context.baritone().getPathingBehavior().cancelEverything();
 
         if (!(context.playerContext().world().getBlockState(context.placeLoc()).getBlock() instanceof AirBlock)) {
+            context.setFarmPlaceLocResynced(false); // verify again once this chest is mined
             context.baritone().getBuilderProcess().clearArea(context.placeLoc(), context.placeLoc());
             context.resetTimer();
             return;
         }
 
+        // Make the server resend placeLoc and only trust air it confirmed.
+        if (!context.farmPlaceLocResynced()) {
+            if (context.playerContext().player().getMainHandItem().getItem() instanceof BlockItem) {
+                int pickSlot = context.putPickaxeHotbar(true);
+                if (pickSlot == -1) {
+                    // Nothing safe to hold for the click; skip verification rather than risk
+                    // placing the held block at placeLoc
+                    context.resetTimer();
+                    context.transitionTo(HighwayState.CollectingObsidian);
+                    return;
+                }
+                context.playerContext().player().getInventory().selected = pickSlot;
+                context.resetTimer();
+                return; // click next pass, once the held-item change has synced
+            }
+            context.requestBlockResync(context.placeLoc());
+            context.setFarmPlaceLocResynced(true);
+            context.resetTimer();
+            return;
+        }
+
+        if (context.timer() < 20) {
+            return; // resync reply still in flight; a restored chest hits the clear branch above
+        }
+
+        context.setFarmPlaceLocResynced(false);
         context.resetTimer();
         context.transitionTo(HighwayState.CollectingObsidian);
     }
