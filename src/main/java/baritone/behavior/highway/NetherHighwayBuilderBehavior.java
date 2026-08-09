@@ -411,6 +411,10 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             walk = !highwayContext.invalidBlockFixActive()
                     && highwayContext.getHighwayLengthFront() >= settings.highwayEndDistance.value
                     && highwayContext.canWalkOnFloorAhead()
+                    // a solid at body height on an all-correct stretch is schematic-valid (the
+                    // ledge of a paved section, the wall of a pocket in the floor) and will never
+                    // be dug; the creep can't jump it, so release and let the builder path instead
+                    && highwayContext.canWalkThroughAhead()
                     // never creep into a lit portal waiting for its frame to be mined
                     && highwayContext.noPortalAhead()
                     // release the key while an inventory move waits for a tick without movement input

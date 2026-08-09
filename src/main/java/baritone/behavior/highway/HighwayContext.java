@@ -2593,6 +2593,14 @@ public class HighwayContext {
         return true;
     }
 
+    public boolean canWalkThroughAhead() {
+        BetterBlockPos feet = playerContext.playerFeet();
+        int x = feet.x + highwayDirection.getX();
+        int z = feet.z + highwayDirection.getZ();
+        return MovementHelper.canWalkThrough(baritone.bsi, x, feet.y, z)
+                && MovementHelper.canWalkThrough(baritone.bsi, x, feet.y + 1, z);
+    }
+
     public boolean isPlayerInPortal() {
         AABB bb = playerContext.player().getBoundingBox();
         for (BlockPos pos : BlockPos.betweenClosed((int) Math.floor(bb.minX), (int) Math.floor(bb.minY), (int) Math.floor(bb.minZ),
