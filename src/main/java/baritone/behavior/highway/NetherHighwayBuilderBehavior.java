@@ -19,6 +19,7 @@ package baritone.behavior.highway;
 
 import baritone.Baritone;
 import baritone.api.BaritoneAPI;
+import baritone.api.Settings;
 import baritone.api.behavior.INetherHighwayBuilderBehavior;
 import baritone.api.event.events.PacketEvent;
 import baritone.api.event.events.RenderEvent;
@@ -91,11 +92,16 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
     @Override
     public void build(int startX, int startZ, Vec3i direct, boolean selfSolve, boolean pave) {
-        build(startX, startZ, direct, selfSolve, pave, null);
+        build(startX, startZ, direct, selfSolve, pave, null, null);
     }
 
     @Override
     public void build(int startX, int startZ, Vec3i direct, boolean selfSolve, boolean pave, Vec3i endCoords) {
+        build(startX, startZ, direct, selfSolve, pave, endCoords, null);
+    }
+
+    @Override
+    public void build(int startX, int startZ, Vec3i direct, boolean selfSolve, boolean pave, Vec3i endCoords, Vec3i startCoords) {
         highwayContext.setEndPos(null); // a stale end would clamp the projections below
         highwayContext.setHighwayDirection(direct);
         highwayContext.setPaving(pave);
@@ -116,34 +122,18 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
         int highwayWidth = settings.highwayWidth.value;
         int highwayHeight = settings.highwayHeight.value;
-        int supportWidth = settings.highwaySupportWidth.value;
-        int supportOffset = settings.highwaySupportOffset.value;
         boolean highwayRail = settings.highwayRail.value;
-        boolean diag = Math.abs(highwayContext.highwayDirection().getX()) == Math.abs(highwayContext.highwayDirection().getZ()) && Math.abs(highwayContext.highwayDirection().getZ()) == 1;
+        boolean railLow = highwayRail && settings.highwayRailLow.value;
+        boolean railHigh = highwayRail && settings.highwayRailHigh.value;
         int highwayWidthOffset = -((Math.round(highwayWidth / 2.0f)) + 1);
         int highwayWidthLiqOffset = -(Math.round(highwayWidth / 2.0f)) - 1;
         int highwayWidthLiqOffsetRail = -(Math.round(highwayWidth / 2.0f)) - 2;
         int highwayWidthCenterOffset = 1 + (highwayWidth - 1) / 2;
 
-        ISchematic obsidSchemBot;
-        WhiteBlackSchematic topAir;
-        WhiteBlackSchematic noLavaBotSides = new WhiteBlackSchematic(1, 1, 1, Collections.singletonList(Blocks.LAVA.defaultBlockState()), Blocks.NETHERRACK.defaultBlockState(), false, true, true);
-        WhiteBlackSchematic supportNetherRack;
-        WhiteBlackSchematic sideRailSupport;
-        ISchematic sideRail;
-        if (pave)
-            sideRail = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.OBSIDIAN.defaultBlockState(), Blocks.CRYING_OBSIDIAN.defaultBlockState()), Blocks.OBSIDIAN.defaultBlockState(), true, false, false);
-        else
-            sideRail = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.OBSIDIAN.defaultBlockState(), Blocks.CRYING_OBSIDIAN.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
-
-        WhiteBlackSchematic sideRailAir = new WhiteBlackSchematic(1, 2, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
-        CompositeSchematic fullSchem = new CompositeSchematic(0, 0,0);
-
         // +X, -X, +X +Z, -X -Z
-        if ((highwayContext.highwayDirection().getZ() == 0 && (highwayContext.highwayDirection().getX() == -1 || highwayContext.highwayDirection().getX() == 1)) ||
-                (highwayContext.highwayDirection().getX() == 1 && highwayContext.highwayDirection().getZ() == 1) || (highwayContext.highwayDirection().getX() == -1 && highwayContext.highwayDirection().getZ() == -1)) {
+        if (isGroupA(highwayContext.highwayDirection())) {
             if (selfSolve) {
-                highwayContext.setOriginVector(new Vec3(0, 0, highwayWidthOffset));
+                highwayContext.setOriginVector(canonicalOriginVector(highwayContext.highwayDirection(), settings));
                 if (highwayRail) {
                     highwayContext.setLiqOriginVector(new Vec3(0, 0, highwayWidthLiqOffsetRail));
                 } else {
@@ -162,51 +152,25 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 highwayContext.seteChestEmptyShulkOriginVector(new Vec3(startX, 0, startZ - highwayWidthOffset - 1));
             }
 
-            topAir = new WhiteBlackSchematic(1, highwayHeight - 1, highwayWidth, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
             if (pave) {
-                obsidSchemBot = new WhiteBlackSchematic(1, 1, highwayWidth, Arrays.asList(Blocks.OBSIDIAN.defaultBlockState(), Blocks.CRYING_OBSIDIAN.defaultBlockState()), Blocks.OBSIDIAN.defaultBlockState(), true, false, false);
                 highwayContext.setLiqOriginVector(highwayContext.liqOriginVector().add(0, 0, 1));
                 if (highwayRail) {
                     highwayContext.setLiqCheckSchem(new WhiteBlackSchematic(1, highwayHeight - 1, highwayWidth + 2, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false));
                 } else {
                     highwayContext.setLiqCheckSchem(new WhiteBlackSchematic(1, highwayHeight - 1, highwayWidth, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false));
                 }
-
-                if (diag && highwayRail) {
-                    sideRailSupport = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.LAVA.defaultBlockState(), Blocks.FIRE.defaultBlockState()), Blocks.NETHERRACK.defaultBlockState(), false, true, true);
-                    sideRailSupport.setThrowawayFallback(Blocks.OBSIDIAN.defaultBlockState());
-                    fullSchem.put(sideRailSupport, 0, 1, 0);
-                    fullSchem.put(sideRailSupport, 0, 1, highwayWidth + 1);
-                }
             } else {
-                obsidSchemBot = new WhiteBlackSchematic(1, 1, highwayWidth, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.OBSIDIAN.defaultBlockState(), Blocks.CRYING_OBSIDIAN.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false); // Allow only air and obsidian
-                supportNetherRack = new WhiteBlackSchematic(1, 1, supportWidth, highwayContext.blackListBlocks(), Blocks.NETHERRACK.defaultBlockState(), false, true, true); // Allow everything other than air and lava
                 if (highwayRail) {
                     highwayContext.setLiqCheckSchem(new WhiteBlackSchematic(1, highwayHeight + 1, highwayWidth + 4, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false));
                 } else {
                     highwayContext.setLiqCheckSchem(new WhiteBlackSchematic(1, highwayHeight + 1, highwayWidth + 2, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false));
                 }
-                if (supportWidth + 2 <= highwayWidth) {
-                    fullSchem.put(noLavaBotSides, 0, 0, 1);
-                    fullSchem.put(noLavaBotSides, 0, 0, highwayWidth);
-                }
-                fullSchem.put(supportNetherRack, 0, 0, supportOffset);
             }
-
-            fullSchem.put(obsidSchemBot, 0, 1, 1);
-            if (highwayRail) {
-                fullSchem.put(sideRail, 0, 2, 0);
-                fullSchem.put(sideRail, 0, 2, highwayWidth + 1);
-                fullSchem.put(sideRailAir, 0, 3, 0);
-                fullSchem.put(sideRailAir, 0, 3, highwayWidth + 1);
-            }
-            fullSchem.put(topAir, 0, 2, 1);
         }
         // +Z, -Z, +X -Z, -X +Z
-        else if ((highwayContext.highwayDirection().getX() == 0 && (highwayContext.highwayDirection().getZ() == -1 || highwayContext.highwayDirection().getZ() == 1)) ||
-                (highwayContext.highwayDirection().getX() == 1 && highwayContext.highwayDirection().getZ() == -1) || (highwayContext.highwayDirection().getX() == -1 && highwayContext.highwayDirection().getZ() == 1)) {
+        else if (isGroupB(highwayContext.highwayDirection())) {
             if (selfSolve) {
-                highwayContext.setOriginVector(new Vec3(highwayWidthOffset, 0, 0));
+                highwayContext.setOriginVector(canonicalOriginVector(highwayContext.highwayDirection(), settings));
                 if (highwayRail) {
                     highwayContext.setLiqOriginVector(new Vec3(highwayWidthLiqOffsetRail, 0, 0));
                 } else {
@@ -225,55 +189,32 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 highwayContext.seteChestEmptyShulkOriginVector(new Vec3(startX - highwayWidthOffset - 1, 0, startZ));
             }
 
-            topAir = new WhiteBlackSchematic(highwayWidth, highwayHeight - 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
             if (pave) {
-                obsidSchemBot = new WhiteBlackSchematic(highwayWidth, 1, 1, Arrays.asList(Blocks.OBSIDIAN.defaultBlockState(), Blocks.CRYING_OBSIDIAN.defaultBlockState()), Blocks.OBSIDIAN.defaultBlockState(), true, false, false);
                 highwayContext.setLiqOriginVector(highwayContext.liqOriginVector().add(1, 0, 0));
                 if (highwayRail) {
                     highwayContext.setLiqCheckSchem(new WhiteBlackSchematic(highwayWidth + 2, highwayHeight - 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false));
                 } else {
                     highwayContext.setLiqCheckSchem(new WhiteBlackSchematic(highwayWidth, highwayHeight - 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false));
                 }
-
-                if (diag && highwayRail) {
-                    sideRailSupport = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.LAVA.defaultBlockState(), Blocks.FIRE.defaultBlockState()), Blocks.NETHERRACK.defaultBlockState(), false, true, true);
-                    sideRailSupport.setThrowawayFallback(Blocks.OBSIDIAN.defaultBlockState());
-                    fullSchem.put(sideRailSupport, 0, 1, 0);
-                    fullSchem.put(sideRailSupport, highwayWidth + 1, 1, 0);
-                }
             } else {
-                obsidSchemBot = new WhiteBlackSchematic(highwayWidth, 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.OBSIDIAN.defaultBlockState(), Blocks.CRYING_OBSIDIAN.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false); // Allow only air and obsidian
-                supportNetherRack = new WhiteBlackSchematic(supportWidth, 1, 1, highwayContext.blackListBlocks(), Blocks.NETHERRACK.defaultBlockState(), false, true, true); // Allow everything other than air and lava
                 if (highwayRail) {
                     highwayContext.setLiqCheckSchem(new WhiteBlackSchematic(highwayWidth + 4, highwayHeight + 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false));
                 } else {
                     highwayContext.setLiqCheckSchem(new WhiteBlackSchematic(highwayWidth + 2, highwayHeight + 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false));
                 }
-                if (supportWidth + 2 <= highwayWidth) {
-                    fullSchem.put(noLavaBotSides, 1, 0, 0);
-                    fullSchem.put(noLavaBotSides, highwayWidth, 0, 0);
-                }
-
-                fullSchem.put(supportNetherRack, supportOffset, 0, 0);
             }
-
-            fullSchem.put(obsidSchemBot, 1, 1, 0);
-            if (highwayRail) {
-                fullSchem.put(sideRail, 0, 2, 0);
-                fullSchem.put(sideRail, highwayWidth + 1, 2, 0);
-                fullSchem.put(sideRailAir, 0, 3, 0);
-                fullSchem.put(sideRailAir, highwayWidth + 1, 3, 0);
-            }
-
-            fullSchem.put(topAir, 1, 2, 0);
         }
 
-        highwayContext.setSchematic(fullSchem);
+        highwayContext.setSchematic(composeHighwaySchematic(highwayContext.highwayDirection(), pave, settings));
 
         Vec3 origin = new Vec3(highwayContext.originVector().x, highwayContext.originVector().y, highwayContext.originVector().z);
         Vec3 direction = new Vec3(highwayContext.highwayDirection().getX(), highwayContext.highwayDirection().getY(), highwayContext.highwayDirection().getZ());
-        Vec3 curPos = new Vec3(ctx.playerFeet().getX(), ctx.playerFeet().getY(), ctx.playerFeet().getZ());
-        highwayContext.setOriginBuild(highwayContext.getClosestPoint(origin, direction, curPos, LocationType.HighwayBuild));
+        // A named start replaces the feet projection wholesale: firstStartingPos then clamps every
+        // later projection to it, so a start ahead of the bot needs no special handling.
+        Vec3 startFrom = (startCoords != null)
+                ? new Vec3(startCoords.getX(), 0, startCoords.getZ())
+                : new Vec3(ctx.playerFeet().getX(), ctx.playerFeet().getY(), ctx.playerFeet().getZ());
+        highwayContext.setOriginBuild(highwayContext.getClosestPoint(origin, direction, startFrom, LocationType.HighwayBuild));
 
         highwayContext.setFirstStartingPos(new BetterBlockPos(highwayContext.originBuild()));
 
@@ -289,6 +230,10 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             Helper.HELPER.logDirect("Stopping at " + end.toString() + " (" + endSteps + " blocks ahead)");
         }
 
+        Helper.HELPER.logDirect("Profile: width=" + highwayWidth + " height=" + highwayHeight
+                + " y=" + settings.highwayLowestY.value + "/" + settings.highwayMainY.value
+                + " rails=" + (railLow ? "low" : "") + (railHigh ? "high" : "")
+                + (!railLow && !railHigh ? "none" : ""));
         Helper.HELPER.logDirect("Building from " + highwayContext.originBuild().toString());
         settings.buildRepeat.value = new Vec3i(highwayContext.highwayDirection().getX(), 0, highwayContext.highwayDirection().getZ());
         baritone.getPathingBehavior().cancelEverything();
@@ -310,6 +255,153 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         highwayContext.clearInvalidBlockFix();
         highwayContext.stopTravelTowardsEnd();
         highwayContext.transitionTo(HighwayState.Nothing);
+    }
+
+    /** +X, -X, +X+Z, -X-Z: the schematic is 1 wide in X and extends in Z; the cross-axis is Z. */
+    public static boolean isGroupA(Vec3i direction) {
+        return (direction.getZ() == 0 && (direction.getX() == -1 || direction.getX() == 1)) ||
+                (direction.getX() == 1 && direction.getZ() == 1) || (direction.getX() == -1 && direction.getZ() == -1);
+    }
+
+    /** +Z, -Z, +X-Z, -X+Z: the schematic extends in X and is 1 wide in Z; the cross-axis is X. */
+    public static boolean isGroupB(Vec3i direction) {
+        return (direction.getX() == 0 && (direction.getZ() == -1 || direction.getZ() == 1)) ||
+                (direction.getX() == 1 && direction.getZ() == -1) || (direction.getX() == -1 && direction.getZ() == 1);
+    }
+
+    /** The schematic's origin for a selfSolve build. */
+    public static Vec3 canonicalOriginVector(Vec3i direction, Settings settings) {
+        int highwayWidthOffset = -((Math.round(settings.highwayWidth.value / 2.0f)) + 1);
+        if (isGroupA(direction)) {
+            return new Vec3(0, 0, highwayWidthOffset);
+        }
+        if (isGroupB(direction)) {
+            return new Vec3(highwayWidthOffset, 0, 0);
+        }
+        throw new IllegalArgumentException("Not a highway direction: " + direction);
+    }
+
+    /**
+     * Compose the one-slice highway schematic for the given direction and mode. Pure - reads only
+     * the highway profile settings - so the nhwdump conformance dump emits exactly what the
+     * builder targets.
+     */
+    public static CompositeSchematic composeHighwaySchematic(Vec3i direction, boolean pave, Settings settings) {
+        int highwayWidth = settings.highwayWidth.value;
+        int highwayHeight = settings.highwayHeight.value;
+        int supportWidth = settings.highwaySupportWidth.value;
+        int supportOffset = settings.highwaySupportOffset.value;
+        boolean rails = settings.highwayRail.value;
+        boolean railLow = rails && settings.highwayRailLow.value;
+        boolean railHigh = rails && settings.highwayRailHigh.value;
+        boolean diag = Math.abs(direction.getX()) == Math.abs(direction.getZ()) && Math.abs(direction.getZ()) == 1;
+
+        ISchematic obsidSchemBot;
+        WhiteBlackSchematic topAir;
+        WhiteBlackSchematic noLavaBotSides = new WhiteBlackSchematic(1, 1, 1, Collections.singletonList(Blocks.LAVA.defaultBlockState()), Blocks.NETHERRACK.defaultBlockState(), false, true, true);
+        WhiteBlackSchematic supportNetherRack;
+        WhiteBlackSchematic sideRailSupport;
+        ISchematic sideRail;
+        if (pave)
+            sideRail = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.OBSIDIAN.defaultBlockState(), Blocks.CRYING_OBSIDIAN.defaultBlockState()), Blocks.OBSIDIAN.defaultBlockState(), true, false, false);
+        else
+            sideRail = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.OBSIDIAN.defaultBlockState(), Blocks.CRYING_OBSIDIAN.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
+
+        WhiteBlackSchematic sideRailAir = new WhiteBlackSchematic(1, 2, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
+        // The rail column asserted EMPTY: sideRail's cell plus sideRailAir's two above it, which is
+        // exactly the set of cells the rail component owns. Air-only whitelist, so an obsidian rail
+        // mismatches and BuilderProcess mines it.
+        WhiteBlackSchematic railClear = new WhiteBlackSchematic(1, 3, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
+        CompositeSchematic fullSchem = new CompositeSchematic(0, 0, 0);
+
+        // +X, -X, +X +Z, -X -Z
+        if (isGroupA(direction)) {
+            topAir = new WhiteBlackSchematic(1, highwayHeight - 1, highwayWidth, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
+            if (pave) {
+                obsidSchemBot = new WhiteBlackSchematic(1, 1, highwayWidth, Arrays.asList(Blocks.OBSIDIAN.defaultBlockState(), Blocks.CRYING_OBSIDIAN.defaultBlockState()), Blocks.OBSIDIAN.defaultBlockState(), true, false, false);
+
+                if (diag && (railLow || railHigh)) {
+                    sideRailSupport = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.LAVA.defaultBlockState(), Blocks.FIRE.defaultBlockState()), Blocks.NETHERRACK.defaultBlockState(), false, true, true);
+                    sideRailSupport.setThrowawayFallback(Blocks.OBSIDIAN.defaultBlockState());
+                    if (railLow) {
+                        fullSchem.put(sideRailSupport, 0, 1, 0);
+                    }
+                    if (railHigh) {
+                        fullSchem.put(sideRailSupport, 0, 1, highwayWidth + 1);
+                    }
+                }
+            } else {
+                obsidSchemBot = new WhiteBlackSchematic(1, 1, highwayWidth, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.OBSIDIAN.defaultBlockState(), Blocks.CRYING_OBSIDIAN.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false); // Allow only air and obsidian
+                supportNetherRack = new WhiteBlackSchematic(1, 1, supportWidth, HighwayContext.blackListBlocks, Blocks.NETHERRACK.defaultBlockState(), false, true, true); // Allow everything other than air and lava
+                if (supportWidth + 2 <= highwayWidth) {
+                    fullSchem.put(noLavaBotSides, 0, 0, 1);
+                    fullSchem.put(noLavaBotSides, 0, 0, highwayWidth);
+                }
+                fullSchem.put(supportNetherRack, 0, 0, supportOffset);
+            }
+
+            fullSchem.put(obsidSchemBot, 0, 1, 1);
+            if (railLow) {
+                fullSchem.put(sideRail, 0, 2, 0);
+                fullSchem.put(sideRailAir, 0, 3, 0);
+            } else if (rails) {
+                fullSchem.put(railClear, 0, 2, 0);
+            }
+            if (railHigh) {
+                fullSchem.put(sideRail, 0, 2, highwayWidth + 1);
+                fullSchem.put(sideRailAir, 0, 3, highwayWidth + 1);
+            } else if (rails) {
+                fullSchem.put(railClear, 0, 2, highwayWidth + 1);
+            }
+            fullSchem.put(topAir, 0, 2, 1);
+        }
+        // +Z, -Z, +X -Z, -X +Z
+        else if (isGroupB(direction)) {
+            topAir = new WhiteBlackSchematic(highwayWidth, highwayHeight - 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
+            if (pave) {
+                obsidSchemBot = new WhiteBlackSchematic(highwayWidth, 1, 1, Arrays.asList(Blocks.OBSIDIAN.defaultBlockState(), Blocks.CRYING_OBSIDIAN.defaultBlockState()), Blocks.OBSIDIAN.defaultBlockState(), true, false, false);
+
+                if (diag && (railLow || railHigh)) {
+                    sideRailSupport = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.LAVA.defaultBlockState(), Blocks.FIRE.defaultBlockState()), Blocks.NETHERRACK.defaultBlockState(), false, true, true);
+                    sideRailSupport.setThrowawayFallback(Blocks.OBSIDIAN.defaultBlockState());
+                    if (railLow) {
+                        fullSchem.put(sideRailSupport, 0, 1, 0);
+                    }
+                    if (railHigh) {
+                        fullSchem.put(sideRailSupport, highwayWidth + 1, 1, 0);
+                    }
+                }
+            } else {
+                obsidSchemBot = new WhiteBlackSchematic(highwayWidth, 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.OBSIDIAN.defaultBlockState(), Blocks.CRYING_OBSIDIAN.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false); // Allow only air and obsidian
+                supportNetherRack = new WhiteBlackSchematic(supportWidth, 1, 1, HighwayContext.blackListBlocks, Blocks.NETHERRACK.defaultBlockState(), false, true, true); // Allow everything other than air and lava
+                if (supportWidth + 2 <= highwayWidth) {
+                    fullSchem.put(noLavaBotSides, 1, 0, 0);
+                    fullSchem.put(noLavaBotSides, highwayWidth, 0, 0);
+                }
+
+                fullSchem.put(supportNetherRack, supportOffset, 0, 0);
+            }
+
+            fullSchem.put(obsidSchemBot, 1, 1, 0);
+            if (railLow) {
+                fullSchem.put(sideRail, 0, 2, 0);
+                fullSchem.put(sideRailAir, 0, 3, 0);
+            } else if (rails) {
+                fullSchem.put(railClear, 0, 2, 0);
+            }
+            if (railHigh) {
+                fullSchem.put(sideRail, highwayWidth + 1, 2, 0);
+                fullSchem.put(sideRailAir, highwayWidth + 1, 3, 0);
+            } else if (rails) {
+                fullSchem.put(railClear, highwayWidth + 1, 2, 0);
+            }
+
+            fullSchem.put(topAir, 1, 2, 0);
+        } else {
+            throw new IllegalArgumentException("Not a highway direction: " + direction);
+        }
+
+        return fullSchem;
     }
 
     @Override

@@ -37,11 +37,10 @@ public class Nothing extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        // Never (re)start the builder while we're below the highway walking level (e.g. down the
-        // hole dug to drop a boat through): the printer would pave the floor right over our head
-        // and seal us underneath. Climb back onto the built highway first.
-        int highwayFeetY = context.settings().highwayMainY.value + (context.paving() ? 1 : 0);
-        if (context.settings().highwayFallRecovery.value && context.playerContext().playerFeet().y < highwayFeetY) {
+        // Never (re)start the builder while we're underneath the highway (e.g. down the hole dug to
+        // drop a boat through): the printer would pave the floor right over our head and seal us
+        // underneath. Climb back onto the road first.
+        if (context.settings().highwayFallRecovery.value && context.belowBuiltHighway()) {
             BetterBlockPos target = context.computeRecoveryTarget();
             if (target != null) {
                 Helper.HELPER.logDirect("Below the highway level (y=" + context.playerContext().playerFeet().y + "), returning to " + target + " before building.");

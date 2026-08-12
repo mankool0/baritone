@@ -53,6 +53,41 @@ public class WhiteBlackSchematic extends AbstractSchematic {
         return ValidIfUnder;
     }
 
+    public enum ServerRequirement { OBSIDIAN, AIR, IGNORE }
+
+    /**
+     * How the highway coordination server models a position covered by this schematic: obsidian it
+     * requires, air it requires, or scaffolding it has no requirement for. Blacklist mode is only
+     * ever used for scaffolding, and its placed block depends on hotbar contents
+     * (getDefaultOrThrowaway), so it is not predictable anyway - the server ignores those
+     * positions entirely.
+     */
+    public ServerRequirement serverRequirement() {
+        if (!WhiteList) {
+            return ServerRequirement.IGNORE;
+        }
+
+        boolean allAir = BomList.stream()
+                .allMatch(b -> b.getBlock() == Blocks.AIR
+                        || b.getBlock() == Blocks.CAVE_AIR
+                        || b.getBlock() == Blocks.VOID_AIR);
+        if (allAir) {
+            return ServerRequirement.AIR;
+        }
+
+        boolean anyObsidian = BomList.stream()
+                .anyMatch(b -> b.getBlock() == Blocks.OBSIDIAN
+                        || b.getBlock() == Blocks.CRYING_OBSIDIAN);
+        if (anyObsidian) {
+            return ServerRequirement.OBSIDIAN;
+        }
+
+        // A whitelist schematic that is neither all-air nor obsidian-bearing means the highway
+        // profile grew something the server's model doesn't know about; silently ignoring it is
+        // exactly the divergence the conformance dump exists to prevent.
+        throw new IllegalStateException("Whitelist schematic with no server requirement mapping: " + BomList);
+    }
+
     public void setThrowawayFallback(BlockState state) {
         ThrowawayFallback = state;
     }

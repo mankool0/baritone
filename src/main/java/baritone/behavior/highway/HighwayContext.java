@@ -134,7 +134,7 @@ public class HighwayContext {
     }
 
     private final ArrayList<Rotation> floatingFixReachables = new ArrayList<>();
-    private final List<BlockState> blackListBlocks = Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.LAVA.defaultBlockState(), Blocks.FIRE.defaultBlockState(), Blocks.BROWN_MUSHROOM.defaultBlockState(), Blocks.RED_MUSHROOM.defaultBlockState(), Blocks.MAGMA_BLOCK.defaultBlockState(), Blocks.SOUL_SAND.defaultBlockState(), Blocks.SOUL_SOIL.defaultBlockState());
+    static final List<BlockState> blackListBlocks = Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.LAVA.defaultBlockState(), Blocks.FIRE.defaultBlockState(), Blocks.BROWN_MUSHROOM.defaultBlockState(), Blocks.RED_MUSHROOM.defaultBlockState(), Blocks.MAGMA_BLOCK.defaultBlockState(), Blocks.SOUL_SAND.defaultBlockState(), Blocks.SOUL_SOIL.defaultBlockState());
     private Settings settings = BaritoneAPI.getSettings();
     private State currentState;
     private HighwayState previousState = HighwayState.Nothing;
@@ -710,18 +710,64 @@ public class HighwayContext {
         return null;
     }
 
-    // True if a solid block sits in our column between head height and the highway walking space
-    public boolean hasHighwayRoofOverhead() {
+    public int highwayFeetY() {
+        return settings.highwayMainY.value + (paving ? 1 : 0);
+    }
+
+    public int highwayFloorY() {
+        return highwayFeetY() - 1;
+    }
+
+    /**
+     * True if the paved road is directly over our head. This is what separates being underneath the
+     * highway from standing in ground the printer simply hasn't mined yet: raw netherrack overhead
+     * is not a road, it's the next thing to dig, and it must never trigger a recovery.
+     */
+    public boolean roadOverhead() {
         BetterBlockPos feet = playerContext.playerFeet();
-        int highwayFeetY = settings.highwayMainY.value + (paving ? 1 : 0);
-        for (int y = feet.y + 2; y <= highwayFeetY + 1; y++) {
-            BlockState state = baritone.bsi.get0(feet.x, y, feet.z);
-            if (!(state.getBlock() instanceof AirBlock) && !(state.getBlock() instanceof LiquidBlock)
-                    && !MovementHelper.isReplaceable(feet.x, y, feet.z, state, baritone.bsi)) {
-                return true;
-            }
-        }
-        return false;
+        Block above = baritone.bsi.get0(feet.x, highwayFloorY(), feet.z).getBlock();
+        return above == Blocks.OBSIDIAN || above == Blocks.CRYING_OBSIDIAN;
+    }
+
+    /**
+     * True if the highway's walking space is open above our column, i.e. this stretch is already dug
+     * out. That's the boat pit case: we're below the highway where the floor has been cleared away,
+     * so restarting the printer would pave it shut over our head.
+     */
+    public boolean highwayWalkSpaceOpen() {
+        BetterBlockPos feet = playerContext.playerFeet();
+        return passableForRecovery(feet.x, highwayFeetY(), feet.z)
+                && passableForRecovery(feet.x, highwayFeetY() + 1, feet.z);
+    }
+
+    /** True if we're stuck below the road with it sealing us in, so we have to walk back on top of it. */
+    public boolean sealedUnderHighway() {
+        return underRoadChecksApply()
+                && playerContext.playerFeet().y < highwayFloorY()
+                && roadOverhead();
+    }
+
+    /**
+     * True if we're below the highway somewhere the printer could pave the floor in on top of us:
+     * either the road is already over our head, or we're in a pit under a dug out stretch that is
+     * still waiting to be paved.
+     */
+    public boolean belowBuiltHighway() {
+        return underRoadChecksApply()
+                && playerContext.playerFeet().y < highwayFeetY()
+                && (roadOverhead() || highwayWalkSpaceOpen());
+    }
+
+    /** A digging build lays no floor, so there is nothing that could ever pave us in. */
+    private boolean underRoadChecksApply() {
+        return paving && settings.highwayUnderRoadRecovery.value;
+    }
+
+    /** Air, liquid, or something the printer replaces - nothing that could box us in. */
+    private boolean passableForRecovery(int x, int y, int z) {
+        BlockState state = baritone.bsi.get0(x, y, z);
+        return state.getBlock() instanceof AirBlock || state.getBlock() instanceof LiquidBlock
+                || MovementHelper.isReplaceable(x, y, z, state, baritone.bsi);
     }
 
     public boolean invalidBlockFixActive() {
@@ -1051,11 +1097,9 @@ public class HighwayContext {
 
         // Fell off the highway, or got paved over while below it: recover by pathing back to a
         // built spot behind us
-        int highwayFeetY = settings.highwayMainY.value + (paving ? 1 : 0);
-        boolean fellFar = playerContext.playerFeet().y <= highwayFeetY - settings.highwayFallDetectThreshold.value;
-        boolean sealedUnder = playerContext.playerFeet().y < highwayFeetY && hasHighwayRoofOverhead();
+        boolean fellFar = playerContext.playerFeet().y <= highwayFeetY() - settings.highwayFallDetectThreshold.value;
         if (settings.highwayFallRecovery.value && currentStateEnum == HighwayState.BuildingHighway
-                && (fellFar || sealedUnder)) {
+                && (fellFar || sealedUnderHighway())) {
             Helper.HELPER.logDirect((fellFar ? "Fell off the highway" : "Trapped underneath the highway")
                     + " (y=" + playerContext.playerFeet().y + "). Recovering.");
             setPreviousState(currentStateEnum);

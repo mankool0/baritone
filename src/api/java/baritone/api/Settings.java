@@ -1834,6 +1834,20 @@ public final class Settings {
     public final Setting<Boolean> highwayRail = new Setting<>(true);
 
     /**
+     * Build the rail on the low side of the highway - the column at cross-offset 0, i.e. lower Z
+     * for +X, -X, +X+Z, -X-Z highways and lower X for +Z, -Z, +X-Z, -X+Z highways. When false the
+     * column must be EMPTY: an existing rail there is mined and none is placed. Used to open a gap
+     * where another highway crosses. Ignored when highwayRail is false (a railless road puts
+     * nothing in the rail columns and touches nothing there).
+     */
+    public final Setting<Boolean> highwayRailLow = new Setting<>(true);
+
+    /**
+     * As highwayRailLow, for the column at cross-offset highwayWidth + 1.
+     */
+    public final Setting<Boolean> highwayRailHigh = new Setting<>(true);
+
+    /**
      * If not -1 will keep this distance from the end of the highway
      * Useful for digging small tunnels quicker
      */
@@ -1857,6 +1871,14 @@ public final class Settings {
      * as having fallen off the highway and trigger fall recovery.
      */
     public final Setting<Integer> highwayFallDetectThreshold = new Setting<>(5);
+
+    /**
+     * If enabled, being underneath the road - paved in over its head, or down a hole it dug through
+     * the highway - also counts as having fallen off, so the bot walks back on top of the road
+     * before it builds. Only applies to paving builds; a digging build lays no floor to be sealed
+     * under. Disable if the check keeps sending the bot back when it isn't actually stuck.
+     */
+    public final Setting<Boolean> highwayUnderRoadRecovery = new Setting<>(true);
 
     /**
      * How many blocks behind the fall location to start looking for a standable, already-built spot
