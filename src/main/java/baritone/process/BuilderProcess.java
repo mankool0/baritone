@@ -46,6 +46,7 @@ import baritone.utils.schematic.schematica.SchematicaHelper;
 import com.google.common.collect.ImmutableSet;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.client.gui.screens.ChatScreen;
+import net.minecraft.client.gui.screens.PauseScreen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -975,7 +976,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private boolean printerUsable() {
         return ctx.player() != null
                 && ctx.minecraft().gameMode != null
-                && (ctx.minecraft().screen == null || ctx.minecraft().screen instanceof ChatScreen || ctx.minecraft().screen instanceof InventoryScreen)
+                && (ctx.minecraft().screen == null || ctx.minecraft().screen instanceof ChatScreen || ctx.minecraft().screen instanceof InventoryScreen || ctx.minecraft().screen instanceof PauseScreen)
+                && !ctx.minecraft().isPaused()
                 && ctx.player().containerMenu.getCarried().isEmpty()
                 && !ctx.player().isUsingItem()
                 && !ctx.player().isHandsBusy()
@@ -1174,7 +1176,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         // placed block can wall off the break target. Nor let placements starve breaking forever.
         boolean mayPlace = !breakSession && printerBreakStarvation < PRINTER_MAX_BREAK_STARVATION;
         PrinterAction printerAction = PrinterAction.NONE;
-        if (Baritone.settings().printer.value && printerUsable()) {
+        boolean printerReady = Baritone.settings().printer.value && printerUsable();
+        if (printerReady) {
             printerAction = printerTick(bcc, mayPlace);
         }
         if (!toBreak.isEmpty() && printerAction.placed() && !printerAction.broke()) {
@@ -1282,12 +1285,13 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         }
 
         INetherHighwayBuilderBehavior highway = baritone.getNetherHighwayBuilderBehavior();
+        boolean printerBlocked = Baritone.settings().printer.value && !printerReady;
         if (Baritone.settings().highwayEndDistance.value != -1
                 && highway.isBuildingHighwayState()
                 && !highway.isFixingInvalidBlocks()
                 && !(highway.needsLateralTraverses() && baritone.getPathingBehavior().isPathing())
                 && isSafeToCancel
-                && (printerAction.acted() || highway.isEndDistanceWalkHeld())) {
+                && (printerAction.acted() || highway.isEndDistanceWalkHeld() || printerBlocked)) {
             return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
         }
         // Aim at the strip we're standing in before anything further across the width, so a sweep
