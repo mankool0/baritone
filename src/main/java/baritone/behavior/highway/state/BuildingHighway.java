@@ -50,9 +50,13 @@ public class BuildingHighway extends State {
         }
 
         if (!context.baritone().getBuilderProcess().isActive()) {
-            Helper.HELPER.logDirect("Restarting builder");
-            context.transitionTo(HighwayState.Nothing);
-            return;
+            if (!context.travelTowardsEnd()) {
+                Helper.HELPER.logDirect("Restarting builder");
+                context.transitionTo(HighwayState.Nothing);
+                return;
+            }
+        } else {
+            context.stopTravelTowardsEnd();
         }
 
         if (context.walkBackTimer() > 120 && context.baritone().getPathingControlManager().mostRecentCommand().isPresent()) {
@@ -247,17 +251,26 @@ public class BuildingHighway extends State {
             }
 
             int blocksCheckDist = Math.max(0, tempCheckBackDist - context.settings().highwayInvalidBlockCheckMargin.value);
-            curState = context.isHighwayCorrect(startCheckPos, startCheckPosLiq, blocksCheckDist, false);
+            BlockPos blocksCheckPos = startCheckPos;
+            BlockPos blocksCheckPosLiq = startCheckPosLiq;
+            if (context.invalidBlockFixActive() && context.invalidBlockFixScanStart() != null) {
+                blocksCheckPos = context.invalidBlockFixScanStart();
+                blocksCheckPosLiq = context.invalidBlockFixScanStartLiq();
+                blocksCheckDist = context.invalidBlockFixScanDist();
+            }
+            curState = context.isHighwayCorrect(blocksCheckPos, blocksCheckPosLiq, blocksCheckDist, false);
             if (curState == HighwayBlockState.Blocks) {
                 if (!context.invalidBlockFixActive()) {
                     Helper.HELPER.logDirect("Fixing invalid blocks: " + String.join("; ", context.lastMismatches()));
-                    context.startInvalidBlockFix();
+                    context.startInvalidBlockFix(startCheckPos, startCheckPosLiq, blocksCheckDist);
                     context.transitionTo(HighwayState.Nothing);
                     context.resetTimer();
                     return;
-                } else if (context.invalidBlockFixStalled()) {
+                }
+                context.noteInvalidBlockFixProgress(context.lastMismatches());
+                if (context.invalidBlockFixStalled()) {
                     Helper.HELPER.logDirect("Invalid block fix stalled, restarting builder.");
-                    context.startInvalidBlockFix();
+                    context.startInvalidBlockFix(context.invalidBlockFixScanStart(), context.invalidBlockFixScanStartLiq(), context.invalidBlockFixScanDist());
                     context.transitionTo(HighwayState.Nothing);
                     context.resetTimer();
                     return;

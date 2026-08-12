@@ -57,6 +57,18 @@ public class WhiteBlackSchematic extends AbstractSchematic {
         ThrowawayFallback = state;
     }
 
+    public boolean coversLiquid(BlockState current) {
+        if (WhiteList || !(current.getBlock() instanceof LiquidBlock)) {
+            return false;
+        }
+        for (BlockOptionalMeta bom : BomList) {
+            if ((bom.getBlock() instanceof LiquidBlock && current.getBlock() == bom.getBlock()) || bom.matches(current)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private BlockState getDefaultOrThrowaway() {
         if (UseThrowaway) {
             List<ItemStack> inventory = BaritoneAPI.getProvider().getPrimaryBaritone().getPlayerContext().player().getInventory().items;

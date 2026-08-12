@@ -62,7 +62,12 @@ public class Nothing extends State {
         Vec3 origin = new Vec3(context.originVector().x, context.originVector().y, context.originVector().z);
         Vec3 direction = new Vec3(context.highwayDirection().getX(), context.highwayDirection().getY(), context.highwayDirection().getZ());
         Vec3 curPos = new Vec3(context.playerContext().playerFeet().getX() + (context.highwayCheckBackDistance() * -context.highwayDirection().getX()), context.playerContext().playerFeet().getY(), context.playerContext().playerFeet().getZ() + (context.highwayCheckBackDistance() * -context.highwayDirection().getZ())); // Go back a bit to clear up our mess
-        context.setOriginBuild(context.getClosestPoint(origin, direction, curPos, LocationType.HighwayBuild));
+        BetterBlockPos buildStart = context.getClosestPoint(origin, direction, curPos, LocationType.HighwayBuild);
+        BlockPos fixStart = context.invalidBlockFixScanStart();
+        if (context.invalidBlockFixActive() && fixStart != null && context.stepsAlongHighway(fixStart, buildStart) > 0) {
+            buildStart = new BetterBlockPos(fixStart);
+        }
+        context.setOriginBuild(buildStart);
 
         if (context.endPos() != null) {
             // Bound the repeat so the builder never places past the end slice; originBuild is

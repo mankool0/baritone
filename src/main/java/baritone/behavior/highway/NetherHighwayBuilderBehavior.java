@@ -307,6 +307,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         highwayContext.setStartShulkerCount(highwayContext.getShulkerCountInventory(ShulkerType.Any));
         highwayContext.setPaused(false);
         highwayContext.resetThroughWallDetection();
+        highwayContext.clearInvalidBlockFix();
+        highwayContext.stopTravelTowardsEnd();
         highwayContext.transitionTo(HighwayState.Nothing);
     }
 
@@ -319,6 +321,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         highwayContext.setRepeatCheck(false);
         wrongDimension = false;
         highwayContext.resetRecovery(); // restore any settings (e.g. allowSwimThroughLava) overridden during recovery
+        highwayContext.clearInvalidBlockFix();
+        highwayContext.stopTravelTowardsEnd();
         highwayContext.transitionTo(HighwayState.Nothing);
         setWalkForward(false);
         baritone.getPathingBehavior().cancelEverything();
@@ -406,10 +410,13 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 // override movement input installed, which ignores the real walk key entirely
                 baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, false);
             }
+            int lengthFront = highwayContext.getHighwayLengthFront();
             // a dispatched repair needs to path to a block behind us; creeping forward (and
             // steering back to the lane center) would drag the bot off that path every tick
             walk = !highwayContext.invalidBlockFixActive()
-                    && highwayContext.getHighwayLengthFront() >= settings.highwayEndDistance.value
+                    && lengthFront >= settings.highwayEndDistance.value
+                    // only creep while the build front is right in front of us
+                    && lengthFront < settings.highwayEndDistance.value + highwayContext.creepMaxOvershoot()
                     && highwayContext.canWalkOnFloorAhead()
                     // a solid at body height on an all-correct stretch is schematic-valid (the
                     // ledge of a paved section, the wall of a pocket in the floor) and will never

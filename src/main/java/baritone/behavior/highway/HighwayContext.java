@@ -153,6 +153,17 @@ public class HighwayContext {
     private Boolean recoverySwimThroughLavaSaved = null; // non-null while we've overridden allowSwimThroughLava for recovery
     private boolean invalidBlockFixActive = false;
     private int invalidBlockFixNoPathTicks = 0;
+    private BlockPos invalidBlockFixScanStart = null; // stretch the running repair was dispatched for, in build-line coords
+    private BlockPos invalidBlockFixScanStartLiq = null;
+    private int invalidBlockFixScanDist = 0;
+    private final ArrayList<String> invalidBlockFixLastMismatches = new ArrayList<>(); // mismatch snapshot of the last check, to spot progress
+    private static final int TRAVEL_STALL_TICKS = 200; // a walk that hasn't closed any distance in this long isn't going to
+    private boolean travellingToEnd = false; // walking up an already-built stretch because the builder found nothing to do
+    private Goal travelGoal = null; // the goal object we handed the custom goal process, so we only ever cancel our own walk
+    private BetterBlockPos travelTarget = null;
+    private int travelBestSteps = Integer.MAX_VALUE; // closest we've come to travelTarget, in slices
+    private int travelNoProgressTicks = 0;
+    private int travelStallCooldown = 0; // ticks to leave the walk alone after one failed to make progress
     private CompositeSchematic schematic;
     private WhiteBlackSchematic liqCheckSchem;
     private BetterBlockPos originBuild;
@@ -508,6 +519,12 @@ public class HighwayContext {
 
     public void transitionTo(HighwayState nextState) {
         Helper.HELPER.logDebug(currentState + " -> " + nextState);
+        // The travel walk belongs to BuildingHighway; never let it outlive the state that drives it,
+        // or the next state's pathing runs with our goal still set and we cancel a walk (or a builder)
+        // that isn't ours several states later.
+        if (currentState != null && currentState.getState() == HighwayState.BuildingHighway && nextState != HighwayState.BuildingHighway) {
+            stopTravelTowardsEnd();
+        }
         // Leaving the eat flow by any path: release the use key and drop the hitResult
         // suppression so they can't leak into (and act during) other states.
         if (currentState != null && GAPPLE_EAT_STATES.contains(currentState.getState())
@@ -711,15 +728,44 @@ public class HighwayContext {
         return invalidBlockFixActive;
     }
 
-    /** Mark that we've dispatched the builder to clear invalid blocks and (re)start the stall timer. */
-    public void startInvalidBlockFix() {
+    public BlockPos invalidBlockFixScanStart() {
+        return invalidBlockFixScanStart;
+    }
+
+    public BlockPos invalidBlockFixScanStartLiq() {
+        return invalidBlockFixScanStartLiq;
+    }
+
+    public int invalidBlockFixScanDist() {
+        return invalidBlockFixScanDist;
+    }
+
+    public void startInvalidBlockFix(BlockPos scanStart, BlockPos scanStartLiq, int scanDist) {
         invalidBlockFixActive = true;
+        invalidBlockFixNoPathTicks = 0;
+        invalidBlockFixScanStart = scanStart;
+        invalidBlockFixScanStartLiq = scanStartLiq;
+        invalidBlockFixScanDist = scanDist;
+        invalidBlockFixLastMismatches.clear();
+        invalidBlockFixLastMismatches.addAll(lastMismatches);
+    }
+
+    public void noteInvalidBlockFixProgress(List<String> mismatches) {
+        if (invalidBlockFixLastMismatches.equals(mismatches)) {
+            return;
+        }
+        invalidBlockFixLastMismatches.clear();
+        invalidBlockFixLastMismatches.addAll(mismatches);
         invalidBlockFixNoPathTicks = 0;
     }
 
     public void clearInvalidBlockFix() {
         invalidBlockFixActive = false;
         invalidBlockFixNoPathTicks = 0;
+        invalidBlockFixScanStart = null;
+        invalidBlockFixScanStartLiq = null;
+        invalidBlockFixScanDist = 0;
+        invalidBlockFixLastMismatches.clear();
     }
 
     /** True if the dispatched invalid-block fix has gone too long without an active path (it's stuck). */
@@ -1032,6 +1078,9 @@ public class HighwayContext {
             if (thiefHuntFailCooldown == 0) {
                 thiefHuntIgnoredThief = null;
             }
+        }
+        if (travelStallCooldown > 0) {
+            travelStallCooldown--;
         }
 
         if (invalidBlockFixActive) {
@@ -2468,7 +2517,34 @@ public class HighwayContext {
         return closestBlock;
     }
 
+    /**
+     * How far past the stand-off distance the build front may sit before creeping stops making sense.
+     * Within it the creep is just trailing the printer a block at a time, which is all it is for; the
+     * printer can only work about a reach ahead of us, so anything further is travel and the pathfinder
+     * does travel better than a held walk key.
+     */
+    public int creepMaxOvershoot() {
+        return 2 * (int) Math.ceil(settings.blockReachDistance.value);
+    }
+
     public int getHighwayLengthFront() {
+        // scan far enough that the configured stand-off distance is actually reachable, and past it far
+        // enough that the caller can tell "the front is right there" from "the front is a hike away"
+        return scanFrontLength(Math.max(10, settings.highwayEndDistance.value + creepMaxOvershoot()), false);
+    }
+
+    /**
+     * Slices ahead of us we have actually seen built, stopping at the first slice whose chunks aren't
+     * loaded instead of counting it as built. That is the built front, and it is as far as walking
+     * anywhere is safe: past it the highway is either unknown or missing, and pathing over missing
+     * highway makes the pathfinder bridge with throwaway netherrack that the printer then has to
+     * break out again.
+     */
+    public int builtSlicesAhead(int maxScan) {
+        return scanFrontLength(maxScan, true);
+    }
+
+    private int scanFrontLength(int scanLength, boolean stopAtUnloaded) {
         Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
         Vec3 curPosPlayer = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
         BlockPos startCheckPos = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z), direction, curPosPlayer, LocationType.HighwayBuild);
@@ -2487,8 +2563,6 @@ public class HighwayContext {
         int crossLo = Math.max(0, lateral - corridorReach);
         int crossHi = Math.min(crossLen - 1, lateral + corridorReach);
 
-        // scan far enough that the configured stand-off distance is actually reachable
-        int scanLength = Math.max(10, settings.highwayEndDistance.value);
         int maxResult = scanLength; // an all-correct scan means "at least this much built ahead"
         if (endPos != null) {
             int stepsToEnd = stepsAlongHighway(startCheckPos, endPos);
@@ -2516,29 +2590,106 @@ public class HighwayContext {
                         if (!schematic.inSchematic(x, y, z, current)) {
                             continue;
                         }
-                        if (baritone.bsi.worldContainsLoadedChunk(blockX, blockZ)) { // check if its in render distance, not if its in cache
-                            // we can directly observe this block, it is in render distance
-
-                            ISchematic ourSchem = schematic.getSchematic(x, y, z, current).schematic;
-                            if (ourSchem instanceof WhiteBlackSchematic && ((WhiteBlackSchematic) ourSchem).isValidIfUnder() &&
-                                    MovementHelper.isBlockNormalCube(playerContext.world().getBlockState(new BlockPos(blockX, blockY + 1, blockZ)))) {
-                                continue;
-                            }
-
-                            if (!schematic.desiredState(x, y, z, current, this.approxPlaceable).equals(current)) {
+                        if (!baritone.bsi.worldContainsLoadedChunk(blockX, blockZ)) {
+                            if (stopAtUnloaded) {
                                 return i;
                             }
+                            continue;
+                        }
+                        // we can directly observe this block, it is in render distance
 
+                        ISchematic ourSchem = schematic.getSchematic(x, y, z, current).schematic;
+                        if (ourSchem instanceof WhiteBlackSchematic && ((WhiteBlackSchematic) ourSchem).isValidIfUnder() &&
+                                MovementHelper.isBlockNormalCube(playerContext.world().getBlockState(new BlockPos(blockX, blockY + 1, blockZ)))) {
+                            continue;
                         }
 
+                        if (!schematic.desiredState(x, y, z, current, this.approxPlaceable).equals(current)) {
+                            return i;
+                        }
                     }
                 }
             }
         }
 
-        // the whole scanned stretch is correct; report its length rather than 0 so the walk-creep
-        // keeps moving over long pre-built sections and stops the right distance from the end
+        // the whole scanned stretch is correct; report its length rather than 0. For the walk-creep
+        // that reads as "the front is further off than creeping is for", and for the travel walk it
+        // is how far up the highway it may head in one hop.
         return maxResult;
+    }
+
+    public boolean travelTowardsEnd() {
+        if (endPos == null || invalidBlockFixActive()) {
+            stopTravelTowardsEnd();
+            return false;
+        }
+        if (travellingToEnd) {
+            boolean ours = travelGoal != null && travelTarget != null && baritone.getCustomGoalProcess().isActive()
+                    && baritone.getCustomGoalProcess().getGoal() == travelGoal;
+            if (!ours) {
+                // arrived, or something else took the wheel: let the builder look at what we loaded
+                stopTravelTowardsEnd();
+                return false;
+            }
+            int remaining = stepsAlongHighway(playerContext.playerFeet(), travelTarget);
+            if (remaining < travelBestSteps) {
+                travelBestSteps = remaining;
+                travelNoProgressTicks = 0;
+                return true; // still closing in
+            }
+            if (++travelNoProgressTicks <= TRAVEL_STALL_TICKS) {
+                return true;
+            }
+            Helper.HELPER.logDirect("Walk to " + travelTarget + " hasn't gotten any closer in " + TRAVEL_STALL_TICKS + " ticks, handing it back to the builder.");
+            stopTravelTowardsEnd();
+            travelStallCooldown = TRAVEL_STALL_TICKS;
+            return false;
+        }
+        if (travelStallCooldown > 0) {
+            return false;
+        }
+
+        Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
+        Vec3 feetVec = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
+        BetterBlockPos feetSlice = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z), direction, feetVec, LocationType.HighwayBuild);
+
+        int hop = builtSlicesAhead(Math.max(32, playerContext.minecraft().options.renderDistance().get() * 16)) - 1
+                - Math.max(0, settings.highwayEndDistance.value);
+        hop = Math.min(hop, stepsAlongHighway(feetSlice, endPos));
+        if (hop <= 0) {
+            return false;
+        }
+        travelTarget = laneOnSlice(feetSlice.offset(hop * highwayDirection.getX(), 0, hop * highwayDirection.getZ()));
+        travelGoal = new GoalBlock(travelTarget);
+        travelBestSteps = stepsAlongHighway(playerContext.playerFeet(), travelTarget);
+        travelNoProgressTicks = 0;
+        travellingToEnd = true;
+        Helper.HELPER.logDirect("Nothing left to build within render distance, walking to " + travelTarget + " to load more of the highway.");
+        baritone.getCustomGoalProcess().setGoalAndPath(travelGoal);
+        return true;
+    }
+
+    public void stopTravelTowardsEnd() {
+        if (!travellingToEnd) {
+            return;
+        }
+        travellingToEnd = false;
+        travelTarget = null;
+        travelBestSteps = Integer.MAX_VALUE;
+        travelNoProgressTicks = 0;
+        if (travelGoal != null && baritone.getCustomGoalProcess().getGoal() == travelGoal) {
+            baritone.getCustomGoalProcess().onLostControl();
+            baritone.getPathingBehavior().cancelSegmentIfSafe();
+        }
+        travelGoal = null;
+    }
+
+    private BetterBlockPos laneOnSlice(BlockPos buildLinePos) {
+        Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
+        BetterBlockPos lane = getClosestPoint(new Vec3(backPathOriginVector.x, backPathOriginVector.y, backPathOriginVector.z),
+                direction, new Vec3(buildLinePos.getX(), buildLinePos.getY(), buildLinePos.getZ()), LocationType.ShulkerEchestInteraction);
+        int off = stepsAlongHighway(lane, buildLinePos);
+        return off == 0 ? lane : new BetterBlockPos(lane.offset(off * highwayDirection.getX(), 0, off * highwayDirection.getZ()));
     }
 
     public boolean isHighwayEndComplete() {
@@ -2562,7 +2713,7 @@ public class HighwayContext {
     }
 
     private boolean isStretchLoaded(BlockPos startPos, int widthX, int lengthZ, int distanceToCheck) {
-        for (int i = 1; i < distanceToCheck; i++) {
+        for (int i = distanceToCheck - 1; i >= 1; i--) {
             BlockPos curPos = startPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
             for (int z = 0; z < lengthZ; z++) {
                 for (int x = 0; x < widthX; x++) {
@@ -2855,8 +3006,13 @@ public class HighwayContext {
                                 if (desiredState.getBlock() instanceof AirBlock && Baritone.settings().buildIgnoreBlocks.value.contains(current.getBlock())) {
                                     continue;
                                 }
-                                // Never should be liquids
-                                if (current.getBlock() instanceof LiquidBlock) {
+                                // Never should be liquids, except where the schematic covers them with a
+                                // placed block (the support row under the floor, the diagonal rail supports).
+                                // Those are ordinary build work: the liquid removal cannot even see them,
+                                // since its scan starts at the walking level, so routing there just
+                                // bounces between LiquidRemovalPrep and a builder restart forever.
+                                if (current.getBlock() instanceof LiquidBlock
+                                        && !(ourSchem instanceof WhiteBlackSchematic && ((WhiteBlackSchematic) ourSchem).coversLiquid(current))) {
                                     renderLockBuilding.unlock();
                                     return HighwayBlockState.Liquids;
                                 } else {
