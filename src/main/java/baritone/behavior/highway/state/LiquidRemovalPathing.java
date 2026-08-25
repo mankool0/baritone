@@ -29,7 +29,6 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.AirBlock;
 import net.minecraft.world.level.block.Block;
@@ -44,6 +43,9 @@ import java.util.Optional;
 public class LiquidRemovalPathing extends State {
     private static final int AIM_WAIT_MAX = 10;
     private static final int AIM_RECOVERY_TICKS = 30;
+
+    private static final int FILL_NONE = -1;
+    private static final int FILL_PENDING = -2;
 
     private int aimWaitTicks = 0;
 
@@ -176,18 +178,16 @@ public class LiquidRemovalPathing extends State {
             // keep crouching through the aim/place ticks
             context.baritone().getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
 
-            int netherRackSlot = context.putItemHotbar(Item.getId(Blocks.NETHERRACK.asItem()));
-            if (netherRackSlot == -1) {
-                Helper.HELPER.logDirect("Error getting netherrack slot");
+            int fillSlot = selectFillBlock(context);
+            if (fillSlot == FILL_NONE) {
+                Helper.HELPER.logDirect("Error getting a block to fill liquids with");
                 context.transitionTo(HighwayState.Nothing);
                 return;
             }
-
-
-            ItemStack stack = context.playerContext().player().getInventory().items.get(netherRackSlot);
-            if (Item.getId(stack.getItem()) == Item.getId(Blocks.NETHERRACK.asItem())) {
-                context.playerContext().player().getInventory().selected = netherRackSlot;
+            if (fillSlot == FILL_PENDING) {
+                return; // hotbar swap hasn't landed yet, place on a later tick
             }
+
             if (context.place(fillTarget, (float) context.playerContext().playerController().getBlockReachDistance(), !throughWalls, false, InteractionHand.MAIN_HAND) == HighwayContext.PlaceResult.Placed) {
                 if (throughWalls) {
                     context.noteThroughWallPlace(fillTarget);
@@ -257,14 +257,14 @@ public class LiquidRemovalPathing extends State {
                     // placing floor below feet means there are holes around us, stay
                     // crouched for the whole aim/place sequence
                     context.baritone().getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
-                    int netherRackSlot = context.putItemHotbar(Item.getId(Blocks.NETHERRACK.asItem()));
-                    if (netherRackSlot == -1) {
-                        Helper.HELPER.logDirect("Error getting netherrack slot");
+                    int fillSlot = selectFillBlock(context);
+                    if (fillSlot == FILL_NONE) {
+                        Helper.HELPER.logDirect("Error getting a block to fill liquids with");
                         context.transitionTo(HighwayState.Nothing);
                         return;
                     }
-                    if (Item.getId(context.playerContext().player().getInventory().items.get(netherRackSlot).getItem()) == Item.getId(Blocks.NETHERRACK.asItem())) {
-                        context.playerContext().player().getInventory().selected = netherRackSlot;
+                    if (fillSlot == FILL_PENDING) {
+                        return; // hotbar swap hasn't landed yet, place on a later tick
                     }
 
                     double lastX = context.playerContext().getPlayerEntity().getXLast();
@@ -412,6 +412,18 @@ public class LiquidRemovalPathing extends State {
         }
 
         //timer = 0;
+    }
+
+    private static int selectFillBlock(HighwayContext context) {
+        int slot = context.putAcceptableThrowawayHotbar();
+        if (slot == -1) {
+            return FILL_NONE;
+        }
+        if (slot >= 9) {
+            return FILL_PENDING;
+        }
+        context.playerContext().player().getInventory().selected = slot;
+        return slot;
     }
 
     private static boolean hasLiquidNeighbor(HighwayContext context, BlockPos pos) {

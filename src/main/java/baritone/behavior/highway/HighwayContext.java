@@ -1318,6 +1318,17 @@ public class HighwayContext {
         return -1;
     }
 
+    public int getItemSlotHotbar(int itemId) {
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = playerContext.player().getInventory().items.get(i);
+            if (Item.getId(stack.getItem()) == itemId) {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
     public int getItemSlotNoHotbar(int itemId) {
         for (int i = 9; i < 36; i++) {
             ItemStack stack = playerContext.player().getInventory().items.get(i);
@@ -3523,6 +3534,12 @@ public class HighwayContext {
 
     /** Puts the first acceptableThrowawayItems block we carry onto the hotbar; returns its slot or -1. */
     public int putAcceptableThrowawayHotbar() {
+        for (Item throwawayItem : settings.acceptableThrowawayItems.value) {
+            int slot = getItemSlotHotbar(Item.getId(throwawayItem));
+            if (slot != -1) {
+                return slot;
+            }
+        }
         for (Item throwawayItem : settings.acceptableThrowawayItems.value) {
             int slot = putItemHotbar(Item.getId(throwawayItem));
             if (slot != -1) {
