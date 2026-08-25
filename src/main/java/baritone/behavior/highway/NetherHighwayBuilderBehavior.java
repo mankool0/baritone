@@ -103,6 +103,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     @Override
     public void build(int startX, int startZ, Vec3i direct, boolean selfSolve, boolean pave, Vec3i endCoords, Vec3i startCoords) {
         highwayContext.setEndPos(null); // a stale end would clamp the projections below
+        highwayContext.setFirstStartingPos(null); // and a stale start from a paused leg would too, under the NEW direction
         highwayContext.setHighwayDirection(direct);
         highwayContext.setPaving(pave);
         highwayContext.setCachedHealth(ctx.player().getHealth());

@@ -1253,15 +1253,6 @@ public class HighwayContext {
             case SideStorage -> settings.highwayEmptyShulkEchestY.value;
         };
 
-        // Never allow points behind the original starting location
-        if (firstStartingPos != null &&
-                ((direction.z == -1 && point.z > firstStartingPos.z) || // NW, N, NE
-                        (direction.z == 1 && point.z < firstStartingPos.z) || // SE, S, SW
-                        (direction.x == -1 && direction.z == 0 && point.x > firstStartingPos.x) || // W
-                        (direction.x == 1 && direction.z == 0 && point.x < firstStartingPos.x))) { // E
-            point = new Vec3(firstStartingPos.getX(), firstStartingPos.getY(), firstStartingPos.getZ());
-        }
-
         // Project onto the highway line, but round the along-line step count once and derive both
         // coordinates from it in integer space. Rounding x and z independently after a double
         // projection can disagree on half-integer results and return a point one block off the
@@ -1275,7 +1266,15 @@ public class HighwayContext {
             return new BetterBlockPos((int) ox, yLevel, (int) oz);
         }
         long steps = Math.round(((point.x - ox) * dirX + (point.z - oz) * dirZ) / lenSq);
-        // Mirror of the firstStartingPos clamp above: never allow points past the set end
+        // Never allow points behind the original starting location. Clamped in step
+        // space, after projection: the raw-coordinate test this replaces read
+        // laterally offset points (a parallel lane, a diagonal's cross component)
+        // as behind and snapped them onto the start.
+        if (firstStartingPos != null) {
+            long startSteps = Math.round(((firstStartingPos.getX() - ox) * dirX + (firstStartingPos.getZ() - oz) * dirZ) / (double) lenSq);
+            steps = Math.max(steps, startSteps);
+        }
+        // Mirror of the firstStartingPos clamp: never allow points past the set end
         if (endPos != null) {
             long endSteps = dirX != 0 ? (endPos.getX() - ox) * dirX : (endPos.getZ() - oz) * dirZ;
             steps = Math.min(steps, endSteps);

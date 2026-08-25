@@ -79,9 +79,15 @@ public class HighwayBuilderCommands {
 
                 int origX = -69;
                 int origZ = -69;
-                if (!selfSolve && args.has(2)) {
-                    origX = args.getAsOrDefault(Integer.class, -69);
-                    origZ = args.getAsOrDefault(Integer.class, -69);
+                if (!selfSolve) {
+                    // getAsOrDefault leaves a non-integer token in place, so a missing pair
+                    // used to fall through as (-69, -69) and anchor the road there.
+                    if (!args.has(2) || isStartKeyword(args.peekString())) {
+                        logDirect("selfSolve=false needs <origX> <origZ> before the end coordinates");
+                        return;
+                    }
+                    origX = args.getAs(Integer.class);
+                    origZ = args.getAs(Integer.class);
                 }
                 logDirect("origX: " + origX + " origZ: " + origZ);
 
