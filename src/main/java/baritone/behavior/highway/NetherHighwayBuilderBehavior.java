@@ -284,7 +284,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
     /**
      * Compose the one-slice highway schematic for the given direction and mode. Pure - reads only
-     * the highway profile settings - so the nhwdump conformance dump emits exactly what the
+     * the highway profile settings - so HighwayConformanceDump emits exactly what the
      * builder targets.
      */
     public static CompositeSchematic composeHighwaySchematic(Vec3i direction, boolean pave, Settings settings) {
