@@ -57,7 +57,8 @@ public class FarmingEnderChest extends State {
         BlockState state = context.playerContext().world().getBlockState(context.placeLoc());
         boolean chestVisible = !(state.getBlock() instanceof AirBlock);
         boolean validPick = HighwayContext.validPicksList.contains(context.playerContext().player().getItemInHand(InteractionHand.MAIN_HAND).getItem());
-        boolean pipelining = validPick && context.instantMineCalibrated()
+        boolean instantMine = context.settings().highwayEnderChestInstantMine.value;
+        boolean pipelining = instantMine && validPick && context.instantMineCalibrated()
                 && context.lastEchestPlaceTick() == context.playerContext().player().tickCount - 1;
 
         if (chestVisible) {
@@ -66,10 +67,13 @@ public class FarmingEnderChest extends State {
             }
 
             // First chest of the session so break it the legitimate way (real client mining) so
-            // the server's destroy target is set
-            if (!context.instantMineCalibrated()) {
+            // the server's destroy target is set. With instant mining off every chest goes this
+            // way and the destroy target is never reused.
+            if (!instantMine || !context.instantMineCalibrated()) {
                 if (context.calibrationBreakTick(context.placeLoc())) {
-                    context.setInstantMineCalibrated(true);
+                    if (instantMine) {
+                        context.setInstantMineCalibrated(true);
+                    }
                     context.setEchestPlacedServerSide(false);
                 }
                 return;

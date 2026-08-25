@@ -1674,6 +1674,13 @@ public final class Settings {
     public final Setting<Integer> highwayEnderChestsToHave = new Setting<>(64);
 
     /**
+     * Break the placed ender chests instantly while farming obsidian, by reusing the server's
+     * destroy target from one real break instead of mining each chest out. Turn this off to mine
+     * every ender chest normally.
+     */
+    public final Setting<Boolean> highwayEnderChestInstantMine = new Setting<>(true);
+
+    /**
      * Max search distance for obsidian after mining ender chests
      */
     public final Setting<Double> highwayObsidianMaxSearchDist = new Setting<>(6D);
