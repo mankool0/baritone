@@ -91,6 +91,21 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     }
 
     @Override
+    public boolean hasCustomPattern() {
+        return highwayContext.pattern().isCustom();
+    }
+
+    @Override
+    public Vec3i repeatAdvance(BlockPos currentOrigin) {
+        return highwayContext.repeatAdvance(currentOrigin);
+    }
+
+    @Override
+    public ISchematic schematicForOrigin(BlockPos origin) {
+        return highwayContext.hasPatternSchematics() ? highwayContext.schematicForOrigin(origin) : null;
+    }
+
+    @Override
     public void build(int startX, int startZ, Vec3i direct, boolean selfSolve, boolean pave) {
         build(startX, startZ, direct, selfSolve, pave, null, null);
     }
@@ -104,8 +119,27 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     public void build(int startX, int startZ, Vec3i direct, boolean selfSolve, boolean pave, Vec3i endCoords, Vec3i startCoords) {
         highwayContext.setEndPos(null); // a stale end would clamp the projections below
         highwayContext.setFirstStartingPos(null); // and a stale start from a paused leg would too, under the NEW direction
+
+        HighwayPattern parsedPattern;
+        try {
+            parsedPattern = HighwayPattern.parse(settings.highwayPattern.value, direct);
+        } catch (IllegalArgumentException e) {
+            Helper.HELPER.logDirect("highwayPattern rejected: " + e.getMessage());
+            stop();
+            return;
+        }
+        if (parsedPattern.isCustom()) {
+            // The pattern owns the angle; the direction only supplies the two signs, so a longer
+            // vector would just desync the pieces that still read it (the diagonal rail supports,
+            // the schematic group table, canonicalOriginVector).
+            direct = new Vec3i(Integer.signum(direct.getX()), 0, Integer.signum(direct.getZ()));
+        }
         highwayContext.setHighwayDirection(direct);
         highwayContext.setPaving(pave);
+        highwayContext.setPattern(parsedPattern);
+        if (parsedPattern.isCustom()) {
+            Helper.HELPER.logDirect("Angled highway pattern: " + parsedPattern.describe());
+        }
         highwayContext.setCachedHealth(ctx.player().getHealth());
         highwayContext.setCachedAbsorption(ctx.player().getAbsorptionAmount());
         startDimension = ctx.world().dimension();
@@ -131,10 +165,15 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         int highwayWidthLiqOffsetRail = -(Math.round(highwayWidth / 2.0f)) - 2;
         int highwayWidthCenterOffset = 1 + (highwayWidth - 1) / 2;
 
+        // Custom patterns pick the layout by their driving axis: the cross-section must span the
+        // jog axis. Classic builds keep the legacy direction table.
+        boolean groupA = parsedPattern.isCustom() ? parsedPattern.majorIsX() : isGroupA(highwayContext.highwayDirection());
+        boolean groupB = !groupA && (parsedPattern.isCustom() || isGroupB(highwayContext.highwayDirection()));
+
         // +X, -X, +X +Z, -X -Z
-        if (isGroupA(highwayContext.highwayDirection())) {
+        if (groupA) {
             if (selfSolve) {
-                highwayContext.setOriginVector(canonicalOriginVector(highwayContext.highwayDirection(), settings));
+                highwayContext.setOriginVector(canonicalOriginVector(groupA, settings));
                 if (highwayRail) {
                     highwayContext.setLiqOriginVector(new Vec3(0, 0, highwayWidthLiqOffsetRail));
                 } else {
@@ -169,9 +208,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             }
         }
         // +Z, -Z, +X -Z, -X +Z
-        else if (isGroupB(highwayContext.highwayDirection())) {
+        else if (groupB) {
             if (selfSolve) {
-                highwayContext.setOriginVector(canonicalOriginVector(highwayContext.highwayDirection(), settings));
+                highwayContext.setOriginVector(canonicalOriginVector(groupA, settings));
                 if (highwayRail) {
                     highwayContext.setLiqOriginVector(new Vec3(highwayWidthLiqOffsetRail, 0, 0));
                 } else {
@@ -206,7 +245,12 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             }
         }
 
-        highwayContext.setSchematic(composeHighwaySchematic(highwayContext.highwayDirection(), pave, settings));
+        highwayContext.setSchematic(composeHighwaySchematic(highwayContext.highwayDirection(), groupA, groupB, pave, settings));
+        // Rails are the one component whose cells differ between slices that share a major
+        // coordinate, so an angled build with rails needs the per-slice cross-sections.
+        highwayContext.setPatternSchematics(parsedPattern.isCustom() && highwayRail
+                ? composePatternSchematics(highwayContext.highwayDirection(), groupA, groupB, pave, settings)
+                : null);
 
         Vec3 origin = new Vec3(highwayContext.originVector().x, highwayContext.originVector().y, highwayContext.originVector().z);
         Vec3 direction = new Vec3(highwayContext.highwayDirection().getX(), highwayContext.highwayDirection().getY(), highwayContext.highwayDirection().getZ());
@@ -272,14 +316,24 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
     /** The schematic's origin for a selfSolve build. */
     public static Vec3 canonicalOriginVector(Vec3i direction, Settings settings) {
-        int highwayWidthOffset = -((Math.round(settings.highwayWidth.value / 2.0f)) + 1);
         if (isGroupA(direction)) {
-            return new Vec3(0, 0, highwayWidthOffset);
+            return canonicalOriginVector(true, settings);
         }
         if (isGroupB(direction)) {
-            return new Vec3(highwayWidthOffset, 0, 0);
+            return canonicalOriginVector(false, settings);
         }
         throw new IllegalArgumentException("Not a highway direction: " + direction);
+    }
+
+    /**
+     * The schematic's origin for a selfSolve build, with the layout chosen explicitly. A custom
+     * pattern picks its group from its own driving axis, not from the direction table, and every
+     * parallel line has to agree on that choice: they are offset from each other on the cross axis
+     * only, and the slice indexing relies on their driving-axis origin components matching.
+     */
+    public static Vec3 canonicalOriginVector(boolean groupA, Settings settings) {
+        int highwayWidthOffset = -((Math.round(settings.highwayWidth.value / 2.0f)) + 1);
+        return groupA ? new Vec3(0, 0, highwayWidthOffset) : new Vec3(highwayWidthOffset, 0, 0);
     }
 
     /**
@@ -288,6 +342,39 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
      * builder targets.
      */
     public static CompositeSchematic composeHighwaySchematic(Vec3i direction, boolean pave, Settings settings) {
+        return composeHighwaySchematic(direction, isGroupA(direction), isGroupB(direction), pave, settings);
+    }
+
+    /**
+     * @param groupA layout with the cross-section spanning Z (X-driving); for custom patterns the
+     *               grouping follows the pattern's major axis rather than the legacy direction table
+     * @param groupB layout with the cross-section spanning X (Z-driving)
+     */
+    public static CompositeSchematic composeHighwaySchematic(Vec3i direction, boolean groupA, boolean groupB, boolean pave, Settings settings) {
+        return composeHighwaySchematic(direction, groupA, groupB, pave, settings, true, true);
+    }
+
+    /**
+     * The four cross-sections an angled build alternates between, indexed by
+     * {@code (lowRail ? 1 : 0) | (highRail ? 2 : 0)}. Slices that share a major coordinate overlap on
+     * the cross axis, and only the outermost of them may carry the rail on that side - see
+     * {@link HighwayPattern#ownsLowRail}. All four report the same dimensions, so callers can size
+     * their loops against any of them and query the rest cell by cell.
+     */
+    public static CompositeSchematic[] composePatternSchematics(Vec3i direction, boolean groupA, boolean groupB, boolean pave, Settings settings) {
+        CompositeSchematic[] variants = new CompositeSchematic[4];
+        for (int bits = 0; bits < variants.length; bits++) {
+            variants[bits] = composeHighwaySchematic(direction, groupA, groupB, pave, settings, (bits & 1) != 0, (bits & 2) != 0);
+        }
+        return variants;
+    }
+
+    /**
+     * @param lowRailHere  emit the rail column at cross offset 0 (the {@code highwayRailLow} side)
+     * @param highRailHere emit the rail column at cross offset width+1
+     */
+    public static CompositeSchematic composeHighwaySchematic(Vec3i direction, boolean groupA, boolean groupB, boolean pave, Settings settings,
+                                                            boolean lowRailHere, boolean highRailHere) {
         int highwayWidth = settings.highwayWidth.value;
         int highwayHeight = settings.highwayHeight.value;
         int supportWidth = settings.highwaySupportWidth.value;
@@ -313,10 +400,19 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         // exactly the set of cells the rail component owns. Air-only whitelist, so an obsidian rail
         // mismatches and BuilderProcess mines it.
         WhiteBlackSchematic railClear = new WhiteBlackSchematic(1, 3, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
-        CompositeSchematic fullSchem = new CompositeSchematic(0, 0, 0);
+        // A slice that hands one of its rail columns to a neighbour still reports the full
+        // cross-section: callers size their loops against one variant and query the others cell by
+        // cell, and the builder's own bounds must not shrink under it when the phase changes.
+        CompositeSchematic fullSchem;
+        if (rails && !(lowRailHere && highRailHere)) {
+            CompositeSchematic complete = composeHighwaySchematic(direction, groupA, groupB, pave, settings, true, true);
+            fullSchem = new CompositeSchematic(complete.widthX(), complete.heightY(), complete.lengthZ());
+        } else {
+            fullSchem = new CompositeSchematic(0, 0, 0);
+        }
 
         // +X, -X, +X +Z, -X -Z
-        if (isGroupA(direction)) {
+        if (groupA) {
             topAir = new WhiteBlackSchematic(1, highwayHeight - 1, highwayWidth, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
             if (pave) {
                 obsidSchemBot = new WhiteBlackSchematic(1, 1, highwayWidth, Arrays.asList(Blocks.OBSIDIAN.defaultBlockState(), Blocks.CRYING_OBSIDIAN.defaultBlockState()), Blocks.OBSIDIAN.defaultBlockState(), true, false, false);
@@ -324,10 +420,10 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 if (diag && (railLow || railHigh)) {
                     sideRailSupport = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.LAVA.defaultBlockState(), Blocks.FIRE.defaultBlockState()), Blocks.NETHERRACK.defaultBlockState(), false, true, true);
                     sideRailSupport.setThrowawayFallback(Blocks.OBSIDIAN.defaultBlockState());
-                    if (railLow) {
+                    if (railLow && lowRailHere) {
                         fullSchem.put(sideRailSupport, 0, 1, 0);
                     }
-                    if (railHigh) {
+                    if (railHigh && highRailHere) {
                         fullSchem.put(sideRailSupport, 0, 1, highwayWidth + 1);
                     }
                 }
@@ -342,22 +438,26 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             }
 
             fullSchem.put(obsidSchemBot, 0, 1, 1);
-            if (railLow) {
-                fullSchem.put(sideRail, 0, 2, 0);
-                fullSchem.put(sideRailAir, 0, 3, 0);
-            } else if (rails) {
-                fullSchem.put(railClear, 0, 2, 0);
+            if (lowRailHere) {
+                if (railLow) {
+                    fullSchem.put(sideRail, 0, 2, 0);
+                    fullSchem.put(sideRailAir, 0, 3, 0);
+                } else if (rails) {
+                    fullSchem.put(railClear, 0, 2, 0);
+                }
             }
-            if (railHigh) {
-                fullSchem.put(sideRail, 0, 2, highwayWidth + 1);
-                fullSchem.put(sideRailAir, 0, 3, highwayWidth + 1);
-            } else if (rails) {
-                fullSchem.put(railClear, 0, 2, highwayWidth + 1);
+            if (highRailHere) {
+                if (railHigh) {
+                    fullSchem.put(sideRail, 0, 2, highwayWidth + 1);
+                    fullSchem.put(sideRailAir, 0, 3, highwayWidth + 1);
+                } else if (rails) {
+                    fullSchem.put(railClear, 0, 2, highwayWidth + 1);
+                }
             }
             fullSchem.put(topAir, 0, 2, 1);
         }
         // +Z, -Z, +X -Z, -X +Z
-        else if (isGroupB(direction)) {
+        else if (groupB) {
             topAir = new WhiteBlackSchematic(highwayWidth, highwayHeight - 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
             if (pave) {
                 obsidSchemBot = new WhiteBlackSchematic(highwayWidth, 1, 1, Arrays.asList(Blocks.OBSIDIAN.defaultBlockState(), Blocks.CRYING_OBSIDIAN.defaultBlockState()), Blocks.OBSIDIAN.defaultBlockState(), true, false, false);
@@ -365,10 +465,10 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 if (diag && (railLow || railHigh)) {
                     sideRailSupport = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.LAVA.defaultBlockState(), Blocks.FIRE.defaultBlockState()), Blocks.NETHERRACK.defaultBlockState(), false, true, true);
                     sideRailSupport.setThrowawayFallback(Blocks.OBSIDIAN.defaultBlockState());
-                    if (railLow) {
+                    if (railLow && lowRailHere) {
                         fullSchem.put(sideRailSupport, 0, 1, 0);
                     }
-                    if (railHigh) {
+                    if (railHigh && highRailHere) {
                         fullSchem.put(sideRailSupport, highwayWidth + 1, 1, 0);
                     }
                 }
@@ -384,17 +484,21 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             }
 
             fullSchem.put(obsidSchemBot, 1, 1, 0);
-            if (railLow) {
-                fullSchem.put(sideRail, 0, 2, 0);
-                fullSchem.put(sideRailAir, 0, 3, 0);
-            } else if (rails) {
-                fullSchem.put(railClear, 0, 2, 0);
+            if (lowRailHere) {
+                if (railLow) {
+                    fullSchem.put(sideRail, 0, 2, 0);
+                    fullSchem.put(sideRailAir, 0, 3, 0);
+                } else if (rails) {
+                    fullSchem.put(railClear, 0, 2, 0);
+                }
             }
-            if (railHigh) {
-                fullSchem.put(sideRail, highwayWidth + 1, 2, 0);
-                fullSchem.put(sideRailAir, highwayWidth + 1, 3, 0);
-            } else if (rails) {
-                fullSchem.put(railClear, highwayWidth + 1, 2, 0);
+            if (highRailHere) {
+                if (railHigh) {
+                    fullSchem.put(sideRail, highwayWidth + 1, 2, 0);
+                    fullSchem.put(sideRailAir, highwayWidth + 1, 3, 0);
+                } else if (rails) {
+                    fullSchem.put(railClear, highwayWidth + 1, 2, 0);
+                }
             }
 
             fullSchem.put(topAir, 1, 2, 0);

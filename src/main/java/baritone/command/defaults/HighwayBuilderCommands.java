@@ -122,7 +122,10 @@ public class HighwayBuilderCommands {
                         "> nhwbuild - <dirX> <dirZ> <pave> - Where pave is true if you want to pave with obsidian. Default is false",
                         "> nhwbuild - <dirX> <dirZ> <pave> <selfSolve> <origX> <origZ> - Where selfSolve is false if you want a custom origin. Default is true",
                         "> nhwbuild - <dirX> <dirZ> <pave> <selfSolve> [<origX> <origZ>] <endX> <endZ> - Stop once the highway is built through the end coords",
-                        "> nhwbuild - ... start <startX> <startZ> - Begin the build at the named point on the highway line instead of at your feet"
+                        "> nhwbuild - ... start <startX> <startZ> - Begin the build at the named point on the highway line instead of at your feet",
+                        "",
+                        "Set highwayPattern (e.g. XXZXXZXXXZ, 7 X per 3 Z) to build at an angle instead of straight or 45 degrees.",
+                        "A two-axis pattern needs both signs, so give it a quadrant: `nhwbuild 1 1`, not `nhwbuild 1 0`."
                 );
             }
         };

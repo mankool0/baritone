@@ -17,6 +17,8 @@
 
 package baritone.api.behavior;
 
+import baritone.api.schematic.ISchematic;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 
 public interface INetherHighwayBuilderBehavior extends IBehavior {
@@ -46,6 +48,28 @@ public interface INetherHighwayBuilderBehavior extends IBehavior {
     void build(int startX, int startZ, Vec3i direct, boolean selfSolve, boolean pave, Vec3i endCoords);
 
     void build(int startX, int startZ, Vec3i direct, boolean selfSolve, boolean pave, Vec3i endCoords, Vec3i startCoords);
+
+    /**
+     * True when the active build follows a custom slice pattern (an angled highway) rather than a
+     * straight or 45-degree diagonal line.
+     */
+    boolean hasCustomPattern();
+
+    /**
+     * The origin advance for the next repeat of a pattern build, derived from the current
+     * origin's slice position. A pure function of position, so builder restarts can never desync
+     * the pattern phase. Only meaningful while {@link #hasCustomPattern()} is true.
+     */
+    Vec3i repeatAdvance(BlockPos currentOrigin);
+
+    /**
+     * The cross-section to build at the given origin. Angled builds with rails alternate between
+     * cross-sections: slices that share a driving-axis coordinate overlap, so only the outermost of
+     * them carries the rail on that side. A pure function of position, like
+     * {@link #repeatAdvance}. Null when the active build has no per-slice cross-sections, which is
+     * everything except an angled build with rails.
+     */
+    ISchematic schematicForOrigin(BlockPos origin);
 
     void stop();
 

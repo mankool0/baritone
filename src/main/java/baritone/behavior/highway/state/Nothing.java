@@ -80,12 +80,14 @@ public class Nothing extends State {
 
         // The context keeps the single-slice schematic that the correctness scans size themselves
         // against; the builder gets several slices at once so the printer always has targets.
-        ISchematic buildSchem = context.schematic();
         BlockPos buildOrigin = context.originBuild();
+        ISchematic buildSchem = context.schematicForOrigin(buildOrigin);
         int lookahead = context.settings().highwayPrinterLookahead.value;
         int slicesToEnd = context.settings().buildRepeatCount.value;
         boolean nearEnd = slicesToEnd != -1 && slicesToEnd <= context.highwayCheckBackDistance() + 2 * lookahead + 2;
-        if (context.settings().printer.value && lookahead > 1 && !nearEnd) {
+        // A custom-pattern build repeats one slice at a time: a straight lookahead window can't
+        // follow the jogs, and its internal shape would depend on the pattern phase.
+        if (context.settings().printer.value && lookahead > 1 && !nearEnd && !context.pattern().isCustom()) {
             int stepX = context.highwayDirection().getX();
             int stepZ = context.highwayDirection().getZ();
             buildSchem = context.schematic().repeated(stepX, 0, stepZ, lookahead);

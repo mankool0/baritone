@@ -165,6 +165,8 @@ public class HighwayContext {
     private int travelNoProgressTicks = 0;
     private int travelStallCooldown = 0; // ticks to leave the walk alone after one failed to make progress
     private CompositeSchematic schematic;
+    /** Per-slice cross-sections for an angled build with rails; null when every slice is the same. */
+    private CompositeSchematic[] patternSchematics;
     private WhiteBlackSchematic liqCheckSchem;
     private BetterBlockPos originBuild;
     private BetterBlockPos firstStartingPos;
@@ -174,6 +176,7 @@ public class HighwayContext {
     private Vec3 backPathOriginVector = new Vec3(0, 0, 0);
     private Vec3 eChestEmptyShulkOriginVector = new Vec3(0, 0, 0);
     private Vec3i highwayDirection = new Vec3i(1, 0, -1);
+    private HighwayPattern pattern = HighwayPattern.NONE;
     private boolean paving = false;
     private boolean paused = false;
     private boolean cursorStackNonEmpty = false;
@@ -474,6 +477,87 @@ public class HighwayContext {
         this.highwayDirection = highwayDirection;
     }
 
+    public HighwayPattern pattern() {
+        return pattern;
+    }
+
+    public void setPattern(HighwayPattern pattern) {
+        this.pattern = pattern == null ? HighwayPattern.NONE : pattern;
+    }
+
+    /**
+     * Slice index of an anchor relative to the given parallel line's origin. Exact: the minor
+     * coordinate disambiguates the slices that share a major coordinate at the jogs, so this must
+     * be called with the origin of the line the anchor actually lies on. Custom patterns only.
+     */
+    private int sliceIndexOf(BlockPos anchor, Vec3 lineOrigin) {
+        int ox = (int) Math.round(lineOrigin.x);
+        int oz = (int) Math.round(lineOrigin.z);
+        int qMajor = (pattern.majorIsX() ? anchor.getX() - ox : anchor.getZ() - oz) * pattern.majorSign();
+        int qMinor = (pattern.majorIsX() ? anchor.getZ() - oz : anchor.getX() - ox) * pattern.minorSign();
+        return pattern.sliceIndex(qMajor, qMinor);
+    }
+
+    /**
+     * Slice index from the major (driving) coordinate alone, relative to originVector. All the
+     * parallel lines share their major origin component, so this works for points on any of them
+     * (and for points off the path entirely). Ambiguous by the jog run length - the last slice at
+     * that coordinate is returned - so use it where a one-slice phase error is harmless.
+     */
+    private int sliceIndexNear(double worldX, double worldZ) {
+        int q = (int) ((pattern.majorIsX() ? Math.round(worldX) - Math.round(originVector.x)
+                : Math.round(worldZ) - Math.round(originVector.z)) * pattern.majorSign());
+        return pattern.sliceFromMajor(q);
+    }
+
+    /** World-space offset from slice t's anchor to slice (t + slices)'s anchor. */
+    private Vec3i sliceDelta(int t, int slices) {
+        return pattern.worldDelta(t, slices);
+    }
+
+    public void setPatternSchematics(CompositeSchematic[] patternSchematics) {
+        this.patternSchematics = patternSchematics;
+    }
+
+    /** True when the cross-section varies from slice to slice (an angled build with rails). */
+    public boolean hasPatternSchematics() {
+        return patternSchematics != null;
+    }
+
+    /**
+     * The cross-section slice {@code t} is built and checked against. Identical for every slice
+     * unless the build is an angled one with rails, where slices sharing a major coordinate have to
+     * split the rail columns between them - see {@link HighwayPattern#ownsLowRail}. All the variants
+     * report the same dimensions as {@link #schematic()}, so scans keep sizing their loops against
+     * that one and only the cell queries go through here.
+     */
+    public CompositeSchematic schematicForSlice(int t) {
+        if (patternSchematics == null) {
+            return schematic;
+        }
+        return patternSchematics[(pattern.ownsLowRail(t) ? 1 : 0) | (pattern.ownsHighRail(t) ? 2 : 0)];
+    }
+
+    /** {@link #schematicForSlice} for the slice a build origin anchors, for the builder's repeats. */
+    public CompositeSchematic schematicForOrigin(BlockPos origin) {
+        if (patternSchematics == null) {
+            return schematic;
+        }
+        return schematicForSlice(sliceIndexOf(origin, originVector));
+    }
+
+    /**
+     * Origin advance for the repeating builder: from the slice the current origin anchors to the
+     * next one. A pure function of position, so builder restarts and detours can never desync the
+     * pattern phase (the old stateful cursor did exactly that).
+     */
+    public Vec3i repeatAdvance(BlockPos currentOrigin) {
+        if (!pattern.isCustom()) {
+            return new Vec3i(highwayDirection.getX(), 0, highwayDirection.getZ());
+        }
+        return sliceDelta(sliceIndexOf(currentOrigin, originVector), 1);
+    }
+
     public void setPaving(boolean paving) {
         this.paving = paving;
     }
@@ -691,6 +775,32 @@ public class HighwayContext {
         int maxLateral = settings.highwayWidth.value + 2;
         int start = Math.max(1, settings.highwayRecoveryBackDistance.value) + recoveryExtraBack;
         int max = Math.max(start, settings.highwayRecoveryMaxSearch.value);
+        if (pattern.isCustom()) {
+            // Walk back slice by slice along the pattern (a straight walk-back leaves the road
+            // within a few slices), scanning across the road width from the walk lane.
+            int crossX = pattern.majorIsX() ? 0 : 1;
+            int crossZ = pattern.majorIsX() ? 1 : 0;
+            int tFeet = sliceIndexNear(feet.x, feet.z);
+            int laneOx = (int) Math.round(backPathOriginVector.x);
+            int laneOz = (int) Math.round(backPathOriginVector.z);
+            for (int d = start; d <= max; d++) {
+                int t = tFeet - d;
+                int baseX = laneOx + pattern.worldOffsetX(t);
+                int baseZ = laneOz + pattern.worldOffsetZ(t);
+                for (int w = 0; w <= maxLateral; w++) {
+                    for (int sign = (w == 0 ? 1 : -1); sign <= 1; sign += 2) {
+                        int fx = baseX + crossX * w * sign;
+                        int fz = baseZ + crossZ * w * sign;
+                        if (MovementHelper.canWalkOn(baritone.bsi, fx, floorY, fz)
+                                && MovementHelper.canWalkThrough(baritone.bsi, fx, floorY + 1, fz)
+                                && MovementHelper.canWalkThrough(baritone.bsi, fx, floorY + 2, fz)) {
+                            return new BetterBlockPos(fx, floorY + 1, fz);
+                        }
+                    }
+                }
+            }
+            return null;
+        }
         for (int d = start; d <= max; d++) {
             int baseX = feet.x - dirX * d;
             int baseZ = feet.z - dirZ * d;
@@ -956,8 +1066,11 @@ public class HighwayContext {
                 playerContext.playerFeet().getY(),
                 playerContext.playerFeet().getZ() + (distBack * -highwayDirection.getZ()));
         BlockPos startPos = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z), direction, backPos, LocationType.HighwayBuild);
+        int scanT0 = pattern.isCustom() ? sliceIndexOf(startPos, originVector) : 0;
         for (int i = 0; i < distBack + distAhead; i++) {
-            BlockPos curPos = startPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
+            BlockPos curPos = pattern.isCustom()
+                    ? startPos.offset(sliceDelta(scanT0, i))
+                    : startPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
             for (int y = 0; y < schematic.heightY(); y++) {
                 for (int z = 0; z < schematic.lengthZ(); z++) {
                     for (int x = 0; x < schematic.widthX(); x++) {
@@ -1253,6 +1366,24 @@ public class HighwayContext {
             case SideStorage -> settings.highwayEmptyShulkEchestY.value;
         };
 
+        if (pattern.isCustom()) {
+            // Project onto the pattern path instead of a straight line. Slice indices are shared
+            // across the parallel lines because build() gives them all the same major-axis origin
+            // component, so the start/end clamps (computed on the build line) apply directly.
+            long ox = Math.round(origin.x);
+            long oz = Math.round(origin.z);
+            int qMajor = (int) ((pattern.majorIsX() ? Math.round(point.x) - ox : Math.round(point.z) - oz) * pattern.majorSign());
+            int qMinor = (int) ((pattern.majorIsX() ? Math.round(point.z) - oz : Math.round(point.x) - ox) * pattern.minorSign());
+            int t = pattern.sliceIndex(qMajor, qMinor);
+            if (firstStartingPos != null) {
+                t = Math.max(t, sliceIndexOf(firstStartingPos, originVector));
+            }
+            if (endPos != null) {
+                t = Math.min(t, sliceIndexOf(endPos, originVector));
+            }
+            return new BetterBlockPos((int) (ox + pattern.worldOffsetX(t)), yLevel, (int) (oz + pattern.worldOffsetZ(t)));
+        }
+
         // Project onto the highway line, but round the along-line step count once and derive both
         // coordinates from it in integer space. Rounding x and z independently after a double
         // projection can disagree on half-integer results and return a point one block off the
@@ -1288,6 +1419,12 @@ public class HighwayContext {
      * {@code to} is behind {@code from}.
      */
     public int stepsAlongHighway(BlockPos from, BlockPos to) {
+        if (pattern.isCustom()) {
+            // Count slices, not blocks: the major axis no longer advances one block per slice.
+            // Major-only indexing keeps the original property that points on parallel lines
+            // (offset on the cross axis only) agree on where a slice ends.
+            return sliceIndexNear(to.getX(), to.getZ()) - sliceIndexNear(from.getX(), from.getZ());
+        }
         return highwayDirection.getX() != 0
                 ? (to.getX() - from.getX()) * highwayDirection.getX()
                 : (to.getZ() - from.getZ()) * highwayDirection.getZ();
@@ -2625,8 +2762,12 @@ public class HighwayContext {
                 maxResult = stepsToEnd; // past the last slice there is only the end, not more highway
             }
         }
+        int scanT0 = pattern.isCustom() ? sliceIndexOf(startCheckPos, originVector) : 0;
         for (int i = 0; i < scanLength; i++) {
-            BlockPos curPos = startCheckPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
+            BlockPos curPos = pattern.isCustom()
+                    ? startCheckPos.offset(sliceDelta(scanT0, i))
+                    : startCheckPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
+            CompositeSchematic sliceSchem = schematicForSlice(scanT0 + i);
             for (int y = 0; y < schematic.heightY(); y++) {
                 for (int z = 0; z < schematic.lengthZ(); z++) {
                     if (crossZ && (z < crossLo || z > crossHi)) {
@@ -2641,7 +2782,7 @@ public class HighwayContext {
                         int blockZ = z + curPos.getZ();
                         BlockState current = playerContext.world().getBlockState(new BlockPos(blockX, blockY, blockZ));
 
-                        if (!schematic.inSchematic(x, y, z, current)) {
+                        if (!sliceSchem.inSchematic(x, y, z, current)) {
                             continue;
                         }
                         if (!baritone.bsi.worldContainsLoadedChunk(blockX, blockZ)) {
@@ -2652,13 +2793,13 @@ public class HighwayContext {
                         }
                         // we can directly observe this block, it is in render distance
 
-                        ISchematic ourSchem = schematic.getSchematic(x, y, z, current).schematic;
+                        ISchematic ourSchem = sliceSchem.getSchematic(x, y, z, current).schematic;
                         if (ourSchem instanceof WhiteBlackSchematic && ((WhiteBlackSchematic) ourSchem).isValidIfUnder() &&
                                 MovementHelper.isBlockNormalCube(playerContext.world().getBlockState(new BlockPos(blockX, blockY + 1, blockZ)))) {
                             continue;
                         }
 
-                        if (!schematic.desiredState(x, y, z, current, this.approxPlaceable).equals(current)) {
+                        if (!sliceSchem.desiredState(x, y, z, current, this.approxPlaceable).equals(current)) {
                             return i;
                         }
                     }
@@ -2713,7 +2854,9 @@ public class HighwayContext {
         if (hop <= 0) {
             return false;
         }
-        travelTarget = laneOnSlice(feetSlice.offset(hop * highwayDirection.getX(), 0, hop * highwayDirection.getZ()));
+        travelTarget = laneOnSlice(pattern.isCustom()
+                ? feetSlice.offset(sliceDelta(sliceIndexOf(feetSlice, originVector), hop))
+                : feetSlice.offset(hop * highwayDirection.getX(), 0, hop * highwayDirection.getZ()));
         travelGoal = new GoalBlock(travelTarget);
         travelBestSteps = stepsAlongHighway(playerContext.playerFeet(), travelTarget);
         travelNoProgressTicks = 0;
@@ -2743,7 +2886,12 @@ public class HighwayContext {
         BetterBlockPos lane = getClosestPoint(new Vec3(backPathOriginVector.x, backPathOriginVector.y, backPathOriginVector.z),
                 direction, new Vec3(buildLinePos.getX(), buildLinePos.getY(), buildLinePos.getZ()), LocationType.ShulkerEchestInteraction);
         int off = stepsAlongHighway(lane, buildLinePos);
-        return off == 0 ? lane : new BetterBlockPos(lane.offset(off * highwayDirection.getX(), 0, off * highwayDirection.getZ()));
+        if (off == 0) {
+            return lane;
+        }
+        return new BetterBlockPos(pattern.isCustom()
+                ? lane.offset(sliceDelta(sliceIndexOf(lane, backPathOriginVector), off))
+                : lane.offset(off * highwayDirection.getX(), 0, off * highwayDirection.getZ()));
     }
 
     public boolean isHighwayEndComplete() {
@@ -2759,16 +2907,19 @@ public class HighwayContext {
         BlockPos startCheckPos = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z), direction, curPosBack, LocationType.HighwayBuild);
         BlockPos startCheckPosLiq = getClosestPoint(new Vec3(liqOriginVector.x, liqOriginVector.y, liqOriginVector.z), direction, curPosBack, LocationType.ShulkerEchestInteraction);
         int scanDist = stepsAlongHighway(startCheckPos, endPos) + 1;
-        if (!isStretchLoaded(startCheckPos, schematic.widthX(), schematic.lengthZ(), scanDist)
-                || !isStretchLoaded(startCheckPosLiq, liqCheckSchem.widthX(), liqCheckSchem.lengthZ(), scanDist)) {
+        if (!isStretchLoaded(startCheckPos, originVector, schematic.widthX(), schematic.lengthZ(), scanDist)
+                || !isStretchLoaded(startCheckPosLiq, liqOriginVector, liqCheckSchem.widthX(), liqCheckSchem.lengthZ(), scanDist)) {
             return false;
         }
         return isHighwayCorrect(startCheckPos, startCheckPosLiq, scanDist, false) == HighwayBlockState.Air;
     }
 
-    private boolean isStretchLoaded(BlockPos startPos, int widthX, int lengthZ, int distanceToCheck) {
+    private boolean isStretchLoaded(BlockPos startPos, Vec3 lineOrigin, int widthX, int lengthZ, int distanceToCheck) {
+        int scanT0 = pattern.isCustom() ? sliceIndexOf(startPos, lineOrigin) : 0;
         for (int i = distanceToCheck - 1; i >= 1; i--) {
-            BlockPos curPos = startPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
+            BlockPos curPos = pattern.isCustom()
+                    ? startPos.offset(sliceDelta(scanT0, i))
+                    : startPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
             for (int z = 0; z < lengthZ; z++) {
                 for (int x = 0; x < widthX; x++) {
                     if (!baritone.bsi.worldContainsLoadedChunk(x + curPos.getX(), z + curPos.getZ())) {
@@ -2786,6 +2937,21 @@ public class HighwayContext {
         int dirZ = highwayDirection.getZ();
         int floorY = feet.y - 1;
 
+        if (pattern.isCustom()) {
+            int t = sliceIndexNear(feet.x, feet.z);
+            Vec3i s1 = pattern.worldStep(t);
+            Vec3i s2 = pattern.worldStep(t + 1);
+            if (!MovementHelper.canWalkOn(baritone.bsi, feet.x + s1.getX(), floorY, feet.z + s1.getZ())) {
+                return false;
+            }
+            if (s1.getX() != s2.getX() || s1.getZ() != s2.getZ()) {
+                // approaching a jog: the creep walks the average heading, so the hitbox crosses
+                // the corner cell as well
+                return MovementHelper.canWalkOn(baritone.bsi, feet.x + s1.getX() + s2.getX(), floorY, feet.z + s1.getZ() + s2.getZ());
+            }
+            return true;
+        }
+
         // Block we'll be standing on after stepping forward
         if (!MovementHelper.canWalkOn(baritone.bsi, feet.x + dirX, floorY, feet.z + dirZ)) {
             return false;
@@ -2800,8 +2966,16 @@ public class HighwayContext {
 
     public boolean canWalkThroughAhead() {
         BetterBlockPos feet = playerContext.playerFeet();
-        int x = feet.x + highwayDirection.getX();
-        int z = feet.z + highwayDirection.getZ();
+        int x;
+        int z;
+        if (pattern.isCustom()) {
+            Vec3i s1 = pattern.worldStep(sliceIndexNear(feet.x, feet.z));
+            x = feet.x + s1.getX();
+            z = feet.z + s1.getZ();
+        } else {
+            x = feet.x + highwayDirection.getX();
+            z = feet.z + highwayDirection.getZ();
+        }
         return MovementHelper.canWalkThrough(baritone.bsi, x, feet.y, z)
                 && MovementHelper.canWalkThrough(baritone.bsi, x, feet.y + 1, z);
     }
@@ -2904,6 +3078,23 @@ public class HighwayContext {
     /** Walk-creep guard: no lit portal blocks in the cells we're about to walk into. */
     public boolean noPortalAhead() {
         BetterBlockPos feet = playerContext.playerFeet();
+        if (pattern.isCustom()) {
+            int t = sliceIndexNear(feet.x, feet.z);
+            for (int step = 1; step <= 2; step++) {
+                Vec3i d = sliceDelta(t, step);
+                if (isPortalCell(feet.x + d.getX(), feet.y, feet.z + d.getZ())) {
+                    return false;
+                }
+            }
+            // the average-heading walk can clip the cell beside the first step at a jog
+            Vec3i s1 = sliceDelta(t, 1);
+            Vec3i s2 = sliceDelta(t, 2);
+            if ((s2.getX() != 2 * s1.getX() || s2.getZ() != 2 * s1.getZ())
+                    && isPortalCell(feet.x + s2.getX() - s1.getX(), feet.y, feet.z + s2.getZ() - s1.getZ())) {
+                return false;
+            }
+            return true;
+        }
         int dirX = highwayDirection.getX();
         int dirZ = highwayDirection.getZ();
         for (int step = 1; step <= 2; step++) {
@@ -2935,17 +3126,27 @@ public class HighwayContext {
     public int lateralColumn(int x, int z) {
         int ox = (int) Math.round(originVector.x);
         int oz = (int) Math.round(originVector.z);
+        if (pattern.isCustom()) {
+            // Column relative to the block's own slice anchor, so the jogs don't drift the
+            // banding. The last-slice convention makes it deterministic; a block in a pre-jog
+            // slice reads one column high, which is harmless for the strip sweep.
+            int t = sliceIndexNear(x, z);
+            return (pattern.majorIsX() ? (z - oz) : (x - ox)) * pattern.minorSign() - pattern.minorOffset(t);
+        }
         return -(x - ox) * highwayDirection.getZ() + (z - oz) * highwayDirection.getX();
     }
 
     /** The yaw that points straight down the highway direction. */
     public float highwayDirectionYaw() {
+        if (pattern.isCustom()) {
+            return (float) Math.toDegrees(Math.atan2(-pattern.periodWorldX(), pattern.periodWorldZ()));
+        }
         return (float) Math.toDegrees(Math.atan2(-highwayDirection.getX(), highwayDirection.getZ()));
     }
 
     public void faceHighwayDirection() {
-        double dirX = highwayDirection.getX();
-        double dirZ = highwayDirection.getZ();
+        double dirX = pattern.isCustom() ? pattern.periodWorldX() : highwayDirection.getX();
+        double dirZ = pattern.isCustom() ? pattern.periodWorldZ() : highwayDirection.getZ();
         double len = Math.sqrt(dirX * dirX + dirZ * dirZ);
         if (len == 0) {
             return;
@@ -2960,9 +3161,10 @@ public class HighwayContext {
         BetterBlockPos sliceOrigin = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z),
                 new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ()), playerPos, LocationType.HighwayBuild);
         double laneCenterOffset = 1 + settings.highwayWidth.value / 2.0;
-        boolean crossAxisZ = (highwayDirection.getZ() == 0 && Math.abs(highwayDirection.getX()) == 1)
+        boolean crossAxisZ = pattern.isCustom() ? pattern.majorIsX()
+                : ((highwayDirection.getZ() == 0 && Math.abs(highwayDirection.getX()) == 1)
                 || (highwayDirection.getX() == 1 && highwayDirection.getZ() == 1)
-                || (highwayDirection.getX() == -1 && highwayDirection.getZ() == -1);
+                || (highwayDirection.getX() == -1 && highwayDirection.getZ() == -1));
         double centerX = crossAxisZ ? sliceOrigin.x + 0.5 : sliceOrigin.x + laneCenterOffset;
         double centerZ = crossAxisZ ? sliceOrigin.z + laneCenterOffset : sliceOrigin.z + 0.5;
 
@@ -2970,7 +3172,10 @@ public class HighwayContext {
         double lateral = (playerPos.x - centerX) * -dirZ + (playerPos.z - centerZ) * dirX;
 
         double halfLane = settings.highwayWidth.value / 2.0;
-        if (highwayDirection.getX() != 0 && highwayDirection.getZ() != 0) {
+        if (pattern.isCustom()) {
+            // corridor half-width measured perpendicular to the average travel direction
+            halfLane *= pattern.periodMajorBlocks() / Math.hypot(pattern.periodMajorBlocks(), pattern.periodMinorBlocks());
+        } else if (highwayDirection.getX() != 0 && highwayDirection.getZ() != 0) {
             halfLane /= Math.sqrt(2); // diagonal corridors are measured perpendicular to travel
         }
 
@@ -3005,8 +3210,12 @@ public class HighwayContext {
         renderBlocksBuilding.clear();
         lastMismatches.clear();
         boolean foundBlocks = false;
+        int scanT0 = pattern.isCustom() ? sliceIndexOf(startPos, originVector) : 0;
         for (int i = 1; i < distanceToCheck; i++) {
-            BlockPos curPos = startPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
+            BlockPos curPos = pattern.isCustom()
+                    ? startPos.offset(sliceDelta(scanT0, i))
+                    : startPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
+            CompositeSchematic sliceSchem = schematicForSlice(scanT0 + i);
             for (int y = 0; y < schematic.heightY(); y++) {
                 for (int z = 0; z < schematic.lengthZ(); z++) {
                     for (int x = 0; x < schematic.widthX(); x++) {
@@ -3015,10 +3224,10 @@ public class HighwayContext {
                         int blockZ = z + curPos.getZ();
                         BlockState current = playerContext.world().getBlockState(new BlockPos(blockX, blockY, blockZ));
 
-                        if (!schematic.inSchematic(x, y, z, current)) {
+                        if (!sliceSchem.inSchematic(x, y, z, current)) {
                             continue;
                         }
-                        BlockState desiredState = schematic.desiredState(x, y, z, current, this.approxPlaceable);
+                        BlockState desiredState = sliceSchem.desiredState(x, y, z, current, this.approxPlaceable);
                         if (i == 1) {
                             if (desiredState.getBlock() instanceof AirBlock) {
                                 renderBlocksBuilding.put(new BlockPos(blockX, blockY, blockZ), Color.CYAN);
@@ -3033,7 +3242,7 @@ public class HighwayContext {
                         if (baritone.bsi.worldContainsLoadedChunk(blockX, blockZ)) { // check if its in render distance, not if its in cache
                             // we can directly observe this block, it is in render distance
 
-                            ISchematic ourSchem = schematic.getSchematic(x, y, z, current).schematic;
+                            ISchematic ourSchem = sliceSchem.getSchematic(x, y, z, current).schematic;
                             if (ourSchem instanceof WhiteBlackSchematic && ((WhiteBlackSchematic) ourSchem).isValidIfUnder() &&
                                     MovementHelper.isBlockNormalCube(playerContext.world().getBlockState(new BlockPos(blockX, blockY + 1, blockZ)))) {
                                 continue;
@@ -3099,8 +3308,11 @@ public class HighwayContext {
         if (endPos != null) {
             distanceToCheck = Math.min(distanceToCheck, stepsAlongHighway(startPos, endPos) + 1);
         }
+        int scanT0 = pattern.isCustom() ? sliceIndexOf(startPos, liqOriginVector) : 0;
         if (renderCheckedBlocks) {
-            BlockPos slice = startPos.offset(highwayDirection.getX(), 0, highwayDirection.getZ());
+            BlockPos slice = pattern.isCustom()
+                    ? startPos.offset(sliceDelta(scanT0, 1))
+                    : startPos.offset(highwayDirection.getX(), 0, highwayDirection.getZ());
             AABB area = new AABB(slice.getX(), slice.getY(), slice.getZ(),
                     slice.getX() + liqCheckSchem.widthX(), slice.getY() + liqCheckSchem.heightY(), slice.getZ() + liqCheckSchem.lengthZ());
             renderLockLiquid.lock();
@@ -3109,7 +3321,9 @@ public class HighwayContext {
         }
         //Liquid Checking all around
         for (int i = 1; i < distanceToCheck; i++) {
-            BlockPos curPos = startPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
+            BlockPos curPos = pattern.isCustom()
+                    ? startPos.offset(sliceDelta(scanT0, i))
+                    : startPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
             for (int y = 0; y < liqCheckSchem.heightY(); y++) {
                 for (int z = 0; z < liqCheckSchem.lengthZ(); z++) {
                     for (int x = 0; x < liqCheckSchem.widthX(); x++) {

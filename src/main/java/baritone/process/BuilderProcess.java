@@ -181,29 +181,34 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         super(baritone);
     }
 
-    @Override
-    public void build(String name, ISchematic schematic, Vec3i origin) {
-        this.name = name;
-        this.schematic = schematic;
-        this.realSchematic = null;
-        boolean buildingSelectionSchematic = schematic instanceof SelectionSchematic;
+    /** The substitute/mirror/rotate/skip-blocks wrappers every schematic handed to the builder gets. */
+    private ISchematic wrapForBuild(ISchematic raw) {
+        ISchematic wrapped = raw;
         if (!Baritone.settings().buildSubstitutes.value.isEmpty()) {
-            this.schematic = new SubstituteSchematic(this.schematic, Baritone.settings().buildSubstitutes.value);
+            wrapped = new SubstituteSchematic(wrapped, Baritone.settings().buildSubstitutes.value);
         }
         if (Baritone.settings().buildSchematicMirror.value != net.minecraft.world.level.block.Mirror.NONE) {
-            this.schematic = new MirroredSchematic(this.schematic, Baritone.settings().buildSchematicMirror.value);
+            wrapped = new MirroredSchematic(wrapped, Baritone.settings().buildSchematicMirror.value);
         }
         if (Baritone.settings().buildSchematicRotation.value != net.minecraft.world.level.block.Rotation.NONE) {
-            this.schematic = new RotatedSchematic(this.schematic, Baritone.settings().buildSchematicRotation.value);
+            wrapped = new RotatedSchematic(wrapped, Baritone.settings().buildSchematicRotation.value);
         }
         // TODO this preserves the old behavior, but maybe we should bake the setting value right here
-        this.schematic = new MaskSchematic(this.schematic) {
+        return new MaskSchematic(wrapped) {
             @Override
             public boolean partOfMask(int x, int y, int z, BlockState current) {
                 // partOfMask is only called inside the schematic so desiredState is not null
                 return !Baritone.settings().buildSkipBlocks.value.contains(this.desiredState(x, y, z, current, Collections.emptyList()).getBlock());
             }
         };
+    }
+
+    @Override
+    public void build(String name, ISchematic schematic, Vec3i origin) {
+        this.name = name;
+        this.realSchematic = null;
+        boolean buildingSelectionSchematic = schematic instanceof SelectionSchematic;
+        this.schematic = wrapForBuild(schematic);
         int x = origin.getX();
         int y = origin.getY();
         int z = origin.getZ();
@@ -1152,12 +1157,33 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             }
             // build repeat time
             layer = 0;
-            origin = new BlockPos(origin).offset(repeat);
+            Vec3i step = repeat;
+            INetherHighwayBuilderBehavior highwayRepeat = baritone.getNetherHighwayBuilderBehavior();
+            boolean patternRepeat = highwayRepeat.isBuildingHighwayState() && highwayRepeat.hasCustomPattern();
+            if (patternRepeat) {
+                // Angled highway: the next origin follows the configured slice pattern. The step
+                // is derived from the current origin's position, so builder restarts and detours
+                // can never desync the pattern phase.
+                step = highwayRepeat.repeatAdvance(new BlockPos(origin));
+            }
+            origin = new BlockPos(origin).offset(step);
+            if (patternRepeat) {
+                // ... and so is the cross-section: with rails on, the slices sharing a driving-axis
+                // coordinate split the rail columns between them.
+                ISchematic nextSlice = highwayRepeat.schematicForOrigin(new BlockPos(origin));
+                if (nextSlice != null) {
+                    if (realSchematic != null) {
+                        realSchematic = wrapForBuild(nextSlice); // buildInLayers rewraps this next tick
+                    } else {
+                        schematic = wrapForBuild(nextSlice);
+                    }
+                }
+            }
             if (!Baritone.settings().buildRepeatSneaky.value) {
                 schematic.reset();
             }
             if (Baritone.settings().buildRepeatLog.value) {
-                logDirect("Repeating build in vector " + repeat + ", new origin is " + origin);
+                logDirect("Repeating build in vector " + step + ", new origin is " + origin);
             }
             return onTick(calcFailed, isSafeToCancel, recursions + 1);
         }

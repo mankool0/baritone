@@ -217,11 +217,11 @@ public class BuildingHighway extends State {
             BlockPos startCheckPos = context.getClosestPoint(new Vec3(context.originVector().x, context.originVector().y, context.originVector().z), direction, curPos, LocationType.HighwayBuild);
             BlockPos startCheckPosLiq = context.getClosestPoint(new Vec3(context.liqOriginVector().x, context.liqOriginVector().y, context.liqOriginVector().z), direction, curPos, LocationType.ShulkerEchestInteraction);
 
-            // Along-line distance in blocks from the scan start to the player's projected position;
-            // both points are on the highway line, so the larger axis delta is the step count for
-            // straight and diagonal highways alike
+            // Slice count from the scan start to the player's projected position; both points
+            // are anchors on the highway path, so this is exact for straight, diagonal and
+            // pattern highways alike
             BlockPos feetClosestPoint = context.getClosestPoint(new Vec3(context.originVector().x, context.originVector().y, context.originVector().z), direction, curPosNotOffset, LocationType.HighwayBuild);
-            int distToWantedStart = Math.max(Math.abs(feetClosestPoint.getX() - startCheckPos.getX()), Math.abs(feetClosestPoint.getZ() - startCheckPos.getZ()));
+            int distToWantedStart = Math.abs(context.stepsAlongHighway(startCheckPos, feetClosestPoint));
 
             int tempCheckBackDist = Math.min(context.highwayCheckBackDistance(), distToWantedStart);
 

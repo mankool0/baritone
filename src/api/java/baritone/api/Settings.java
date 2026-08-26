@@ -1836,6 +1836,16 @@ public final class Settings {
     public final Setting<Integer> highwaySupportOffset = new Setting<>(2);
 
     /**
+     * Slice pattern for angled highways, e.g. XXZXXZXXXZ for 7 blocks of +/-X per 3 blocks of
+     * +/-Z (about 23 degrees off the X axis). One X or Z character per slice, in absolute world
+     * axes; the signs come from the direction given to the build command, which must name both
+     * axes when the pattern uses both, i.e. {@code nhwbuild 1 1} rather than {@code nhwbuild 1 0}.
+     * Empty = classic straight/diagonal highways. Patterns that use only one axis, or both axes
+     * equally, fall back to the classic builds.
+     */
+    public final Setting<String> highwayPattern = new Setting<>("");
+
+    /**
      * If enabled will dig and pave for rails
      */
     public final Setting<Boolean> highwayRail = new Setting<>(true);
