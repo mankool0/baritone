@@ -222,8 +222,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         if (endCoords != null) {
             BetterBlockPos end = highwayContext.getClosestPoint(origin, direction, new Vec3(endCoords.getX(), 0, endCoords.getZ()), LocationType.HighwayBuild);
             int endSteps = highwayContext.stepsAlongHighway(highwayContext.firstStartingPos(), end);
-            if (endSteps <= 0) {
-                Helper.HELPER.logDirect("End " + endCoords.getX() + ", " + endCoords.getZ() + " is not ahead of the start " + highwayContext.firstStartingPos().toString() + ", not starting");
+            if (endSteps < 0) {
+                Helper.HELPER.logDirect("End " + endCoords.getX() + ", " + endCoords.getZ() + " is behind the start " + highwayContext.firstStartingPos().toString() + ", not starting");
                 stop();
                 return;
             }
