@@ -243,8 +243,10 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         highwayContext.setEnderChestHasPickShulks(true);
         highwayContext.setEnderChestHasEnderShulks(true);
         highwayContext.setEnderChestHasGappleShulks(true);
+        highwayContext.setEnderChestHasTotemShulks(true);
         highwayContext.setRefillingEnderChests(false);
         highwayContext.setRefillingGapples(false);
+        highwayContext.setRefillingTotems(false);
         highwayContext.setStashingShulker(false);
         highwayContext.setEnderChestAccessLoc(null);
         highwayContext.setRepeatCheck(false);

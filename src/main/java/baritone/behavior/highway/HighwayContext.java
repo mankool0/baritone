@@ -191,8 +191,10 @@ public class HighwayContext {
     private boolean enderChestHasPickShulks = true;
     private boolean enderChestHasEnderShulks = true;
     private boolean enderChestHasGappleShulks = true;
+    private boolean enderChestHasTotemShulks = true;
     private boolean refillingEnderChests = false;
     private boolean refillingGapples = false;
+    private boolean refillingTotems = false;
     private boolean stashingShulker = false;
     private BlockPos enderChestAccessLoc = null;
     private boolean repeatCheck = false;
@@ -1160,6 +1162,10 @@ public class HighwayContext {
         this.picksToHave = picksToHave;
     }
 
+    public int totemsToHave() {
+        return Math.max(settings.highwayTotemsToHave.value, settings.highwayTotemsThreshold.value + 1);
+    }
+
     public List<BlockState> blackListBlocks() {
         return blackListBlocks;
     }
@@ -1188,6 +1194,14 @@ public class HighwayContext {
         this.enderChestHasGappleShulks = enderChestHasGappleShulks;
     }
 
+    public boolean enderChestHasTotemShulks() {
+        return enderChestHasTotemShulks;
+    }
+
+    public void setEnderChestHasTotemShulks(boolean enderChestHasTotemShulks) {
+        this.enderChestHasTotemShulks = enderChestHasTotemShulks;
+    }
+
     public boolean refillingEnderChests() {
         return refillingEnderChests;
     }
@@ -1204,6 +1218,14 @@ public class HighwayContext {
         this.refillingGapples = refillingGapples;
     }
 
+    public boolean refillingTotems() {
+        return refillingTotems;
+    }
+
+    public void setRefillingTotems(boolean refillingTotems) {
+        this.refillingTotems = refillingTotems;
+    }
+
     public boolean stashingShulker() {
         return stashingShulker;
     }
@@ -1214,6 +1236,18 @@ public class HighwayContext {
 
     public BlockPos enderChestAccessLoc() {
         return enderChestAccessLoc;
+    }
+
+    /**
+     * Forget the remembered storage access chest, but only once no refill leg is still latched:
+     * trips are chained (an ender chest grab can queue a gapple and a totem top-up behind it), and
+     * whichever leg finishes first would otherwise strand the later ones into placing a fresh chest
+     * a few blocks from the perfectly good one this trip already put down.
+     */
+    public void releaseEnderChestAccessLoc() {
+        if (!refillingEnderChests && !refillingGapples && !refillingTotems) {
+            enderChestAccessLoc = null;
+        }
     }
 
     public void setEnderChestAccessLoc(BlockPos enderChestAccessLoc) {
@@ -1870,6 +1904,22 @@ public class HighwayContext {
         return gappleCount;
     }
 
+    private int isTotemShulker(ItemStack shulker) {
+        NonNullList<ItemStack> contents = getShulkerContents(shulker);
+
+        int totemCount = 0;
+        for (ItemStack curStack : contents) {
+            if (Item.getId(curStack.getItem()) != Item.getId(Items.AIR) && Item.getId(curStack.getItem()) != Item.getId(Items.TOTEM_OF_UNDYING)) {
+                return 0;
+            }
+
+            if (Item.getId(curStack.getItem()) == Item.getId(Items.TOTEM_OF_UNDYING)) {
+                totemCount += curStack.getCount();
+            }
+        }
+        return totemCount;
+    }
+
     private boolean isEmptyShulker(ItemStack shulker) {
         NonNullList<ItemStack> contents = getShulkerContents(shulker);
 
@@ -1905,6 +1955,15 @@ public class HighwayContext {
 
                     case Gapple: {
                         int count = isGappleShulker(stack);
+                        if (count > 0 && count < bestSlotCount) {
+                            bestSlot = i;
+                            bestSlotCount = count;
+                        }
+                        break;
+                    }
+
+                    case Totem: {
+                        int count = isTotemShulker(stack);
                         if (count > 0 && count < bestSlotCount) {
                             bestSlot = i;
                             bestSlotCount = count;
@@ -1977,6 +2036,20 @@ public class HighwayContext {
                 }
                 count++;
             }
+        }
+
+        return count;
+    }
+
+    /**
+     * Totems we can actually pop, so the offhand one counts: it's the one that saves us, and it's
+     * invisible to {@link #getItemCountInventory} (which only scans slots 0-35).
+     */
+    public int getTotemCountInventory() {
+        int count = getItemCountInventory(Item.getId(Items.TOTEM_OF_UNDYING));
+        ItemStack offhand = playerContext.player().getOffhandItem();
+        if (offhand.is(Items.TOTEM_OF_UNDYING)) {
+            count += offhand.getCount();
         }
 
         return count;
@@ -2270,6 +2343,41 @@ public class HighwayContext {
         return count;
     }
 
+    /**
+     * With an open totem shulker box, pull one slot's worth of totems into the inventory. Totems
+     * don't stack, so every totem needs its own free slot; when there is none, swap a throwaway
+     * stack out for the totems and drop it. Returns the number of totems moved (0 when none left).
+     */
+    public int lootTotemChestSlot() {
+        AbstractContainerMenu curContainer = playerContext.player().containerMenu;
+        for (int i = 0; i < 27; i++) {
+            if (curContainer.getSlot(i).getItem().is(Items.TOTEM_OF_UNDYING)) {
+                int count = curContainer.getSlot(i).getItem().getCount();
+
+                if (getItemSlot(Item.getId(Items.AIR)) == -1) {
+                    // No free slot for the totems, so throw out some throwaway items to make room
+                    int throwawaySlot = getAcceptableThrowawaySlot();
+                    if (throwawaySlot == 8) {
+                        throwawaySlot = getAcceptableThrowawaySlotNoHotbar();
+                    }
+                    if (throwawaySlot == -1) {
+                        return 0;
+                    }
+                    playerContext.playerController().windowClick(curContainer.containerId, i, 0, ClickType.PICKUP, playerContext.player());
+                    playerContext.playerController().windowClick(curContainer.containerId, throwawaySlot < 9 ? throwawaySlot + 54 : throwawaySlot + 18, 0, ClickType.PICKUP, playerContext.player()); // Have to convert slot id to single chest slot id
+                    playerContext.playerController().windowClick(curContainer.containerId, -999, 0, ClickType.PICKUP, playerContext.player());
+                } else {
+                    // There's an air slot so we can just do a quick move
+                    playerContext.playerController().windowClick(curContainer.containerId, i, 0, ClickType.QUICK_MOVE, playerContext.player());
+                }
+
+                return count;
+            }
+        }
+
+        return 0;
+    }
+
     public int lootEnderChestSlot() {
         int count = 0;
         AbstractContainerMenu curContainer = playerContext.player().containerMenu;
@@ -2332,6 +2440,12 @@ public class HighwayContext {
 
                     case Gapple:
                         if (isGappleShulker(stack) > 0) {
+                            doLoot = true;
+                        }
+                        break;
+
+                    case Totem:
+                        if (isTotemShulker(stack) > 0) {
                             doLoot = true;
                         }
                         break;
@@ -2487,6 +2601,12 @@ public class HighwayContext {
 
                     case Gapple:
                         if (isGappleShulker(stack) > 0) {
+                            count++;
+                        }
+                        break;
+
+                    case Totem:
+                        if (isTotemShulker(stack) > 0) {
                             count++;
                         }
                         break;

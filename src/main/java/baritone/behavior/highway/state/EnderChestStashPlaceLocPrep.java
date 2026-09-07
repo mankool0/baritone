@@ -62,6 +62,7 @@ public class EnderChestStashPlaceLocPrep extends State {
             context.setStashingShulker(false);
             context.setRefillingEnderChests(false);
             context.setRefillingGapples(false);
+            context.setRefillingTotems(false);
             context.transitionTo(HighwayState.Nothing);
             return;
         }

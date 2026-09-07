@@ -189,7 +189,51 @@ public class BuildingHighway extends State {
                 return;
             }
             context.setRefillingGapples(false);
-            context.setEnderChestAccessLoc(null);
+            context.releaseEnderChestAccessLoc();
+        }
+
+        if (context.settings().highwayRefillTotems.value && context.getTotemCountInventory() <= context.settings().highwayTotemsThreshold.value) {
+            if (context.getShulkerCountInventory(ShulkerType.Totem) == 0) {
+                if (!context.enderChestHasTotemShulks()) {
+                    // Storage is out of totem shulkers. Unlike picks or obsidian, totems aren't
+                    // something the build consumes, so by default we just carry on without them
+                    // and stop retrying until the next startBuild resets the flag.
+                    if (context.settings().highwayPauseWhenOutOfTotems.value) {
+                        Helper.HELPER.logDirect("Out of totems, refill ender chest and inventory and restart.");
+                        context.baritone().getPathingBehavior().cancelEverything();
+                        context.setPaused(true);
+                        return;
+                    }
+                } else if (context.repeatCheck()) {
+                    Helper.HELPER.logDirect("Out of totems, fetching a totem shulker from the ender chest.");
+                    context.setRefillingTotems(true);
+                    context.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);
+                    return;
+                } else {
+                    Helper.HELPER.logDirect("Totem count is under threshold. Player may still be loading. Waiting 120 ticks");
+                    context.resetTimer();
+                    context.setRepeatCheck(true);
+                    return;
+                }
+            } else {
+                context.transitionTo(HighwayState.TotemShulkerPlaceLocPrep);
+                context.baritone().getPathingBehavior().cancelEverything();
+                context.resetTimer();
+                return;
+            }
+        }
+
+        if (context.refillingTotems()) {
+            // Same safety net as the gapple one above: the refill got interrupted after the
+            // threshold cleared, so stash the fetched shulker back or just drop the flag.
+            if (context.settings().highwayStashTotemShulkers.value && context.getShulkerCountInventory(ShulkerType.Totem) > 0) {
+                context.transitionTo(HighwayState.EnderChestStashPlaceLocPrep);
+                context.baritone().getPathingBehavior().cancelEverything();
+                context.resetTimer();
+                return;
+            }
+            context.setRefillingTotems(false);
+            context.releaseEnderChestAccessLoc();
         }
 
         if (context.baritone().getBuilderProcess().isActive() && context.baritone().getBuilderProcess().isPaused() && context.timer() >= 360) {

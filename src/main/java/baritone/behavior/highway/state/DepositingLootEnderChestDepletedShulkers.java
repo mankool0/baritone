@@ -67,9 +67,9 @@ public class DepositingLootEnderChestDepletedShulkers extends State {
             } else if (context.refillingGapples()) {
                 // This storage trip grabbed a gapple shulker: go place and loot it.
                 if (context.getShulkerCountInventory(ShulkerType.Gapple) > 0) {
-                    if (context.settings().highwayStashGappleShulkers.value) {
-                        context.setEnderChestAccessLoc(context.placeLoc()); // reuse this access chest for the stash
-                    }
+                    // Remember the chest unconditionally: carry mode won't stash the gapple box, but a
+                    // totem leg queued behind us still can, and a stale loc is dropped on release anyway.
+                    context.setEnderChestAccessLoc(context.placeLoc());
                     if (context.getPickCountInventory() >= context.settings().highwayPicksThreshold.value) {
                         context.transitionTo(HighwayState.GappleShulkerPlaceLocPrep); // -> top up gapples
                     } else {
@@ -81,6 +81,22 @@ public class DepositingLootEnderChestDepletedShulkers extends State {
                 } else {
                     // Storage had no gapple shulker; abort the refill and let BuildingHighway re-evaluate (it will pause).
                     context.setRefillingGapples(false);
+                    context.transitionTo(HighwayState.Nothing);
+                }
+            } else if (context.refillingTotems()) {
+                // This storage trip grabbed a totem shulker: go place and loot it.
+                if (context.getShulkerCountInventory(ShulkerType.Totem) > 0) {
+                    context.setEnderChestAccessLoc(context.placeLoc()); // reuse this access chest for the stash
+                    if (context.getPickCountInventory() >= context.settings().highwayPicksThreshold.value) {
+                        context.transitionTo(HighwayState.TotemShulkerPlaceLocPrep); // -> top up totems
+                    } else {
+                        // Same pick-priority detour as the gapple leg above: mining the placed box
+                        // needs a pickaxe, so let BuildingHighway run the pick cycle first.
+                        context.transitionTo(HighwayState.Nothing);
+                    }
+                } else {
+                    // Storage had no totem shulker; abort the refill and let BuildingHighway re-evaluate (it will pause).
+                    context.setRefillingTotems(false);
                     context.transitionTo(HighwayState.Nothing);
                 }
             } else {

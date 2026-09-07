@@ -28,8 +28,8 @@ import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 
-public class CollectingGappleShulker extends State {
-    public CollectingGappleShulker(HighwayState state) {
+public class CollectingTotemShulker extends State {
+    public CollectingTotemShulker(HighwayState state) {
         super(state);
     }
 
@@ -44,7 +44,7 @@ public class CollectingGappleShulker extends State {
                 if (HighwayContext.shulkerItemList.contains(((ItemEntity) entity).getItem().getItem())) {
                     if (context.getItemCountInventory(Item.getId(Items.AIR)) == 0) {
                         // No space for shulker, need to do removal
-                        context.transitionTo(HighwayState.InventoryCleaningGappleShulker);
+                        context.transitionTo(HighwayState.InventoryCleaningTotemShulker);
                         context.resetTimer();
                     }
                     context.baritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(new BetterBlockPos(entity.getX(), entity.getY(), entity.getZ())));
@@ -55,16 +55,16 @@ public class CollectingGappleShulker extends State {
 
         // No more shulker boxes to find
         if (context.getShulkerCountInventory(ShulkerType.Any) <= context.preMineShulkerCount()
-                && context.maybeStartThiefHunt(HighwayState.CollectingGappleShulker)) {
+                && context.maybeStartThiefHunt(HighwayState.CollectingTotemShulker)) {
             return; // The mined box never reached the inventory and a piglin is carrying one
         }
-        if (context.refillingGapples()) {
-            if (context.settings().highwayStashGappleShulkers.value && context.getShulkerCountInventory(ShulkerType.Gapple) > 0) {
+        if (context.refillingTotems()) {
+            if (context.settings().highwayStashTotemShulkers.value && context.getShulkerCountInventory(ShulkerType.Totem) > 0) {
                 context.transitionTo(HighwayState.EnderChestStashPlaceLocPrep); // fetched from storage: put it back
                 return;
             }
             // Carry mode, or the shulker emptied out while topping up: nothing to stash
-            context.setRefillingGapples(false);
+            context.setRefillingTotems(false);
             context.releaseEnderChestAccessLoc();
         }
         context.transitionTo(HighwayState.Nothing);

@@ -1624,6 +1624,29 @@ public final class Settings {
     public final Setting<Integer> highwayGapplesToHave = new Setting<>(48);
 
     /**
+     * Grab a totem shulker from ender storage and top totems of undying back up when they run low.
+     * Off by default so bots that don't stock totem shulkers never go looking for one.
+     */
+    public final Setting<Boolean> highwayRefillTotems = new Setting<>(false);
+
+    /**
+     * Totem threshold for acquiring more totems. Counts the offhand totem too.
+     */
+    public final Setting<Integer> highwayTotemsThreshold = new Setting<>(2);
+
+    /**
+     * Minimum amount of totems (offhand included) to stop looting. Raised to at least
+     * highwayTotemsThreshold + 1 so a refill always clears its own trigger.
+     */
+    public final Setting<Integer> highwayTotemsToHave = new Setting<>(5);
+
+    /**
+     * Pause when totems run low and ender storage has no totem shulker left. Off by default:
+     * totems are a safety net, not a build input, so an empty totem stash just keeps building.
+     */
+    public final Setting<Boolean> highwayPauseWhenOutOfTotems = new Setting<>(false);
+
+    /**
      * Obsidian threshold for acquiring more obsidian
      */
     public final Setting<Integer> highwayObsidianThreshold = new Setting<>(32);
@@ -1650,6 +1673,19 @@ public final class Settings {
      * and deposit the shulker back into the ender chest.
      */
     public final Setting<Boolean> highwayStashGappleShulkers = new Setting<>(true);
+
+    /**
+     * Totem shulkers to have in inventory during looting. Only used when
+     * highwayStashTotemShulkers is false.
+     */
+    public final Setting<Integer> highwayTotemShulksToHave = new Setting<>(1);
+
+    /**
+     * Keep totem shulkers in the ender chest instead of the inventory: when totems run low,
+     * grab a totem shulker from the ender chest, loot totems up to highwayTotemsToHave,
+     * and deposit the shulker back into the ender chest.
+     */
+    public final Setting<Boolean> highwayStashTotemShulkers = new Setting<>(true);
 
     /**
      * Ender chests to loot for obsidian farming

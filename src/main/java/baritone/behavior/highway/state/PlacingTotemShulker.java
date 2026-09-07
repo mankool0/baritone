@@ -15,16 +15,28 @@
  * along with Baritone.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package baritone.behavior.highway.enums;
+package baritone.behavior.highway.state;
 
-public enum ShulkerType {
-    EnderChest,
-    NonSilkPickaxe, // For paving
-    //SilkPickaxe,
-    AnyPickaxe, // For digging
-    DepletedPickaxe,
-    Gapple,
-    Totem,
-    Empty,
-    Any
+import baritone.behavior.highway.enums.HighwayState;
+import baritone.behavior.highway.enums.ShulkerType;
+
+public class PlacingTotemShulker extends PlacingShulkerBase {
+    public PlacingTotemShulker(HighwayState state) {
+        super(state);
+    }
+
+    @Override
+    protected HighwayState getPreviousState() {
+        return HighwayState.GoingToPlaceLocTotemShulker;
+    }
+
+    @Override
+    protected HighwayState getNextState() {
+        return HighwayState.OpeningTotemShulker;
+    }
+
+    @Override
+    protected ShulkerType getShulkerType() {
+        return ShulkerType.Totem;
+    }
 }

@@ -65,7 +65,7 @@ public class CollectingEnderShulker extends State {
         } else {
             // Shulker emptied out while topping up: nothing to stash, just resume
             context.setRefillingEnderChests(false);
-            context.setEnderChestAccessLoc(null);
+            context.releaseEnderChestAccessLoc();
             context.transitionTo(HighwayState.Nothing);
         }
     }
