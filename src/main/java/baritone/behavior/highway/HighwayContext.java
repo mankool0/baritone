@@ -721,6 +721,22 @@ public class HighwayContext {
     }
 
     /**
+     * Lifts a point on the walking/placement lane onto the pavement when the road under it is
+     * already obsidian. A digging-only run aims at highwayMainY because that's the floor it digs
+     * down to, but a dig that starts on (or runs through) an already-paved stretch finds obsidian
+     * sitting there: the shulker, the ender chest and our own feet all belong one block up, exactly
+     * where a paving run puts them. Without this the bot mines the road out from under itself and
+     * then keeps failing to place into the block it just tried to stand in.
+     */
+    public BetterBlockPos liftOntoPavement(BetterBlockPos lanePos) {
+        if (paving) {
+            return lanePos; // already one above the obsidian the printer lays
+        }
+        Block at = baritone.bsi.get0(lanePos.x, lanePos.y, lanePos.z).getBlock();
+        return (at == Blocks.OBSIDIAN || at == Blocks.CRYING_OBSIDIAN) ? lanePos.above() : lanePos;
+    }
+
+    /**
      * True if the paved road is directly over our head. This is what separates being underneath the
      * highway from standing in ground the printer simply hasn't mined yet: raw netherrack overhead
      * is not a road, it's the next thing to dig, and it must never trigger a recovery.
@@ -1040,7 +1056,7 @@ public class HighwayContext {
             Vec3 curPos = new Vec3(playerContext.playerFeet().getX() + (backOff * -highwayDirection.getX()),
                     playerContext.playerFeet().getY(),
                     playerContext.playerFeet().getZ() + (backOff * -highwayDirection.getZ()));
-            BetterBlockPos candidate = getClosestPoint(origin, direction, curPos, LocationType.ShulkerEchestInteraction);
+            BetterBlockPos candidate = liftOntoPavement(getClosestPoint(origin, direction, curPos, LocationType.ShulkerEchestInteraction));
             if (firstChoice == null) {
                 firstChoice = candidate;
             }
@@ -2201,20 +2217,67 @@ public class HighwayContext {
     }
 
     public BlockPos findSafeSideStorageSpot(int minBack, int maxBack) {
+        BlockPos behind = scanSideStorageSpots(minBack, maxBack, -1);
+        if (behind != null) {
+            return behind;
+        }
+        // Nothing usable behind us. At a crossing with another highway the side lane is that
+        // highway's corridor rather than our own rail: open air with nothing to set a box on and no
+        // floor to stand on. Look the same distance ahead along our own highway instead.
+        return scanSideStorageSpots(minBack, maxBack, 1);
+    }
+
+    /**
+     * Walks the side-storage line looking for a usable spot, {@code sign} -1 back along the highway
+     * and +1 ahead of us.
+     */
+    private BlockPos scanSideStorageSpots(int minDist, int maxDist, int sign) {
         Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
         Vec3 origin = new Vec3(eChestEmptyShulkOriginVector.x, eChestEmptyShulkOriginVector.y, eChestEmptyShulkOriginVector.z);
-        for (int back = minBack; back <= maxBack; back++) {
+        for (int dist = minDist; dist <= maxDist; dist++) {
             Vec3 curPos = new Vec3(
-                    playerContext.playerFeet().getX() + (back * -highwayDirection.getX()),
+                    playerContext.playerFeet().getX() + (dist * sign * highwayDirection.getX()),
                     playerContext.playerFeet().getY(),
-                    playerContext.playerFeet().getZ() + (back * -highwayDirection.getZ())
+                    playerContext.playerFeet().getZ() + (dist * sign * highwayDirection.getZ())
             );
             BetterBlockPos candidate = getClosestPoint(origin, direction, curPos, LocationType.SideStorage);
-            if (isSideStorageSpotSafe(candidate)) {
+            if (isSideStorageSpotUsable(candidate)) {
                 return candidate;
             }
         }
         return null;
+    }
+
+    /**
+     * A side-storage spot we can actually work with: lava-free, with something under it to set the
+     * box on, and a floor beside it to stand on while placing and opening it. The lava-only check
+     * this wraps happily handed back spots hanging in the middle of a crossing highway's corridor,
+     * where the support block has nothing to attach to and the standing spot is thin air.
+     */
+    public boolean isSideStorageSpotUsable(BlockPos placeLoc) {
+        if (!isSideStorageSpotSafe(placeLoc)) {
+            return false;
+        }
+        // Under the box: either solid already, or a face the support block can be placed against
+        if (!MovementHelper.canWalkOn(baritone.bsi, placeLoc.getX(), placeLoc.getY() - 1, placeLoc.getZ())
+                && !hasSturdyNeighbor(placeLoc.below())) {
+            return false;
+        }
+        // We stand one step along the highway from the box to place it and to open it
+        BlockPos stand = placeLoc.offset(highwayDirection.getX(), 0, highwayDirection.getZ());
+        return MovementHelper.canWalkOn(baritone.bsi, stand.getX(), stand.getY() - 1, stand.getZ());
+    }
+
+    private boolean hasSturdyNeighbor(BlockPos pos) {
+        for (Direction d : Direction.values()) {
+            BlockPos neighbor = pos.relative(d);
+            BlockState state = playerContext.world().getBlockState(neighbor);
+            if (!state.isAir() && state.getFluidState().isEmpty()
+                    && state.isFaceSturdy(playerContext.world(), neighbor, d.getOpposite())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean canPlaceBlockAt(BlockPos pos) {
@@ -2863,7 +2926,7 @@ public class HighwayContext {
         BetterBlockPos lane = getClosestPoint(new Vec3(backPathOriginVector.x, backPathOriginVector.y, backPathOriginVector.z),
                 direction, new Vec3(buildLinePos.getX(), buildLinePos.getY(), buildLinePos.getZ()), LocationType.ShulkerEchestInteraction);
         int off = stepsAlongHighway(lane, buildLinePos);
-        return off == 0 ? lane : new BetterBlockPos(lane.offset(off * highwayDirection.getX(), 0, off * highwayDirection.getZ()));
+        return liftOntoPavement(off == 0 ? lane : new BetterBlockPos(lane.offset(off * highwayDirection.getX(), 0, off * highwayDirection.getZ())));
     }
 
     public boolean isHighwayEndComplete() {

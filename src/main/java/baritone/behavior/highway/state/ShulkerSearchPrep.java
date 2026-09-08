@@ -34,7 +34,7 @@ public class ShulkerSearchPrep extends State {
         Vec3 curPos = new Vec3(context.playerContext().playerFeet().getX() + (context.settings().highwayMaxLostShulkerSearchDist.value * -context.highwayDirection().getX()), context.playerContext().playerFeet().getY(), context.playerContext().playerFeet().getZ() + (context.settings().highwayMaxLostShulkerSearchDist.value * -context.highwayDirection().getZ()));
         Vec3 direction = new Vec3(context.highwayDirection().getX(), context.highwayDirection().getY(), context.highwayDirection().getZ());
 
-        context.setPlaceLoc(context.getClosestPoint(new Vec3(context.backPathOriginVector().x, context.backPathOriginVector().y, context.backPathOriginVector().z), direction, curPos, LocationType.ShulkerEchestInteraction));
+        context.setPlaceLoc(context.liftOntoPavement(context.getClosestPoint(new Vec3(context.backPathOriginVector().x, context.backPathOriginVector().y, context.backPathOriginVector().z), direction, curPos, LocationType.ShulkerEchestInteraction)));
         // Get the closest point and shift it so it's in the middle of the highway
 
         context.settings().buildRepeat.value = new Vec3i(0, 0, 0);

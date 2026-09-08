@@ -42,10 +42,10 @@ public class LootEnderChestPlaceLocPrep extends State {
         context.setRepeatCheck(false);
         context.resetTimer();
 
-        // Start ~7 blocks back and scan further back for a spot without lava behind it
+        // Start ~7 blocks back and scan further back, then ahead, for a spot we can place into
         BlockPos safeLoc = context.findSafeSideStorageSpot(7, 25);
         if (safeLoc == null) {
-            Helper.HELPER.logDirect("Couldn't find a lava-free ender chest spot, pausing.");
+            Helper.HELPER.logDirect("Couldn't find a usable ender chest spot, pausing.");
             context.baritone().getPathingBehavior().cancelEverything();
             context.setPaused(true);
             return;

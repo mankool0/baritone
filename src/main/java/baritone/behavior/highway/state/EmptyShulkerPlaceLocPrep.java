@@ -36,10 +36,10 @@ public class EmptyShulkerPlaceLocPrep extends State {
             return;
         }
 
-        // Start ~7 blocks back and scan further back for a spot without lava behind it
+        // Start ~7 blocks back and scan further back, then ahead, for a spot we can place into
         BlockPos safeLoc = context.findSafeSideStorageSpot(7, 25);
         if (safeLoc == null) {
-            Helper.HELPER.logDirect("Couldn't find a lava-free empty shulker spot, skipping.");
+            Helper.HELPER.logDirect("Couldn't find a usable empty shulker spot, skipping.");
             context.transitionTo(HighwayState.Nothing);
             return;
         }

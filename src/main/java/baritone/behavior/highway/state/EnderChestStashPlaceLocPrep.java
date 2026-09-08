@@ -30,7 +30,7 @@ import net.minecraft.world.level.block.state.BlockState;
 /**
  * After topping up loose ender chests (digging) or gapples, decide where to reopen ender storage to
  * stash the shulker back. Reuses the access chest placed during the earlier grab if it's still there
- * (it was left placed and is only a few blocks away); otherwise finds a fresh, lava-free side spot.
+ * (it was left placed and is only a few blocks away); otherwise finds a fresh, usable side spot.
  * Both paths hand off to the shared loot-access chain, which places-or-detects the chest and opens it.
  */
 public class EnderChestStashPlaceLocPrep extends State {
