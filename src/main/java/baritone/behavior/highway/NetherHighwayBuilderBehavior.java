@@ -436,6 +436,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         Helper.HELPER.logDirect("Paused: " + highwayContext.paused());
         Helper.HELPER.logDirect("Timer: " + highwayContext.timer());
         Helper.HELPER.logDirect("startShulkerCount: " + highwayContext.startShulkerCount());
+        Helper.HELPER.logDirect(highwayContext.frontDistanceDiagnostic());
+        Helper.HELPER.logDirect(highwayContext.walkGateDiagnostic());
     }
 
     @Override
@@ -505,35 +507,48 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 // override movement input installed, which ignores the real walk key entirely
                 baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, false);
             }
-            int lengthFront = highwayContext.getHighwayLengthFront();
+            // both sides of these comparisons are blocks along the highway, including creepMaxOvershoot
+            int frontDistance = highwayContext.getHighwayFrontDistance();
             // a dispatched repair needs to path to a block behind us; creeping forward (and
             // steering back to the lane center) would drag the bot off that path every tick
-            walk = !highwayContext.invalidBlockFixActive()
-                    && lengthFront >= settings.highwayEndDistance.value
-                    // only creep while the build front is right in front of us
-                    && lengthFront < settings.highwayEndDistance.value + highwayContext.creepMaxOvershoot()
-                    && highwayContext.canWalkOnFloorAhead()
-                    // a solid at body height on an all-correct stretch is schematic-valid (the
-                    // ledge of a paved section, the wall of a pocket in the floor) and will never
-                    // be dug; the creep can't jump it, so release and let the builder path instead
-                    && highwayContext.canWalkThroughAhead()
-                    // never creep into a lit portal waiting for its frame to be mined
-                    && highwayContext.noPortalAhead()
-                    // release the key while an inventory move waits for a tick without movement input
-                    && !baritone.getInventoryPauserProcess().calmPausePending()
-                    // while a segment executes the path executor owns the movement keys; forcing
-                    // the walk key under it would shove the player off the moves it planned
-                    && !pathing;
-            if (walk && interacting) {
-                if (baritone.getInputOverrideHandler().isInputForcedDown(Input.SNEAK)) {
-                    // a stationary sneak-placement needs stillness in either mode
-                    walk = false;
-                } else if (!highwayContext.paving()) {
-                    walk = baritone.getLookBehavior().getTargetRotation()
-                            .map(rot -> Math.abs(Mth.degreesDifference(rot.getYaw(), highwayContext.highwayDirectionYaw())) <= 50)
-                            .orElse(false);
-                }
+            // Same conditions in the same order as before, evaluated one at a time so nhwstatus can
+            // say which one is actually holding the key down
+            String walkBlocker = null;
+            if (highwayContext.invalidBlockFixActive()) {
+                walkBlocker = "invalid-block repair";
+            } else if (frontDistance < settings.highwayEndDistance.value) {
+                walkBlocker = "front too close";
+            } else if (frontDistance >= settings.highwayEndDistance.value + highwayContext.creepMaxOvershoot()) {
+                // only creep while the build front is right in front of us
+                walkBlocker = "front too far";
+            } else if (!highwayContext.canWalkOnFloorAhead()) {
+                walkBlocker = "no floor ahead";
+            } else if (!highwayContext.canWalkThroughAhead()) {
+                // a solid at body height on an all-correct stretch is schematic-valid (the
+                // ledge of a paved section, the wall of a pocket in the floor) and will never
+                // be dug; the creep can't jump it, so release and let the builder path instead
+                walkBlocker = "blocked at body height ahead";
+            } else if (!highwayContext.noPortalAhead()) {
+                // never creep into a lit portal waiting for its frame to be mined
+                walkBlocker = "portal ahead";
+            } else if (baritone.getInventoryPauserProcess().calmPausePending()) {
+                // release the key while an inventory move waits for a tick without movement input
+                walkBlocker = "inventory pause";
+            } else if (pathing) {
+                // while a segment executes the path executor owns the movement keys; forcing
+                // the walk key under it would shove the player off the moves it planned
+                walkBlocker = "pathing";
+            } else if (interacting && baritone.getInputOverrideHandler().isInputForcedDown(Input.SNEAK)) {
+                // a stationary sneak-placement needs stillness in either mode
+                walkBlocker = "sneak placement";
+            } else if (interacting && !highwayContext.paving()
+                    && !baritone.getLookBehavior().getTargetRotation()
+                    .map(rot -> Math.abs(Mth.degreesDifference(rot.getYaw(), highwayContext.highwayDirectionYaw())) <= 50)
+                    .orElse(false)) {
+                walkBlocker = "aim off the highway";
             }
+            walk = walkBlocker == null;
+            highwayContext.noteWalkGate(walkBlocker);
             if (walk && !baritone.getLookBehavior().hasTargetThisTick()) {
                 // nothing owns the look this tick; without this the held key walks wherever
                 // the last rotation happened to leave the camera

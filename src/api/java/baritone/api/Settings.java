@@ -1891,7 +1891,7 @@ public final class Settings {
     public final Setting<Boolean> highwayRailHigh = new Setting<>(true);
 
     /**
-     * If not -1 will keep this distance from the end of the highway
+     * If not -1 will keep this distance, in blocks along the highway, from the end of the highway
      * Useful for digging small tunnels quicker
      */
     public final Setting<Integer> highwayEndDistance = new Setting<>(-1);

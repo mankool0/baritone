@@ -71,7 +71,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
@@ -2764,10 +2766,10 @@ public class HighwayContext {
         return 2 * (int) Math.ceil(settings.blockReachDistance.value);
     }
 
-    public int getHighwayLengthFront() {
+    public int getHighwayFrontDistance() {
         // scan far enough that the configured stand-off distance is actually reachable, and past it far
         // enough that the caller can tell "the front is right there" from "the front is a hike away"
-        return scanFrontLength(Math.max(10, settings.highwayEndDistance.value + creepMaxOvershoot()), false);
+        return scanFrontDistance(Math.max(10, settings.highwayEndDistance.value + creepMaxOvershoot()));
     }
 
     /**
@@ -2778,10 +2780,227 @@ public class HighwayContext {
      * break out again.
      */
     public int builtSlicesAhead(int maxScan) {
-        return scanFrontLength(maxScan, true);
+        return scanFrontLength(maxScan);
     }
 
-    private int scanFrontLength(int scanLength, boolean stopAtUnloaded) {
+    // what the last scanFrontDistance was pinned on, for nhwstatus
+    private BlockPos frontBlockerSlice;
+    private int frontBlockerX;
+    private int frontBlockerY;
+    private int frontBlockerZ;
+    private double frontBlockerAlong;
+    private double frontBlockerCross;
+    private int frontBlockerColumn;
+    private int frontBlockerCrossLen;
+    private double frontBlockerPlayerColumn;
+    private int frontBlockerLaneLo;
+    private int frontBlockerLaneHi;
+
+    // why the walk-creep did or didn't hold the key, tallied since the last nhwstatus
+    private final Map<String, Integer> walkGateTally = new LinkedHashMap<>();
+    private int walkGateTicks;
+    private int walkGateHeld;
+
+    /** Records the first condition that stopped the walk-creep holding the key this tick, or null if it held. */
+    public void noteWalkGate(String blocker) {
+        walkGateTicks++;
+        if (blocker == null) {
+            walkGateHeld++;
+        } else {
+            walkGateTally.merge(blocker, 1, Integer::sum);
+        }
+    }
+
+    /** What has been stopping the walk-creep since this was last asked. Reading it resets the tally. */
+    public String walkGateDiagnostic() {
+        if (walkGateTicks == 0) {
+            return "Walk gate: not evaluated (highwayEndDistance is -1, or not in BuildingHighway)";
+        }
+        StringBuilder sb = new StringBuilder(String.format("Walk gate: held %d of %d ticks (%d%%)",
+                walkGateHeld, walkGateTicks, Math.round(100.0 * walkGateHeld / walkGateTicks)));
+        walkGateTally.entrySet().stream()
+                .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
+                .forEach(e -> sb.append(" | ").append(e.getKey()).append(" x").append(e.getValue()));
+        walkGateTally.clear();
+        walkGateTicks = 0;
+        walkGateHeld = 0;
+        return sb.toString();
+    }
+
+    /** Blocks of travel per schematic slice: 1 on a straight highway, sqrt(2) on a diagonal. */
+    private double stepLength() {
+        return Math.sqrt(highwayDirection.getX() * highwayDirection.getX()
+                + highwayDirection.getZ() * highwayDirection.getZ());
+    }
+
+    /**
+     * Distance in blocks along the highway from the player to the nearest cell the schematic still
+     * wants changed, capped at {@code maxBlocks}.
+     * <p>
+     * Blocks rather than slices, because a slice index is not a distance on a diagonal. The schematic
+     * is sliced on a world axis, so a diagonal slice is sqrt(2) blocks long and its own cells are
+     * spread a further (cross section - 1) / sqrt(2) blocks along the travel axis - all of them ahead
+     * of the slice's origin for +X+Z and +X-Z, all behind it for -X-Z and -X+Z, since the schematic is
+     * laid out from its low-cross-axis corner whichever way we're heading. Counting slices therefore
+     * read the front several blocks late in one diagonal sense and several blocks early in the other,
+     * and only the latter ever cleared the walk-creep's stand-off distance: the two +X diagonals never
+     * creeped at all and built the whole road from pathed break goals, stopping at each end of the
+     * 45-degree slice in turn. On a straight highway a slice is exactly one block along travel and
+     * this returns what the slice count returned.
+     */
+    private int scanFrontDistance(int maxBlocks) {
+        Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
+        Vec3 curPosPlayer = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
+        BlockPos startCheckPos = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z), direction, curPosPlayer, LocationType.HighwayBuild);
+
+        int dirX = highwayDirection.getX();
+        int dirZ = highwayDirection.getZ();
+        int lenSq = dirX * dirX + dirZ * dirZ;
+        double stepLen = stepLength();
+
+        boolean crossZ = schematic.lengthZ() >= schematic.widthX();
+        int crossLen = crossZ ? schematic.lengthZ() : schematic.widthX();
+        // One column across the highway shifts a cell crossAlong along the highway and crossPerp across
+        // it, both unnormalised, so both come out in blocks once divided by stepLen. crossAlong is 0 on
+        // a straight, where a slice is perpendicular to travel, and +-1 on a diagonal, where it isn't.
+        int crossAlong = crossZ ? dirZ : dirX;
+        int crossPerp = crossZ ? dirX : -dirZ;
+        // measured from the centre of the block we're standing in, so the reading only moves when we
+        // change block rather than jittering with the walk; the +0.5s cancel between the two centres
+        int relX = startCheckPos.getX() - playerContext.playerFeet().getX();
+        int relZ = startCheckPos.getZ() - playerContext.playerFeet().getZ();
+        double alongBase = relX * dirX + relZ * dirZ;
+        double perpBase = -relX * dirZ + relZ * dirX;
+
+        // The corridor the creep walks down: the column we stand in and one either side, clamped to
+        // the walk lane at cross-axis offsets [1, highwayWidth] so the rails stay out of it. This is
+        // the N-block generalisation of canWalkOnFloorAhead/canWalkThroughAhead, which ask the same
+        // question about the single next step.
+        //
+        // Not the full width, because on a diagonal the road's outer columns lie ahead as well as to
+        // the side: measured in game at width 7, column 7 of 8 sat 2.8 to 3.5 blocks across and 1.4
+        // to 3.5 along, up to 5.3 from the eye against a 4.5 reach, so it could not be dug from the
+        // lane at all - the bot digs it on the way past, when it draws level. "The whole width is
+        // finished N blocks ahead" is therefore never true while a diagonal is being built. It isn't
+        // a sign the printer is behind, and gating the walk on it reduced the walk to an inch.
+        // Work to either side is still dug by the builder, still bounded by creepMaxOvershoot, and
+        // still verified across the full cross-section by the back-check behind us.
+        double playerColumn = -perpBase / crossPerp;
+        playerColumn = Math.max(0, Math.min(crossLen - 1, playerColumn)); // standing off the side still measures a real corridor
+        int bodyColumn = (int) Math.round(playerColumn);
+        int laneLo = Math.max(1, bodyColumn - 1);
+        int laneHi = Math.min(Math.min(crossLen - 1, settings.highwayWidth.value), bodyColumn + 1);
+
+        // A cell of slice i in column j sits (alongBase + i * lenSq + j * crossAlong) / stepLen blocks
+        // along the highway from us. Solve that for the slices that can put a cell in [0, maxBlocks]:
+        // on a diagonal that reaches back past startCheckPos, since a slice trails cells behind its
+        // own origin, and one of those can be the nearest thing left unbuilt.
+        int alongSpanLo = Math.min(0, (crossLen - 1) * crossAlong);
+        int alongSpanHi = Math.max(0, (crossLen - 1) * crossAlong);
+        int iLo = (int) Math.floor((-alongBase - alongSpanHi) / lenSq);
+        int iHi = (int) Math.ceil((maxBlocks * stepLen - alongBase - alongSpanLo) / lenSq);
+
+        frontBlockerSlice = null;
+        frontBlockerCrossLen = crossLen;
+        frontBlockerPlayerColumn = playerColumn;
+        frontBlockerLaneLo = laneLo;
+        frontBlockerLaneHi = laneHi;
+
+        double nearest = maxBlocks; // an all-correct scan means "at least this far built ahead"
+        if (endPos != null) {
+            int stepsToEnd = stepsAlongHighway(startCheckPos, endPos);
+            iHi = Math.min(iHi, stepsToEnd);
+            // past the last slice there is only the end, not more highway
+            nearest = Math.min(nearest, Math.max(0, (alongBase + stepsToEnd * lenSq) / stepLen));
+        }
+
+        for (int i = iLo; i <= iHi; i++) {
+            if ((alongBase + i * lenSq + alongSpanLo) / stepLen >= nearest) {
+                break; // this slice and every one past it is further off than what we already found
+            }
+            BlockPos curPos = startCheckPos.offset(i * dirX, 0, i * dirZ);
+            for (int y = 0; y < schematic.heightY(); y++) {
+                for (int z = 0; z < schematic.lengthZ(); z++) {
+                    for (int x = 0; x < schematic.widthX(); x++) {
+                        int j = crossZ ? z : x;
+                        if (j < laneLo || j > laneHi) {
+                            continue;
+                        }
+                        double along = (alongBase + i * lenSq + j * crossAlong) / stepLen;
+                        if (along < 0 || along >= nearest) {
+                            continue; // behind us, or no closer than what we already found
+                        }
+                        if (cellScan(curPos, x, y, z) == CellScan.MISMATCH) {
+                            nearest = along;
+                            frontBlockerSlice = curPos;
+                            frontBlockerX = x;
+                            frontBlockerY = y;
+                            frontBlockerZ = z;
+                            frontBlockerAlong = along;
+                            frontBlockerCross = (perpBase + j * crossPerp) / stepLen;
+                            frontBlockerColumn = j;
+                        }
+                    }
+                }
+            }
+        }
+        return (int) Math.floor(nearest);
+    }
+
+    /**
+     * What the walk-creep's front distance is currently pinned on. Rescans, so it reports the state
+     * right now rather than whatever the last creep tick happened to see.
+     */
+    public String frontDistanceDiagnostic() {
+        if (schematic == null) {
+            return "Front: no schematic";
+        }
+        int dist = getHighwayFrontDistance();
+        String corridor = String.format("cross-section %d wide, we're in column %.0f, watching columns %d-%d",
+                frontBlockerCrossLen, frontBlockerPlayerColumn, frontBlockerLaneLo, frontBlockerLaneHi);
+        if (frontBlockerSlice == null) {
+            return "Front: " + dist + " blocks, nothing unbuilt in range (" + corridor + ")";
+        }
+        BlockPos pos = frontBlockerSlice.offset(frontBlockerX, frontBlockerY, frontBlockerZ);
+        BlockState current = playerContext.world().getBlockState(pos);
+        BlockState desired = schematic.desiredState(frontBlockerX, frontBlockerY, frontBlockerZ, current, this.approxPlaceable);
+        return String.format("Front: %d blocks, pinned by %d,%d,%d (column %d of %d, %.2f along, %.2f across, y+%d): is %s, wants %s [%s]",
+                dist, pos.getX(), pos.getY(), pos.getZ(),
+                frontBlockerColumn, frontBlockerCrossLen - 1, frontBlockerAlong, frontBlockerCross, frontBlockerY,
+                BlockUtils.blockToString(current.getBlock()), BlockUtils.blockToString(desired.getBlock()), corridor);
+    }
+
+    private enum CellScan {CORRECT, MISMATCH, UNLOADED}
+
+    /**
+     * Whether the cell at schematic coordinates ({@code x}, {@code y}, {@code z}) of the slice starting
+     * at {@code slicePos} already matches the highway. Cells the schematic doesn't cover, and cells held
+     * valid by the block above them, count as correct.
+     */
+    private CellScan cellScan(BlockPos slicePos, int x, int y, int z) {
+        int blockX = x + slicePos.getX();
+        int blockY = y + slicePos.getY();
+        int blockZ = z + slicePos.getZ();
+        BlockState current = playerContext.world().getBlockState(new BlockPos(blockX, blockY, blockZ));
+
+        if (!schematic.inSchematic(x, y, z, current)) {
+            return CellScan.CORRECT;
+        }
+        if (!baritone.bsi.worldContainsLoadedChunk(blockX, blockZ)) {
+            return CellScan.UNLOADED;
+        }
+        // we can directly observe this block, it is in render distance
+
+        ISchematic ourSchem = schematic.getSchematic(x, y, z, current).schematic;
+        if (ourSchem instanceof WhiteBlackSchematic && ((WhiteBlackSchematic) ourSchem).isValidIfUnder() &&
+                MovementHelper.isBlockNormalCube(playerContext.world().getBlockState(new BlockPos(blockX, blockY + 1, blockZ)))) {
+            return CellScan.CORRECT;
+        }
+        return schematic.desiredState(x, y, z, current, this.approxPlaceable).equals(current)
+                ? CellScan.CORRECT : CellScan.MISMATCH;
+    }
+
+    private int scanFrontLength(int scanLength) {
         Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
         Vec3 curPosPlayer = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
         BlockPos startCheckPos = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z), direction, curPosPlayer, LocationType.HighwayBuild);
@@ -2819,29 +3038,8 @@ public class HighwayContext {
                         if (!crossZ && (x < crossLo || x > crossHi)) {
                             continue;
                         }
-                        int blockX = x + curPos.getX();
-                        int blockY = y + curPos.getY();
-                        int blockZ = z + curPos.getZ();
-                        BlockState current = playerContext.world().getBlockState(new BlockPos(blockX, blockY, blockZ));
-
-                        if (!schematic.inSchematic(x, y, z, current)) {
-                            continue;
-                        }
-                        if (!baritone.bsi.worldContainsLoadedChunk(blockX, blockZ)) {
-                            if (stopAtUnloaded) {
-                                return i;
-                            }
-                            continue;
-                        }
-                        // we can directly observe this block, it is in render distance
-
-                        ISchematic ourSchem = schematic.getSchematic(x, y, z, current).schematic;
-                        if (ourSchem instanceof WhiteBlackSchematic && ((WhiteBlackSchematic) ourSchem).isValidIfUnder() &&
-                                MovementHelper.isBlockNormalCube(playerContext.world().getBlockState(new BlockPos(blockX, blockY + 1, blockZ)))) {
-                            continue;
-                        }
-
-                        if (!schematic.desiredState(x, y, z, current, this.approxPlaceable).equals(current)) {
+                        CellScan cell = cellScan(curPos, x, y, z);
+                        if (cell == CellScan.MISMATCH || cell == CellScan.UNLOADED) {
                             return i;
                         }
                     }
@@ -2849,9 +3047,8 @@ public class HighwayContext {
             }
         }
 
-        // the whole scanned stretch is correct; report its length rather than 0. For the walk-creep
-        // that reads as "the front is further off than creeping is for", and for the travel walk it
-        // is how far up the highway it may head in one hop.
+        // the whole scanned stretch is correct; report its length rather than 0, which is how far up
+        // the highway the travel walk may head in one hop.
         return maxResult;
     }
 
@@ -2890,8 +3087,11 @@ public class HighwayContext {
         Vec3 feetVec = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
         BetterBlockPos feetSlice = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z), direction, feetVec, LocationType.HighwayBuild);
 
+        // builtSlicesAhead counts slices while the stand-off distance is in blocks, and a diagonal
+        // slice is sqrt(2) of them
+        int standOffSlices = (int) Math.ceil(Math.max(0, settings.highwayEndDistance.value) / stepLength());
         int hop = builtSlicesAhead(Math.max(32, playerContext.minecraft().options.renderDistance().get() * 16)) - 1
-                - Math.max(0, settings.highwayEndDistance.value);
+                - standOffSlices;
         hop = Math.min(hop, stepsAlongHighway(feetSlice, endPos));
         if (hop <= 0) {
             return false;
