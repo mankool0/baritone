@@ -32,9 +32,12 @@ import baritone.pathing.movement.Movement;
 import baritone.pathing.movement.MovementHelper;
 import baritone.pathing.movement.movements.*;
 import baritone.utils.BlockStateInterface;
+import it.unimi.dsi.fastutil.longs.LongIterator;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.util.Tuple;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.phys.Vec3;
 import java.util.*;
 
@@ -67,6 +70,12 @@ public class PathExecutor implements IPathExecutor, Helper {
     private Integer costEstimateIndex;
     private boolean failed;
     private boolean recalcBP = true;
+    /**
+     * Chunks that have been loaded since this path was calculated, and therefore may disagree with the cached copy
+     * of themselves that the path was calculated from.
+     */
+    private final LongOpenHashSet chunksToVerify = new LongOpenHashSet();
+    private boolean cacheMismatch;
     private HashSet<BlockPos> toBreak = new HashSet<>();
     private HashSet<BlockPos> toPlace = new HashSet<>();
     private HashSet<BlockPos> toWalkInto = new HashSet<>();
@@ -191,6 +200,13 @@ public class PathExecutor implements IPathExecutor, Helper {
             }
         }
         boolean canCancel = movement.safeToCancel();
+        if (!chunksToVerify.isEmpty()) {
+            cacheMismatch |= verifyNewlyLoadedChunks();
+        }
+        if (cacheMismatch && canCancel) {
+            cancel();
+            return true;
+        }
         if (costEstimateIndex == null || costEstimateIndex != pathPosition) {
             costEstimateIndex = pathPosition;
             // do this only once, when the movement starts, and deliberately get the cost as cached when this path was calculated, not the cost as it is right now
@@ -577,6 +593,59 @@ public class PathExecutor implements IPathExecutor, Helper {
         return next instanceof MovementDiagonal && Baritone.settings().allowOvershootDiagonalDescend.value;
     }
 
+    /**
+     * Called when the server sends us a chunk. The chunk cache is only refreshed when this client loads, unloads, or
+     * edits a chunk, so anything another player changed while the chunk was outside of our render distance is invisible
+     * to us until this moment. Any movement of this path that was planned against the cached copy of that chunk has to
+     * be re-checked against what actually arrived.
+     *
+     * @param chunkX The chunk X coordinate
+     * @param chunkZ The chunk Z coordinate
+     */
+    public void onChunkLoaded(int chunkX, int chunkZ) {
+        if (!Baritone.settings().verifyCachedPathOnChunkLoad.value) {
+            return;
+        }
+        chunksToVerify.add(ChunkPos.asLong(chunkX, chunkZ));
+    }
+
+    /**
+     * @return Whether a movement calculated from cached chunk data has been invalidated by what the server sent
+     */
+    private boolean verifyNewlyLoadedChunks() {
+        CalculationContext context = behavior.secretInternalGetCalculationContext();
+        if (context == null) {
+            return false;
+        }
+        LongIterator it = chunksToVerify.iterator();
+        while (it.hasNext()) {
+            long chunk = it.nextLong();
+            int chunkX = ChunkPos.getX(chunk);
+            int chunkZ = ChunkPos.getZ(chunk);
+            if (!context.bsi.worldContainsLoadedChunk(chunkX << 4, chunkZ << 4)) {
+                continue; // our view of the world predates the chunk arriving, try again next tick
+            }
+            it.remove();
+            for (int i = pathPosition; i < path.movements().size(); i++) {
+                Movement m = (Movement) path.movements().get(i);
+                if (m.calculatedWhileLoaded()) {
+                    continue; // planned against the real world rather than the cache, so it was never a guess
+                }
+                if (m.getDest().x >> 4 != chunkX || m.getDest().z >> 4 != chunkZ) {
+                    continue;
+                }
+                double planned = m.getCost();
+                double actual = m.calculateCost(context);
+                if (actual >= ActionCosts.COST_INF || actual - planned > Baritone.settings().maxCostIncrease.value) {
+                    logDebug("Chunk " + chunkX + ", " + chunkZ + " doesn't match the cached copy this path was calculated from"
+                            + " (movement " + i + " cost " + planned + " -> " + actual + "). Cancelling.");
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private void onChangeInPathPosition() {
         clearKeys();
         ticksOnCurrent = 0;
@@ -614,6 +683,8 @@ public class PathExecutor implements IPathExecutor, Helper {
             ret.currentMovementOriginalCostEstimate = currentMovementOriginalCostEstimate;
             ret.costEstimateIndex = costEstimateIndex;
             ret.ticksOnCurrent = ticksOnCurrent;
+            ret.chunksToVerify.addAll(chunksToVerify);
+            ret.cacheMismatch = cacheMismatch;
             return ret;
         }).orElseGet(this::cutIfTooLong); // dont actually call cutIfTooLong every tick if we won't actually use it, use a method reference
     }
@@ -635,6 +706,8 @@ public class PathExecutor implements IPathExecutor, Helper {
                 ret.costEstimateIndex = costEstimateIndex - cutoffAmt;
             }
             ret.ticksOnCurrent = ticksOnCurrent;
+            ret.chunksToVerify.addAll(chunksToVerify);
+            ret.cacheMismatch = cacheMismatch;
             return ret;
         }
         return this;

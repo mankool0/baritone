@@ -108,6 +108,23 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
     }
 
     @Override
+    public void onChunkEvent(ChunkEvent event) {
+        if (!event.isPostPopulate()) {
+            return;
+        }
+        // the chunk cache only knows about chunks that we loaded, unloaded, or edited ourselves, so a chunk arriving
+        // is the first (and only) chance to notice that someone else changed it while it was out of render distance
+        PathExecutor curr = current;
+        if (curr != null) {
+            curr.onChunkLoaded(event.getX(), event.getZ());
+        }
+        PathExecutor nxt = next;
+        if (nxt != null) {
+            nxt.onChunkLoaded(event.getX(), event.getZ());
+        }
+    }
+
+    @Override
     public void onPlayerSprintState(SprintStateEvent event) {
         if (isPathing()) {
             event.setState(current.isSprinting());

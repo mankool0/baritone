@@ -552,6 +552,17 @@ public final class Settings {
     public final Setting<Integer> costVerificationLookahead = new Setting<>(5);
 
     /**
+     * Whenever a chunk is loaded, re-check the movements of the current path that go through it and were calculated
+     * from cached chunk data instead of from the real world. If the chunk the server actually sent doesn't match what
+     * the cache claimed (someone else built or mined there while it was outside of render distance), cancel and
+     * recalculate instead of walking into it.
+     * <p>
+     * Matters when more than one bot is changing the same area: the cache of a chunk is only refreshed when this
+     * client loads, unloads, or edits it, so another bot's work is invisible until we get close enough to load it.
+     */
+    public final Setting<Boolean> verifyCachedPathOnChunkLoad = new Setting<>(true);
+
+    /**
      * Static cutoff factor. 0.9 means cut off the last 10% of all paths, regardless of chunk load state
      */
     public final Setting<Double> pathCutoffFactor = new Setting<>(0.9);
