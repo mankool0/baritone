@@ -102,14 +102,12 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
     @Override
     public void build(int startX, int startZ, Vec3i direct, boolean selfSolve, boolean pave, Vec3i endCoords, Vec3i startCoords) {
-        highwayContext.setEndPos(null); // a stale end would clamp the projections below
-        highwayContext.setFirstStartingPos(null); // and a stale start from a paused leg would too, under the NEW direction
+        teardown(); // nhwbuild is a restart, not an overlay: nothing the last build held survives it
         highwayContext.setHighwayDirection(direct);
         highwayContext.setPaving(pave);
         highwayContext.setCachedHealth(ctx.player().getHealth());
         highwayContext.setCachedAbsorption(ctx.player().getAbsorptionAmount());
         startDimension = ctx.world().dimension();
-        wrongDimension = false;
 
         if (!highwayContext.paving()) {
             // Only digging so any pickaxe works
@@ -237,8 +235,6 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 + (!railLow && !railHigh ? "none" : ""));
         Helper.HELPER.logDirect("Building from " + highwayContext.originBuild().toString());
         settings.buildRepeat.value = new Vec3i(highwayContext.highwayDirection().getX(), 0, highwayContext.highwayDirection().getZ());
-        baritone.getPathingBehavior().cancelEverything();
-
 
         highwayContext.setEnderChestHasPickShulks(true);
         highwayContext.setEnderChestHasEnderShulks(true);
@@ -249,15 +245,28 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         highwayContext.setRefillingTotems(false);
         highwayContext.setStashingShulker(false);
         highwayContext.setEnderChestAccessLoc(null);
-        highwayContext.setRepeatCheck(false);
         highwayContext.resetThiefHunt();
         highwayContext.clearLostShulkerRelogAttempt();
         highwayContext.setStartShulkerCount(highwayContext.getShulkerCountInventory(ShulkerType.Any));
         highwayContext.setPaused(false);
         highwayContext.resetThroughWallDetection();
+        highwayContext.transitionTo(HighwayState.Nothing);
+    }
+
+    private void teardown() {
+        highwayContext.setRepeatCheck(false);
+        wrongDimension = false;
+        highwayContext.resetRecovery(); // held keys, suppressHitResult, and settings (e.g. allowSwimThroughLava) overridden during recovery
         highwayContext.clearInvalidBlockFix();
         highwayContext.stopTravelTowardsEnd();
-        highwayContext.transitionTo(HighwayState.Nothing);
+        highwayContext.transitionTo(HighwayState.Nothing); // onExit: whatever the state we interrupt holds
+        setWalkForward(false);
+        baritone.getInputOverrideHandler().clearAllKeys();
+        baritone.getPathingBehavior().cancelEverything();
+        highwayContext.setFirstStartingPos(null); // a stale start or end clamps every projection the next build makes
+        highwayContext.setOriginBuild(null);
+        highwayContext.setEndPos(null);
+        settings.buildRepeatCount.value = -1; // Nothing clamps it while an end is set
     }
 
     /** +X, -X, +X+Z, -X-Z: the schematic is 1 wide in X and extends in Z; the cross-axis is Z. */
@@ -412,19 +421,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         Helper.HELPER.logDirect("STOPPING NETHERHIGHWAYBUILDER");
         Helper.HELPER.logDirect("Was at state " + highwayContext.currentState().getState() + " before termination");
 
+        teardown();
         highwayContext.setPaused(true);
-        highwayContext.setRepeatCheck(false);
-        wrongDimension = false;
-        highwayContext.resetRecovery(); // restore any settings (e.g. allowSwimThroughLava) overridden during recovery
-        highwayContext.clearInvalidBlockFix();
-        highwayContext.stopTravelTowardsEnd();
-        highwayContext.transitionTo(HighwayState.Nothing);
-        setWalkForward(false);
-        baritone.getPathingBehavior().cancelEverything();
-        highwayContext.setFirstStartingPos(null);
-        highwayContext.setOriginBuild(null);
-        highwayContext.setEndPos(null);
-        settings.buildRepeatCount.value = -1; // Nothing clamps it while an end is set
     }
 
     @Override
@@ -433,7 +431,10 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         if (highwayContext.endPos() != null) {
             Helper.HELPER.logDirect("End: " + highwayContext.endPos().toString());
         }
-        Helper.HELPER.logDirect("Paused: " + highwayContext.paused());
+        Helper.HELPER.logDirect("Paused: " + highwayContext.paused()); // true/false alone: hive.py reads this line
+        if (highwayContext.pauseReason() != null) {
+            Helper.HELPER.logDirect("Pause reason: " + highwayContext.pauseReason());
+        }
         Helper.HELPER.logDirect("Timer: " + highwayContext.timer());
         Helper.HELPER.logDirect("startShulkerCount: " + highwayContext.startShulkerCount());
         Helper.HELPER.logDirect(highwayContext.frontDistanceDiagnostic());

@@ -33,4 +33,6 @@ public abstract class State {
     }
 
     public abstract void handle(HighwayContext context);
+
+    public void onExit(HighwayContext context) {}
 }

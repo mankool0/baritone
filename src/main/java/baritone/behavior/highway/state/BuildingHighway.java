@@ -72,9 +72,8 @@ public class BuildingHighway extends State {
             if (context.getShulkerCountInventory(context.picksToUse()) == 0) {
                 if (context.repeatCheck()) {
                     if (!context.enderChestHasPickShulks()) {
-                        Helper.HELPER.logDirect("Out of picks, refill ender chest and inventory and restart.");
                         context.baritone().getPathingBehavior().cancelEverything();
-                        context.setPaused(true);
+                        context.pause("Out of picks, refill ender chest and inventory and restart.");
                         return;
                     }
                     Helper.HELPER.logDirect("Shulker count is under threshold, checking ender chest");
@@ -97,9 +96,8 @@ public class BuildingHighway extends State {
             if (context.getShulkerCountInventory(ShulkerType.EnderChest) == 0) {
                 if (context.repeatCheck()) {
                     if (!context.enderChestHasEnderShulks()) {
-                        Helper.HELPER.logDirect("Out of ender chests, refill ender chest and inventory and restart.");
                         context.baritone().getPathingBehavior().cancelEverything();
-                        context.setPaused(true);
+                        context.pause("Out of ender chests, refill ender chest and inventory and restart.");
                         return;
                     }
                     Helper.HELPER.logDirect("Shulker count is under threshold, checking ender chest");
@@ -136,9 +134,8 @@ public class BuildingHighway extends State {
             }
             if (context.repeatCheck()) {
                 if (!context.enderChestHasEnderShulks()) {
-                    Helper.HELPER.logDirect("Low on ender chests and none in storage, pausing before we run dry.");
                     context.baritone().getPathingBehavior().cancelEverything();
-                    context.setPaused(true);
+                    context.pause("Low on ender chests, and none in storage to fetch.");
                     return;
                 }
                 // Fetch a shulker (also tops picks/gapples) from storage, then loop back here to top up
@@ -157,9 +154,8 @@ public class BuildingHighway extends State {
             if (context.getShulkerCountInventory(ShulkerType.Gapple) == 0) {
                 if (context.repeatCheck()) {
                     if (!context.enderChestHasGappleShulks()) {
-                        Helper.HELPER.logDirect("Out of gapples, refill ender chest and inventory and restart.");
                         context.baritone().getPathingBehavior().cancelEverything();
-                        context.setPaused(true);
+                        context.pause("Out of gapples, refill ender chest and inventory and restart.");
                         return;
                     }
                     Helper.HELPER.logDirect("Out of gapples, fetching a gapple shulker from the ender chest.");
@@ -199,9 +195,8 @@ public class BuildingHighway extends State {
                     // something the build consumes, so by default we just carry on without them
                     // and stop retrying until the next startBuild resets the flag.
                     if (context.settings().highwayPauseWhenOutOfTotems.value) {
-                        Helper.HELPER.logDirect("Out of totems, refill ender chest and inventory and restart.");
                         context.baritone().getPathingBehavior().cancelEverything();
-                        context.setPaused(true);
+                        context.pause("Out of totems, refill ender chest and inventory and restart.");
                         return;
                     }
                 } else if (context.repeatCheck()) {

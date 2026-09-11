@@ -17,7 +17,6 @@
 
 package baritone.behavior.highway.state;
 
-import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
@@ -46,10 +45,9 @@ public class PortalEscape extends State {
         BlockPos target = context.findPortalEscapeTarget();
         if (target == null) {
             // boxed in: hand over to a human instead of bouncing between dimensions
-            Helper.HELPER.logDirect("Inside a nether portal with nowhere to step out, pausing.");
             context.baritone().getInputOverrideHandler().clearAllKeys();
             context.transitionTo(HighwayState.Nothing);
-            context.setPaused(true);
+            context.pause("Inside a nether portal with nowhere to step out.");
             return;
         }
 

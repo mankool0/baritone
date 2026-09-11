@@ -17,7 +17,6 @@
 
 package baritone.behavior.highway.state;
 
-import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
@@ -33,9 +32,8 @@ public class LootEnderChestPlaceLocPrep extends State {
     @Override
     public void handle(HighwayContext context) {
         if (context.getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) == 0) {
-            Helper.HELPER.logDirect("No ender chests, pausing");
             context.baritone().getPathingBehavior().cancelEverything();
-            context.setPaused(true);
+            context.pause("No ender chest to place.");
             return;
         }
 
@@ -45,9 +43,8 @@ public class LootEnderChestPlaceLocPrep extends State {
         // Start ~7 blocks back and scan further back, then ahead, for a spot we can place into
         BlockPos safeLoc = context.findSafeSideStorageSpot(7, 25);
         if (safeLoc == null) {
-            Helper.HELPER.logDirect("Couldn't find a usable ender chest spot, pausing.");
             context.baritone().getPathingBehavior().cancelEverything();
-            context.setPaused(true);
+            context.pause("Couldn't find a usable ender chest spot.");
             return;
         }
 

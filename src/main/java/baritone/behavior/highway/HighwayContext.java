@@ -152,6 +152,7 @@ public class HighwayContext {
     private int preMineShulkerCount = -1; // inventory shulker count snapshotted before a refill box is mined
     private BetterBlockPos recoveryTarget = null;
     private int recoveryExtraBack = 0;
+    private boolean recoveryHoldingJump = false; // here, not on FallRecovery: transitionTo throws the state object away, and a latched jump key would outlive it
     private Boolean recoverySwimThroughLavaSaved = null; // non-null while we've overridden allowSwimThroughLava for recovery
     private boolean invalidBlockFixActive = false;
     private int invalidBlockFixNoPathTicks = 0;
@@ -178,6 +179,7 @@ public class HighwayContext {
     private Vec3i highwayDirection = new Vec3i(1, 0, -1);
     private boolean paving = false;
     private boolean paused = false;
+    private String pauseReason = null;
     private boolean cursorStackNonEmpty = false;
 
     public BlockPos placeLoc() {
@@ -538,6 +540,9 @@ public class HighwayContext {
                 playerContext.minecraft().options.keyUse.setDown(false);
             }
         }
+        if (currentState != null && currentState.getState() != nextState) {
+            currentState.onExit(this);
+        }
         currentState = StateFactory.getState(nextState);
     }
 
@@ -664,10 +669,22 @@ public class HighwayContext {
         restoreLavaSwimming();
         recoveryTarget = null;
         recoveryExtraBack = 0;
+        recoveryHoldingJump = false;
         NetherHighwayBuilderBehavior.suppressHitResult = false;
         if (playerContext.minecraft() != null) {
             playerContext.minecraft().options.keyJump.setDown(false);
             playerContext.minecraft().options.keyUse.setDown(false);
+        }
+    }
+
+    /** Hold (or release) the jump key that floats us at the lava surface during recovery. */
+    public void setRecoveryHoldingJump(boolean holding) {
+        if (recoveryHoldingJump == holding) {
+            return;
+        }
+        recoveryHoldingJump = holding;
+        if (playerContext.minecraft() != null) {
+            playerContext.minecraft().options.keyJump.setDown(holding);
         }
     }
 
@@ -1294,8 +1311,25 @@ public class HighwayContext {
         return paused;
     }
 
+    public String pauseReason() {
+        return pauseReason;
+    }
+
+    /**
+     * Stop the state machine where it stands and say why. Nothing leaves this by itself - only a
+     * new nhwbuild or an nhwstop - so the one line it logs is how whoever drives the bot learns
+     * about it, instead of having to poll nhwstatus for it. The machine is not ticked while paused,
+     * so it is said exactly once.
+     */
+    public void pause(String reason) {
+        paused = true;
+        pauseReason = reason;
+        Helper.HELPER.logDirect("PAUSED NETHERHIGHWAYBUILDER: " + reason);
+    }
+
     public void setPaused(boolean paused) {
         this.paused = paused;
+        this.pauseReason = null;
     }
 
     public BetterBlockPos getClosestPoint(Vec3 origin, Vec3 direction, Vec3 point, LocationType locType) {
