@@ -207,13 +207,28 @@ public class PathExecutor implements IPathExecutor, Helper {
             cancel();
             return true;
         }
+        // vanilla only cancels on a cost increase if the movement was calculated from cached chunk data, on the
+        // assumption that a loaded chunk only changes because of what this bot does (part of the path interfering with
+        // a later part). with several bots on one highway a loaded chunk changes under our feet all the time: a paving
+        // bot inside render distance turns the floor the path was planned across into obsidian before we get there
+        boolean repathWhileLoaded = Baritone.settings().repathOnLoadedCostIncrease.value;
         if (costEstimateIndex == null || costEstimateIndex != pathPosition) {
             costEstimateIndex = pathPosition;
             // do this only once, when the movement starts, and deliberately get the cost as cached when this path was calculated, not the cost as it is right now
             currentMovementOriginalCostEstimate = movement.getCost();
             for (int i = 1; i < Baritone.settings().costVerificationLookahead.value && pathPosition + i < path.length() - 1; i++) {
-                if (((Movement) path.movements().get(pathPosition + i)).calculateCost(behavior.secretInternalGetCalculationContext()) >= ActionCosts.COST_INF && canCancel) {
+                Movement future = (Movement) path.movements().get(pathPosition + i);
+                double planned = future.getCost();
+                double actual = future.calculateCost(behavior.secretInternalGetCalculationContext());
+                if (actual >= ActionCosts.COST_INF && canCancel) {
                     logDebug("Something has changed in the world and a future movement has become impossible. Cancelling.");
+                    cancel();
+                    return true;
+                }
+                if (repathWhileLoaded && actual - planned > Baritone.settings().maxCostIncrease.value && canCancel) {
+                    // don't walk right up to the changed blocks and only then notice; drop the path while there is still
+                    // room to go around, same idea as the COST_INF lookahead above
+                    logDebug("Something has changed in the world and movement " + (pathPosition + i) + " went from cost " + planned + " to " + actual + ". Cancelling.");
                     cancel();
                     return true;
                 }
@@ -225,9 +240,7 @@ public class PathExecutor implements IPathExecutor, Helper {
             cancel();
             return true;
         }
-        if (!movement.calculatedWhileLoaded() && currentCost - currentMovementOriginalCostEstimate > Baritone.settings().maxCostIncrease.value && canCancel) {
-            // don't do this if the movement was calculated while loaded
-            // that means that this isn't a cache error, it's just part of the path interfering with a later part
+        if ((repathWhileLoaded || !movement.calculatedWhileLoaded()) && currentCost - currentMovementOriginalCostEstimate > Baritone.settings().maxCostIncrease.value && canCancel) {
             logDebug("Original cost " + currentMovementOriginalCostEstimate + " current cost " + currentCost + ". Cancelling.");
             cancel();
             return true;

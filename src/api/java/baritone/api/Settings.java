@@ -563,6 +563,21 @@ public final class Settings {
     public final Setting<Boolean> verifyCachedPathOnChunkLoad = new Setting<>(true);
 
     /**
+     * Cancel and recalculate when a movement of the current path has become more than {@link #maxCostIncrease} more
+     * expensive than planned, even if it was calculated from a loaded chunk rather than from cached chunk data.
+     * <p>
+     * Vanilla Baritone only does this for movements calculated from the cache, on the assumption that a loaded chunk
+     * only changes because of what the bot itself does. That assumption doesn't hold with several bots working on the
+     * same highway: a paving bot inside render distance will turn the floor the path was planned across into obsidian
+     * before we get there, and without this the path is kept and the obsidian mined through instead of just walking
+     * on top of it.
+     * <p>
+     * Also looks {@link #costVerificationLookahead} movements ahead so the path is dropped before walking up to the
+     * changed blocks.
+     */
+    public final Setting<Boolean> repathOnLoadedCostIncrease = new Setting<>(true);
+
+    /**
      * Static cutoff factor. 0.9 means cut off the last 10% of all paths, regardless of chunk load state
      */
     public final Setting<Double> pathCutoffFactor = new Setting<>(0.9);
