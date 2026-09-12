@@ -776,6 +776,11 @@ public class HighwayContext {
         this.preMineShulkerCount = count;
     }
 
+    // Whether the box mined by the last Mining*Shulker state has reached the inventory.
+    public boolean minedShulkerLanded() {
+        return preMineShulkerCount < 0 || getShulkerCountInventory(ShulkerType.Any) > preMineShulkerCount;
+    }
+
     public void resetThiefHunt() {
         thiefTarget = null;
         thiefHuntReturnState = null;

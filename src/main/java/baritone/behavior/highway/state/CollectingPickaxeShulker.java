@@ -22,13 +22,17 @@ import baritone.api.utils.BetterBlockPos;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
-import baritone.behavior.highway.enums.ShulkerType;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 
 public class CollectingPickaxeShulker extends State {
+    /** Ticks to give an in-flight pickup to land in the inventory before treating the box as gone. */
+    private static final int BOX_LANDING_TICKS = 20;
+
+    private int boxWaitTicks = 0;
+
     public CollectingPickaxeShulker(HighwayState state) {
         super(state);
     }
@@ -48,13 +52,19 @@ public class CollectingPickaxeShulker extends State {
                         context.resetTimer();
                     }
                     context.baritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(new BetterBlockPos(entity.getX(), entity.getY(), entity.getZ())));
+                    boxWaitTicks = 0;
                     return;
                 }
             }
         }
 
-        // No more shulker boxes to find
-        if (context.getShulkerCountInventory(ShulkerType.Any) <= context.preMineShulkerCount()
+        // No box on the ground. The count not having risen usually means the pickup packet has
+        // removed the item but the slot update is still in flight, so give it a moment before
+        // concluding the box is gone (moving on early counts its slot as free).
+        if (!context.minedShulkerLanded() && boxWaitTicks++ < BOX_LANDING_TICKS) {
+            return;
+        }
+        if (!context.minedShulkerLanded()
                 && context.maybeStartThiefHunt(HighwayState.CollectingPickaxeShulker)) {
             return; // The mined box never reached the inventory and a piglin is carrying one
         }
