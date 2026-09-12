@@ -52,6 +52,10 @@ public class PlacingShulkerSupport extends State {
         context.baritone().getPathingBehavior().cancelEverything();
         context.settings().buildRepeat.value = new Vec3i(0, 0, 0);
         if (context.playerContext().world().getBlockState(context.placeLoc().below()).getBlock() instanceof AirBlock) {
+            if (!context.canBuildSupportBlock()) {
+                context.pause("Nothing under the shulker placing spot and no blocks left to build a support with. Move the bot onto solid ground or give it throwaway blocks and restart.");
+                return;
+            }
             supportBlockNeeded = true;
             WhiteBlackSchematic supportSchem = new WhiteBlackSchematic(1, 1, 1, context.blackListBlocks(), Blocks.NETHERRACK.defaultBlockState(), false, false, true);
             supportSchem.setThrowawayFallback(Blocks.OBSIDIAN.defaultBlockState());

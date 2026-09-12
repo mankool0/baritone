@@ -161,6 +161,9 @@ public class HighwayContext {
     private int invalidBlockFixScanDist = 0;
     private final ArrayList<String> invalidBlockFixLastMismatches = new ArrayList<>(); // mismatch snapshot of the last check, to spot progress
     private static final int TRAVEL_STALL_TICKS = 200; // a walk that hasn't closed any distance in this long isn't going to
+    private static final int SHULKER_PLACE_ANCHOR_BACK = 7; // where a box goes when the lane behind us is fine
+    private static final int SHULKER_PLACE_MAX_BACK = 31; // how far back the scan walks looking for one that isn't
+    private static final int SHULKER_PLACE_MAX_AHEAD = 16; // last resort, for a start with nothing usable behind it
     private boolean travellingToEnd = false; // walking up an already-built stretch because the builder found nothing to do
     private Goal travelGoal = null; // the goal object we handed the custom goal process, so we only ever cancel our own walk
     private BetterBlockPos travelTarget = null;
@@ -1066,27 +1069,107 @@ public class HighwayContext {
         playerContext.player().swing(InteractionHand.MAIN_HAND);
     }
 
-    public BetterBlockPos shulkerPlaceLocClearOfThieves() {
+    /**
+     * The interaction-lane spot {@code back} blocks behind us (negative is ahead). The projection is
+     * taken at our own position and stepped from there, because {@link #getClosestPoint} clamps
+     * every point to the build start: projecting an already shifted position would snap the whole
+     * scan onto the first slice and never reach the pavement laid before this build began.
+     */
+    private BetterBlockPos shulkerPlaceLocAt(int back) {
         Vec3 origin = new Vec3(backPathOriginVector.x, backPathOriginVector.y, backPathOriginVector.z);
         Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
+        Vec3 feet = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
+        BetterBlockPos lane = getClosestPoint(origin, direction, feet, LocationType.ShulkerEchestInteraction);
+        return liftOntoPavement(new BetterBlockPos(lane.offset(back * -highwayDirection.getX(), 0, back * -highwayDirection.getZ())));
+    }
+
+    /**
+     * Where to set a shulker box (or the obsidian farm's ender chest) down: anchored
+     * {@value #SHULKER_PLACE_ANCHOR_BACK} blocks back, walked further back along the lane when that
+     * spot can't hold a box or piglins are standing by it, and only then tried ahead of us. Starting
+     * a build at the end of an already paved stretch used to hand back the anchor no matter what,
+     * which over the drop past the pavement is thin air: with no block left to prop the box up with,
+     * placing there can never succeed and the place/support states just ping-pong forever.
+     */
+    public BetterBlockPos shulkerPlaceLocClearOfThieves() {
         double radius = settings.highwayShulkerTheftGuardRadius.value;
-        BetterBlockPos firstChoice = null;
-        for (int backOff = 7; backOff <= 31; backOff += 8) {
-            Vec3 curPos = new Vec3(playerContext.playerFeet().getX() + (backOff * -highwayDirection.getX()),
-                    playerContext.playerFeet().getY(),
-                    playerContext.playerFeet().getZ() + (backOff * -highwayDirection.getZ()));
-            BetterBlockPos candidate = liftOntoPavement(getClosestPoint(origin, direction, curPos, LocationType.ShulkerEchestInteraction));
-            if (firstChoice == null) {
-                firstChoice = candidate;
+        BetterBlockPos anchor = shulkerPlaceLocAt(SHULKER_PLACE_ANCHOR_BACK);
+        boolean anchorUsable = isShulkerPlaceSpotUsable(anchor);
+        BetterBlockPos thiefDirty = null;
+        for (int back : shulkerPlaceScanOffsets()) {
+            BetterBlockPos candidate = back == SHULKER_PLACE_ANCHOR_BACK ? anchor : shulkerPlaceLocAt(back);
+            if (!isShulkerPlaceSpotUsable(candidate)) {
+                continue;
             }
-            if (!shulkerThiefNear(candidate, radius)) {
-                if (backOff != 7) {
-                    Helper.HELPER.logDirect("Piglins that could steal the shulker are near the placing location, placing it " + (backOff - 7) + " blocks further back.");
+            if (shulkerThiefNear(candidate, radius)) {
+                if (thiefDirty == null) {
+                    thiefDirty = candidate;
                 }
-                return candidate;
+                continue;
+            }
+            if (back != SHULKER_PLACE_ANCHOR_BACK) {
+                String where = back >= 0 ? (back - SHULKER_PLACE_ANCHOR_BACK) + " blocks further back" : -back + " blocks ahead";
+                Helper.HELPER.logDirect(anchorUsable
+                        ? "Piglins that could steal the shulker are near the placing location, placing it " + where + "."
+                        : "Nothing to set the shulker on at the placing location, placing it " + where + ".");
+            }
+            return candidate;
+        }
+        // every usable candidate is dirty; the mining guard and the thief hunt cover the rest
+        return thiefDirty != null ? thiefDirty : anchor;
+    }
+
+    /** Lane offsets to try, in order: back onto what's already paved, then closer in, then ahead of us. */
+    private int[] shulkerPlaceScanOffsets() {
+        int[] offsets = new int[SHULKER_PLACE_MAX_BACK + SHULKER_PLACE_MAX_AHEAD + 1];
+        int i = 0;
+        for (int back = SHULKER_PLACE_ANCHOR_BACK; back <= SHULKER_PLACE_MAX_BACK; back++) {
+            offsets[i++] = back;
+        }
+        for (int back = SHULKER_PLACE_ANCHOR_BACK - 1; back >= -SHULKER_PLACE_MAX_AHEAD; back--) {
+            offsets[i++] = back;
+        }
+        return offsets;
+    }
+
+    /**
+     * A lane spot we can actually place into and reach: lava-free, with something solid under the
+     * box - or, while we still carry a block to build one with, a face a support block can go on -
+     * and a floor under the spots the go-to states stand on (two back for the ender chest flow, one
+     * ahead for the shulker ones). A spot hanging over the end of the pavement has none of that.
+     */
+    public boolean isShulkerPlaceSpotUsable(BlockPos placeLoc) {
+        if (!isSideStorageSpotSafe(placeLoc)) {
+            return false;
+        }
+        if (!hasFloorUnder(placeLoc) && !(canBuildSupportBlock() && hasSturdyNeighbor(placeLoc.below()))) {
+            return false;
+        }
+        for (int step = -2; step <= 1; step++) {
+            if (step == 0) {
+                continue;
+            }
+            if (!hasFloorUnder(placeLoc.offset(step * highwayDirection.getX(), 0, step * highwayDirection.getZ()))) {
+                return false;
             }
         }
-        return firstChoice; // every candidate is dirty; the mining guard and the thief hunt cover the rest
+        return true;
+    }
+
+    private boolean hasFloorUnder(BlockPos pos) {
+        return MovementHelper.canWalkOn(baritone.bsi, pos.getX(), pos.getY() - 1, pos.getZ());
+    }
+
+    /**
+     * True while we still carry something the support block under a placing spot could be built out
+     * of: any acceptableThrowawayItems block, the netherrack that schematic asks for by default, or
+     * the obsidian it falls back to. Out of all three, a spot with nothing under it can never be
+     * made placeable, and sending the builder at it only parks it on missing materials.
+     */
+    public boolean canBuildSupportBlock() {
+        return getAcceptableThrowawaySlot() != -1
+                || getItemCountInventory(Item.getId(Blocks.NETHERRACK.asItem())) > 0
+                || getItemCountInventory(Item.getId(Blocks.OBSIDIAN.asItem())) > 0;
     }
 
     public void handle() {
@@ -2294,9 +2377,10 @@ public class HighwayContext {
         if (!isSideStorageSpotSafe(placeLoc)) {
             return false;
         }
-        // Under the box: either solid already, or a face the support block can be placed against
+        // Under the box: either solid already, or a face the support block can be placed against -
+        // and that second half only counts while we still carry a block to build the support out of
         if (!MovementHelper.canWalkOn(baritone.bsi, placeLoc.getX(), placeLoc.getY() - 1, placeLoc.getZ())
-                && !hasSturdyNeighbor(placeLoc.below())) {
+                && !(canBuildSupportBlock() && hasSturdyNeighbor(placeLoc.below()))) {
             return false;
         }
         // We stand one step along the highway from the box to place it and to open it

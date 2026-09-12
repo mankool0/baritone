@@ -102,9 +102,14 @@ public abstract class PlacingShulkerBase extends State {
             return;
         }
 
-        // Shulker box spot isn't air or shulker, lets fix that
+        // Shulker box spot isn't air or shulker, lets fix that. A solid block in the spot itself
+        // counts on its own: a spot picked in unpaved ground (nowhere behind us to place into) is
+        // netherrack with air above it, and waiting for both to be blocked left that looping on
+        // "Cannot place shulker" forever. Replaceable blocks (snow, liquids) still place as before.
         BlockState testStateAbove = context.playerContext().world().getBlockState(context.placeLoc().above());
-        if (!(testState.getBlock() instanceof AirBlock) && !(testStateAbove.getBlock() instanceof AirBlock) && !(testState.getBlock() instanceof ShulkerBoxBlock)) {
+        boolean spotBlocked = !testState.canBeReplaced();
+        boolean bothBlocked = !(testState.getBlock() instanceof AirBlock) && !(testStateAbove.getBlock() instanceof AirBlock);
+        if ((spotBlocked || bothBlocked) && !(testState.getBlock() instanceof ShulkerBoxBlock)) {
             context.baritone().getPathingBehavior().cancelEverything();
             context.baritone().getBuilderProcess().clearArea(context.placeLoc(), context.placeLoc().above());
             placed = false;
