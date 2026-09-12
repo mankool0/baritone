@@ -48,10 +48,7 @@ public class InventoryCleaningObsidian extends State {
         int stacksToThrow = slotsNeededForDrops(context) - context.getItemCountInventory(Item.getId(Items.AIR));
         context.baritone().getLookBehavior().updateTarget(new Rotation(45, 0), true);
         for (int i = 0; i < stacksToThrow; i++) {
-            int throwawaySlot = context.getAcceptableThrowawaySlot();
-            if (throwawaySlot == 8) {
-                throwawaySlot = context.getAcceptableThrowawaySlotNoHotbar();
-            }
+            int throwawaySlot = context.getThrowawaySlotToToss();
             if (throwawaySlot == -1) {
                 break;
             }

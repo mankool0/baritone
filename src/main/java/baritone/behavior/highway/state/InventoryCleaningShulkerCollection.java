@@ -34,10 +34,7 @@ public class InventoryCleaningShulkerCollection extends State {
             return;
         }
 
-        int throwawaySlot = context.getAcceptableThrowawaySlot();
-        if (throwawaySlot == 8) {
-            throwawaySlot = context.getAcceptableThrowawaySlotNoHotbar();
-        }
+        int throwawaySlot = context.getThrowawaySlotToToss();
         if (throwawaySlot == -1) {
             return;
         }

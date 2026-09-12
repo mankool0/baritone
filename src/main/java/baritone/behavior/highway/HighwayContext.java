@@ -1868,10 +1868,7 @@ public class HighwayContext {
         }
         // No partial chest stack and no empty slot: toss a throwaway stack so the next tick's
         // stash has somewhere to land. Chests always outrank netherrack.
-        int throwawaySlot = getAcceptableThrowawaySlot();
-        if (throwawaySlot == 8) {
-            throwawaySlot = getAcceptableThrowawaySlotNoHotbar();
-        }
+        int throwawaySlot = getThrowawaySlotToToss();
         if (throwawaySlot == -1) {
             return false;
         }
@@ -1905,10 +1902,7 @@ public class HighwayContext {
                         return true;
                     } else {
                         // We don't have throwaway items on our cursor, might be important so swap with throwaway items and throw away the throwaway
-                        int throwawaySlot = getAcceptableThrowawaySlot();
-                        if (throwawaySlot == 8) {
-                            throwawaySlot = getAcceptableThrowawaySlotNoHotbar();
-                        }
+                        int throwawaySlot = getThrowawaySlotToToss();
                         if (throwawaySlot != -1) {
                             playerContext.playerController().windowClick(curContainer.containerId, invSlotToMenuSlot(throwawaySlot), 0, ClickType.PICKUP, playerContext.player());
                             playerContext.playerController().windowClick(curContainer.containerId, -999, 0, ClickType.PICKUP, playerContext.player());
@@ -2674,10 +2668,7 @@ public class HighwayContext {
                         return 1;
                     }
 
-                    swapSlot = getAcceptableThrowawaySlot();
-                    if (swapSlot == 8) {
-                        swapSlot = getAcceptableThrowawaySlotNoHotbar();
-                    }
+                    swapSlot = getThrowawaySlotToToss();
                     if (swapSlot == -1) {
                         // Also didn't find any throwaway items
                         return 0;
@@ -2707,10 +2698,7 @@ public class HighwayContext {
 
                 if (getItemCountInventory(Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) == 0 && getItemSlot(Item.getId(Items.AIR)) == -1) {
                     // For some reason we have no gapples and no air slots so we have to throw out some throwaway items
-                    int throwawaySlot = getAcceptableThrowawaySlot();
-                    if (throwawaySlot == 8) {
-                        throwawaySlot = getAcceptableThrowawaySlotNoHotbar();
-                    }
+                    int throwawaySlot = getThrowawaySlotToToss();
                     if (throwawaySlot == -1) {
                         return 0;
                     }
@@ -2742,10 +2730,7 @@ public class HighwayContext {
 
                 if (getItemSlot(Item.getId(Items.AIR)) == -1) {
                     // No free slot for the totems, so throw out some throwaway items to make room
-                    int throwawaySlot = getAcceptableThrowawaySlot();
-                    if (throwawaySlot == 8) {
-                        throwawaySlot = getAcceptableThrowawaySlotNoHotbar();
-                    }
+                    int throwawaySlot = getThrowawaySlotToToss();
                     if (throwawaySlot == -1) {
                         return 0;
                     }
@@ -2849,10 +2834,7 @@ public class HighwayContext {
                         playerContext.playerController().windowClick(curContainer.containerId, i, 0, ClickType.PICKUP, playerContext.player()); // Put depleted shulker in looted slot
                     } else if (getItemSlot(Item.getId(Items.AIR)) == -1) {
                         // For some reason we have no air slots so we have to throw out some throwaway items
-                        int throwawaySlot = getAcceptableThrowawaySlot();
-                        if (throwawaySlot == 8) {
-                            throwawaySlot = getAcceptableThrowawaySlotNoHotbar();
-                        }
+                        int throwawaySlot = getThrowawaySlotToToss();
                         if (throwawaySlot == -1) {
                             return 0;
                         }
@@ -4225,7 +4207,24 @@ public class HighwayContext {
         }
         return -1;
     }
-    
+
+    public int getThrowawaySlotToToss() {
+        for (Item throwawayItem : settings.acceptableThrowawayItems.value) {
+            // Paving's product is never a throwaway, whatever the list says; obsidianRoomInventory
+            // assumes as much.
+            if (paving() && (throwawayItem == Blocks.OBSIDIAN.asItem() || throwawayItem == Blocks.CRYING_OBSIDIAN.asItem())) {
+                continue;
+            }
+            int itemId = Item.getId(throwawayItem);
+            for (int i = 0; i < 36; i++) {
+                if (i != 8 && Item.getId(playerContext.player().getInventory().items.get(i).getItem()) == itemId) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
     public int getAcceptableThrowawaySlotNoHotbar() {
         for (Item throwawayItem : settings.acceptableThrowawayItems.value) {
             int slot = getItemSlotNoHotbar(Item.getId(throwawayItem));
