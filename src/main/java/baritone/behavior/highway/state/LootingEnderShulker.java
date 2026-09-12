@@ -32,39 +32,40 @@ public class LootingEnderShulker extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.timer() < 10) {
-            return;
-        }
-
         if (!(context.playerContext().minecraft().screen instanceof ShulkerBoxScreen)) {
             context.transitionTo(HighwayState.OpeningEnderShulker);
             return;
         }
 
-        if (context.timer() < 40 && !context.openContainerHasContents()) {
-            return; // Wait for the initial content sync; a truly empty container proceeds at 40
+        if (!context.openContainerReady()) {
+            return;
         }
 
         int target = context.paving()
                 ? context.settings().highwayEnderChestsToLoot.value
                 : Math.min(64, Math.max(context.settings().highwayEnderChestsToHave.value, Math.min(context.settings().highwayEnderChestsThreshold.value, 56)));
 
-        if (context.getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) < target) {
-            int enderChestsLooted = context.paving()
-                    ? context.lootEnderChestSlot()
-                    : context.topUpEnderChestSlotFromShulker(target);
-            if (enderChestsLooted > 0) {
-                Helper.HELPER.logDirect("Looted " + enderChestsLooted + " ender chests");
-            } else {
-                Helper.HELPER.logDirect("No more ender chests. Rolling with what we have.");
-                context.transitionTo(HighwayState.MiningEnderShulker);
-                context.playerContext().player().closeContainer();
-            }
-
-            context.resetTimer();
-        } else {
+        if (context.getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) >= target) {
             context.transitionTo(HighwayState.MiningEnderShulker);
             context.playerContext().player().closeContainer();
+            return;
         }
+
+        if (!context.containerClickReady()) {
+            return;
+        }
+
+        int enderChestsLooted = context.paving()
+                ? context.lootEnderChestSlot()
+                : context.topUpEnderChestSlotFromShulker(target);
+        context.noteContainerClick();
+        if (enderChestsLooted > 0) {
+            Helper.HELPER.logDirect("Looted " + enderChestsLooted + " ender chests");
+            return;
+        }
+
+        Helper.HELPER.logDirect("No more ender chests. Rolling with what we have.");
+        context.transitionTo(HighwayState.MiningEnderShulker);
+        context.playerContext().player().closeContainer();
     }
 }

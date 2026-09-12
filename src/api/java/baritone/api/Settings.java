@@ -1619,6 +1619,40 @@ public final class Settings {
     public final Setting<Integer> highwayFireRestMinDuration = new Setting<>(1200);
 
     /**
+     * How long, in ticks, to keep waiting for the server to send the contents of a shulker box or
+     * ender chest we just opened before giving up and treating what we can see as the whole story.
+     *
+     * <p>The builder normally proceeds the moment the server's content packet lands, so this only
+     * costs anything when that packet never arrives; it is deliberately generous so a bad ping or a
+     * lagging server can't make a full container look empty.
+     */
+    public final Setting<Integer> highwayContainerSyncTimeout = new Setting<>(200);
+
+    /**
+     * Minimum ticks between the individual slot moves the builder makes inside an open container.
+     * Loot and deposit both move one slot per click, so this paces the click packets; lower is
+     * faster but sends them in tighter bursts.
+     */
+    public final Setting<Integer> highwayContainerClickInterval = new Setting<>(4);
+
+    /**
+     * How long, in ticks, an inventory threshold (picks, gapples, ender chests, totems) has to stay
+     * tripped before the builder commits to a storage trip or pauses.
+     *
+     * <p>An inventory the server hasn't sent yet is handled by waiting for the sync instead, so this
+     * only rides out a count that flickers while items are still being shuffled. It does not stop
+     * the builder, the travel walk or the correctness scans.
+     */
+    public final Setting<Integer> highwayThresholdConfirmTicks = new Setting<>(40);
+
+    /**
+     * How long, in ticks, to keep polling for a shulker box or ender chest we placed to show up
+     * before deciding the placement was refused and relocating.
+     */
+    public final Setting<Integer> highwayPlaceConfirmTimeout = new Setting<>(100);
+
+
+    /**
      * If enabled, liquid removal places blocks without requiring line of sight and without
      * rotating, limited only by normal block reach distance
      */

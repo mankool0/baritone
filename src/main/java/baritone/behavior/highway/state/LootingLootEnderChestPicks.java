@@ -30,32 +30,33 @@ public class LootingLootEnderChestPicks extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.timer() < 10) {
-            return;
-        }
-
         if (!(context.playerContext().minecraft().screen instanceof ContainerScreen)) {
             context.transitionTo(HighwayState.OpeningLootEnderChest);
             return;
         }
 
-        if (context.timer() < 40 && !context.openContainerHasContents()) {
-            return; // Wait for the initial content sync; a truly empty container proceeds at 40
+        if (!context.openContainerReady()) {
+            return;
         }
 
-        if (context.getShulkerCountInventory(context.picksToUse()) < context.settings().highwayPickShulksToHave.value) {
-            int picksShulksLooted = context.lootShulkerChestSlot(context.picksToUse());
-            if (picksShulksLooted > 0) {
-                Helper.HELPER.logDirect("Looted " + picksShulksLooted + " pickaxe shulker");
-            } else {
-                Helper.HELPER.logDirect("No more pickaxe shulkers. Rolling with what we have.");
-                context.transitionTo(HighwayState.LootingLootEnderChestEnderChests);
-                context.setEnderChestHasPickShulks(false);
-            }
-
-            context.resetTimer();
-        } else {
+        if (context.getShulkerCountInventory(context.picksToUse()) >= context.settings().highwayPickShulksToHave.value) {
             context.transitionTo(HighwayState.LootingLootEnderChestEnderChests);
+            return;
         }
+
+        if (!context.containerClickReady()) {
+            return;
+        }
+
+        int picksShulksLooted = context.lootShulkerChestSlot(context.picksToUse());
+        context.noteContainerClick();
+        if (picksShulksLooted > 0) {
+            Helper.HELPER.logDirect("Looted " + picksShulksLooted + " pickaxe shulker");
+            return;
+        }
+
+        Helper.HELPER.logDirect("No more pickaxe shulkers. Rolling with what we have.");
+        context.setEnderChestHasPickShulks(false);
+        context.transitionTo(HighwayState.LootingLootEnderChestEnderChests);
     }
 }

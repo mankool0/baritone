@@ -40,6 +40,9 @@ import baritone.utils.BlockStateInterface;
 import baritone.utils.IRenderer;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import net.minecraft.core.*;
+import net.minecraft.network.protocol.game.ClientboundContainerSetContentPacket;
+import net.minecraft.network.protocol.game.ClientboundLoginPacket;
+import net.minecraft.network.protocol.game.ClientboundRespawnPacket;
 import net.minecraft.network.protocol.game.ClientboundSystemChatPacket;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.util.Mth;
@@ -103,6 +106,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     @Override
     public void build(int startX, int startZ, Vec3i direct, boolean selfSolve, boolean pave, Vec3i endCoords, Vec3i startCoords) {
         teardown(); // nhwbuild is a restart, not an overlay: nothing the last build held survives it
+        highwayContext.resetStateDwell(); // per build, so a stop leaves the last run's timings readable
         highwayContext.setHighwayDirection(direct);
         highwayContext.setPaving(pave);
         highwayContext.setCachedHealth(ctx.player().getHealth());
@@ -254,7 +258,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     }
 
     private void teardown() {
-        highwayContext.setRepeatCheck(false);
+        highwayContext.clearThresholdConfirm();
         wrongDimension = false;
         highwayContext.resetRecovery(); // held keys, suppressHitResult, and settings (e.g. allowSwimThroughLava) overridden during recovery
         highwayContext.clearInvalidBlockFix();
@@ -439,6 +443,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         Helper.HELPER.logDirect("startShulkerCount: " + highwayContext.startShulkerCount());
         Helper.HELPER.logDirect(highwayContext.frontDistanceDiagnostic());
         Helper.HELPER.logDirect(highwayContext.walkGateDiagnostic());
+        highwayContext.stateDwellDiagnostic(12).forEach(Helper.HELPER::logDirect);
     }
 
     @Override
@@ -651,6 +656,16 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
     @Override
     public void onReceivePacket(PacketEvent event) {
+        if (event.getState() == EventState.POST) {
+            // Runs on the netty thread, so only flags are written here.
+            if (event.getPacket() instanceof ClientboundContainerSetContentPacket contents) {
+                highwayContext.noteContainerSync(contents.getContainerId());
+            } else if (event.getPacket() instanceof ClientboundLoginPacket
+                    || event.getPacket() instanceof ClientboundRespawnPacket) {
+                highwayContext.noteInventoryDesynced();
+            }
+        }
+
         if (event.getPacket() instanceof ClientboundSystemChatPacket packet && event.getState() == EventState.POST) {
             String message = packet.content().getString();
             

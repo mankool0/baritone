@@ -45,10 +45,6 @@ public class BuildingHighway extends State {
             return;
         }
 
-        if (context.repeatCheck() && context.timer() <= 120) {
-            return;
-        }
-
         if (!context.baritone().getBuilderProcess().isActive()) {
             if (!context.travelTowardsEnd()) {
                 Helper.HELPER.logDirect("Restarting builder");
@@ -70,19 +66,18 @@ public class BuildingHighway extends State {
 
         if (context.getPickCountInventory() < context.settings().highwayPicksThreshold.value) {
             if (context.getShulkerCountInventory(context.picksToUse()) == 0) {
-                if (context.repeatCheck()) {
-                    if (!context.enderChestHasPickShulks()) {
-                        context.baritone().getPathingBehavior().cancelEverything();
-                        context.pause("Out of picks, refill ender chest and inventory and restart.");
-                        return;
-                    }
-                    Helper.HELPER.logDirect("Shulker count is under threshold, checking ender chest");
-                    context.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);
-                } else {
-                    Helper.HELPER.logDirect("Shulker count is under threshold. Player may still be loading. Waiting 120 ticks");
-                    context.resetTimer();
-                    context.setRepeatCheck(true);
+                // No shulker in hand, so this costs a storage trip or a pause: confirm the count
+                // is real before committing to it.
+                if (!context.thresholdConfirmed("Pick shulker count")) {
+                    return;
                 }
+                if (!context.enderChestHasPickShulks()) {
+                    context.baritone().getPathingBehavior().cancelEverything();
+                    context.pause("Out of picks, refill ender chest and inventory and restart.");
+                    return;
+                }
+                Helper.HELPER.logDirect("Shulker count is under threshold, checking ender chest");
+                context.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);
                 return;
             }
             context.transitionTo(HighwayState.PickaxeShulkerPlaceLocPrep);
@@ -94,19 +89,16 @@ public class BuildingHighway extends State {
         // TODO: Change shulker threshold from 0 to a customizable value
         if (getObsidianCountInventory(context) <= context.settings().highwayObsidianThreshold.value && context.paving()) {
             if (context.getShulkerCountInventory(ShulkerType.EnderChest) == 0) {
-                if (context.repeatCheck()) {
-                    if (!context.enderChestHasEnderShulks()) {
-                        context.baritone().getPathingBehavior().cancelEverything();
-                        context.pause("Out of ender chests, refill ender chest and inventory and restart.");
-                        return;
-                    }
-                    Helper.HELPER.logDirect("Shulker count is under threshold, checking ender chest");
-                    context.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);
-                } else {
-                    Helper.HELPER.logDirect("Shulker count is under threshold. Player may still be loading. Waiting 120 ticks");
-                    context.resetTimer();
-                    context.setRepeatCheck(true);
+                if (!context.thresholdConfirmed("Ender chest shulker count")) {
+                    return;
                 }
+                if (!context.enderChestHasEnderShulks()) {
+                    context.baritone().getPathingBehavior().cancelEverything();
+                    context.pause("Out of ender chests, refill ender chest and inventory and restart.");
+                    return;
+                }
+                Helper.HELPER.logDirect("Shulker count is under threshold, checking ender chest");
+                context.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);
                 return;
             }
             context.transitionTo(HighwayState.EchestMiningPlaceLocPrep);
@@ -126,46 +118,40 @@ public class BuildingHighway extends State {
                     context.setRefillingEnderChests(true);
                     context.setEnderChestAccessLoc(null);
                 }
-                context.setRepeatCheck(false);
+                context.clearThresholdConfirm();
                 context.transitionTo(HighwayState.EchestMiningPlaceLocPrep);
                 context.baritone().getPathingBehavior().cancelEverything();
                 context.resetTimer();
                 return;
             }
-            if (context.repeatCheck()) {
-                if (!context.enderChestHasEnderShulks()) {
-                    context.baritone().getPathingBehavior().cancelEverything();
-                    context.pause("Low on ender chests, and none in storage to fetch.");
-                    return;
-                }
-                // Fetch a shulker (also tops picks/gapples) from storage, then loop back here to top up
-                Helper.HELPER.logDirect("Low on ender chests, fetching an ender chest shulker from storage.");
-                context.setRefillingEnderChests(true);
-                context.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);
-            } else {
-                Helper.HELPER.logDirect("Ender chest count under threshold. Player may still be loading. Waiting 120 ticks");
-                context.resetTimer();
-                context.setRepeatCheck(true);
+            if (!context.thresholdConfirmed("Ender chest count")) {
+                return;
             }
+            if (!context.enderChestHasEnderShulks()) {
+                context.baritone().getPathingBehavior().cancelEverything();
+                context.pause("Low on ender chests, and none in storage to fetch.");
+                return;
+            }
+            // Fetch a shulker (also tops picks/gapples) from storage, then loop back here to top up
+            Helper.HELPER.logDirect("Low on ender chests, fetching an ender chest shulker from storage.");
+            context.setRefillingEnderChests(true);
+            context.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);
             return;
         }
 
         if (context.getItemCountInventory(Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) <= context.settings().highwayGapplesThreshold.value) {
             if (context.getShulkerCountInventory(ShulkerType.Gapple) == 0) {
-                if (context.repeatCheck()) {
-                    if (!context.enderChestHasGappleShulks()) {
-                        context.baritone().getPathingBehavior().cancelEverything();
-                        context.pause("Out of gapples, refill ender chest and inventory and restart.");
-                        return;
-                    }
-                    Helper.HELPER.logDirect("Out of gapples, fetching a gapple shulker from the ender chest.");
-                    context.setRefillingGapples(true);
-                    context.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);
-                } else {
-                    Helper.HELPER.logDirect("Gapple count is under threshold. Player may still be loading. Waiting 120 ticks");
-                    context.resetTimer();
-                    context.setRepeatCheck(true);
+                if (!context.thresholdConfirmed("Gapple count")) {
+                    return;
                 }
+                if (!context.enderChestHasGappleShulks()) {
+                    context.baritone().getPathingBehavior().cancelEverything();
+                    context.pause("Out of gapples, refill ender chest and inventory and restart.");
+                    return;
+                }
+                Helper.HELPER.logDirect("Out of gapples, fetching a gapple shulker from the ender chest.");
+                context.setRefillingGapples(true);
+                context.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);
                 return;
             }
             context.transitionTo(HighwayState.GappleShulkerPlaceLocPrep);
@@ -195,19 +181,20 @@ public class BuildingHighway extends State {
                     // something the build consumes, so by default we just carry on without them
                     // and stop retrying until the next startBuild resets the flag.
                     if (context.settings().highwayPauseWhenOutOfTotems.value) {
+                        if (!context.thresholdConfirmed("Totem count")) {
+                            return;
+                        }
                         context.baritone().getPathingBehavior().cancelEverything();
                         context.pause("Out of totems, refill ender chest and inventory and restart.");
                         return;
                     }
-                } else if (context.repeatCheck()) {
+                } else {
+                    if (!context.thresholdConfirmed("Totem count")) {
+                        return;
+                    }
                     Helper.HELPER.logDirect("Out of totems, fetching a totem shulker from the ender chest.");
                     context.setRefillingTotems(true);
                     context.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);
-                    return;
-                } else {
-                    Helper.HELPER.logDirect("Totem count is under threshold. Player may still be loading. Waiting 120 ticks");
-                    context.resetTimer();
-                    context.setRepeatCheck(true);
                     return;
                 }
             } else {

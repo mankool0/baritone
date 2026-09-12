@@ -69,6 +69,7 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 import java.awt.*;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -204,7 +205,6 @@ public class HighwayContext {
     private boolean refillingTotems = false;
     private boolean stashingShulker = false;
     private BlockPos enderChestAccessLoc = null;
-    private boolean repeatCheck = false;
     private ShulkerType picksToUse;
     private BetterBlockPos cachedPlayerFeet = null;
     private int startShulkerCount = 0;
@@ -275,6 +275,160 @@ public class HighwayContext {
     }
 
     private int timer = 0;
+
+    // --- Server round-trip tracking -------------------------------------------------------------
+
+    /** containerId of the last full content sync the server sent. Written from the netty thread. */
+    private volatile int syncedContainerId = NO_CONTAINER;
+    /** Whether the server has sent our own inventory since we last joined. */
+    private volatile boolean inventorySynced = true;
+    private int ticksSinceInventoryDesync = 0;
+    /** Ticks the currently open (non-inventory) container menu has been open for. */
+    private int containerOpenTicks = 0;
+    private int openContainerId = NO_CONTAINER;
+    /** Main-thread snapshot of {@link #syncedContainerId} taken at the start of the previous tick. */
+    private int syncSeenLastTick = NO_CONTAINER;
+    /** Whether the open container's slots have definitely been filled in on the main thread. */
+    private boolean containerContentsApplied = false;
+    /** Our own tick counter: a respawn hands us a fresh player whose tickCount restarts at zero. */
+    private long contextTick = 0;
+    private long lastContainerClickTick = Long.MIN_VALUE / 4;
+
+    private static final int NO_CONTAINER = Integer.MIN_VALUE;
+
+    /**
+     * Latch a full container content sync. Called off the netty thread from the packet handler, so
+     * the field is volatile and nothing here touches the world or the player.
+     */
+    public void noteContainerSync(int containerId) {
+        syncedContainerId = containerId;
+        if (containerId == 0) {
+            inventorySynced = true;
+        }
+    }
+
+    /** A fresh join/respawn invalidates the inventory we were reading counts off. */
+    public void noteInventoryDesynced() {
+        inventorySynced = false;
+        syncedContainerId = NO_CONTAINER;
+        ticksSinceInventoryDesync = 0;
+    }
+
+    /**
+     * Whether inventory counts can be trusted. Straight after a login or a dimension change the
+     * client's copy is empty, and acting on it would send us on a storage trip for items we are
+     * actually carrying. Assumed true at startBuild (the player is already in-world by then) and
+     * only cleared by a login/respawn packet.
+     */
+    public boolean inventorySynced() {
+        if (inventorySynced) {
+            return true;
+        }
+        // Fallback so an unusual join sequence that never resends the inventory can't wedge every
+        // threshold forever. onTick already refuses to run while the inventory is fully empty.
+        return ticksSinceInventoryDesync >= settings.highwayContainerSyncTimeout.value
+                && !playerContext.player().getInventory().isEmpty();
+    }
+
+    /**
+     * Whether the contents of the open container can be trusted - i.e. the server has sent the
+     * full slot list for this exact container id, so an empty slot really is empty rather than
+     * not-yet-delivered. This is the check that keeps a slow/lagging sync from being read as "this
+     * shulker is empty"; the timeout below is only a wedge guard, not the normal path.
+     */
+    public boolean openContainerReady() {
+        AbstractContainerMenu menu = playerContext.player().containerMenu;
+        if (menu == playerContext.player().inventoryMenu) {
+            return false;
+        }
+        return containerContentsApplied || containerOpenTicks >= settings.highwayContainerSyncTimeout.value;
+    }
+
+    /**
+     * Container clicks are spaced out rather than fired every tick: the loot/deposit helpers move a
+     * slot per call and the server (and anticheat) sees a click packet for each one.
+     */
+    public boolean containerClickReady() {
+        return contextTick - lastContainerClickTick >= settings.highwayContainerClickInterval.value;
+    }
+
+    public void noteContainerClick() {
+        lastContainerClickTick = contextTick;
+    }
+
+    private void tickContainerSync() {
+        contextTick++;
+        if (!inventorySynced) {
+            ticksSinceInventoryDesync++;
+        }
+        AbstractContainerMenu menu = playerContext.player().containerMenu;
+        int latchedNow = syncedContainerId;
+        if (menu == playerContext.player().inventoryMenu) {
+            containerOpenTicks = 0;
+            openContainerId = NO_CONTAINER;
+            containerContentsApplied = false;
+            syncSeenLastTick = latchedNow;
+            return;
+        }
+        if (menu.containerId != openContainerId) {
+            openContainerId = menu.containerId;
+            containerOpenTicks = 0;
+            containerContentsApplied = false;
+            syncSeenLastTick = latchedNow;
+            return;
+        }
+        containerOpenTicks++;
+        // The packet handler latches from the netty thread, but the slots themselves are filled in
+        // on the main thread when Minecraft drains its task queue at the top of a tick. Only accept
+        // a latch that was already set when the previous tick began, so the fill can never still be
+        // pending when a state reads the slots - otherwise a sync arriving mid-tick would make a
+        // full container look empty, which is exactly what this check exists to prevent.
+        if (syncSeenLastTick == menu.containerId) {
+            containerContentsApplied = true;
+        }
+        syncSeenLastTick = latchedNow;
+    }
+
+    // --- Inventory threshold confirmation ---------------------------------------------------------
+
+    private HighwayState pendingThresholdState = null;
+    private String pendingThresholdKey = null;
+    private long pendingThresholdTick = 0;
+
+    /**
+     * Double-check a tripped inventory threshold before committing to something expensive (a storage
+     * trip, or pausing the build). A count read off an inventory the server hasn't sent us is zero,
+     * which used to be covered by standing still for 120 ticks before every such decision; the
+     * inventory sync latch covers that case directly now, and the short confirm window only rides
+     * out a count that flickers while items are still being moved around.
+     *
+     * <p>Returns false (and keeps returning false) until the same threshold has stayed tripped for
+     * {@code highwayThresholdConfirmTicks}. Unlike the old gate this does not stop the builder, the
+     * travel walk or the correctness scans while it waits.
+     */
+    public boolean thresholdConfirmed(String what) {
+        if (!inventorySynced) {
+            return false;
+        }
+        long now = contextTick;
+        if (pendingThresholdState != currentState.getState() || !what.equals(pendingThresholdKey)) {
+            pendingThresholdState = currentState.getState();
+            pendingThresholdKey = what;
+            pendingThresholdTick = now;
+            Helper.HELPER.logDebug(what + " under threshold, confirming over " + settings.highwayThresholdConfirmTicks.value + " ticks.");
+            return false;
+        }
+        if (now - pendingThresholdTick < settings.highwayThresholdConfirmTicks.value) {
+            return false;
+        }
+        clearThresholdConfirm();
+        return true;
+    }
+
+    public void clearThresholdConfirm() {
+        pendingThresholdState = null;
+        pendingThresholdKey = null;
+    }
 
     public int walkBackTimer() {
         return walkBackTimer;
@@ -1229,7 +1383,82 @@ public class HighwayContext {
             transitionTo(HighwayState.FallRecovery);
             return;
         }
-        currentState.handle(this);
+
+        for (int i = 0; ; i++) {
+            State handled = currentState;
+            if (i == 0) {
+                noteStateTick(handled.getState()); // chained instant states are free, so charge one tick
+            }
+            handled.handle(this);
+            handled.noteHandled();
+            if (i >= CHAIN_LIMIT || currentState == handled || !INSTANT_STATES.contains(currentState.getState())) {
+                break;
+            }
+        }
+    }
+
+    private static final int CHAIN_LIMIT = 4;
+
+    /**
+     * States safe to run in the same tick they were entered: each one reads the world, picks a
+     * position or a schematic, and transitions. None of them clicks, places, mines, paths or waits
+     * on a reply, so nothing is gained by spreading them over separate ticks.
+     */
+    private static final EnumSet<HighwayState> INSTANT_STATES = EnumSet.of(
+            HighwayState.Nothing,
+            HighwayState.FloatingFixPrep,
+            HighwayState.PickaxeShulkerPlaceLocPrep,
+            HighwayState.GappleShulkerPlaceLocPrep,
+            HighwayState.TotemShulkerPlaceLocPrep,
+            HighwayState.EchestMiningPlaceLocPrep,
+            HighwayState.EmptyShulkerPlaceLocPrep,
+            HighwayState.EnderChestStashPlaceLocPrep,
+            HighwayState.LootEnderChestPlaceLocPrep,
+            HighwayState.ShulkerSearchPrep
+    );
+
+    // --- Per-state dwell instrumentation ----------------------------------------------------------
+
+    private final EnumMap<HighwayState, int[]> stateDwell = new EnumMap<>(HighwayState.class);
+    private HighwayState lastDwellState = null;
+    private int dwellTotalTicks = 0;
+
+    private void noteStateTick(HighwayState state) {
+        int[] entry = stateDwell.computeIfAbsent(state, k -> new int[2]);
+        entry[0]++;
+        if (state != lastDwellState) {
+            entry[1]++;
+            lastDwellState = state;
+        }
+        dwellTotalTicks++;
+    }
+
+    public void resetStateDwell() {
+        stateDwell.clear();
+        lastDwellState = null;
+        dwellTotalTicks = 0;
+    }
+
+    /**
+     * Ticks spent in each state since the build started, worst first. This is the measurement the
+     * wait tuning is meant to be judged on: a state whose share is far above the work it actually
+     * does is sitting on a timer it shouldn't be.
+     */
+    public List<String> stateDwellDiagnostic(int limit) {
+        List<String> out = new ArrayList<>();
+        if (dwellTotalTicks == 0) {
+            out.add("No state time recorded yet.");
+            return out;
+        }
+        out.add(String.format("State time over %d ticks (%.1fs), worst first:", dwellTotalTicks, dwellTotalTicks / 20.0));
+        stateDwell.entrySet().stream()
+                .sorted((a, b) -> Integer.compare(b.getValue()[0], a.getValue()[0]))
+                .limit(limit)
+                .forEach(e -> out.add(String.format("  %-38s %6d ticks (%5.1fs, %4.1f%%) over %d visit(s), avg %.1ft",
+                        e.getKey(), e.getValue()[0], e.getValue()[0] / 20.0,
+                        100.0 * e.getValue()[0] / dwellTotalTicks, e.getValue()[1],
+                        (double) e.getValue()[0] / e.getValue()[1])));
+        return out;
     }
 
     public void incrementTimers() {
@@ -1237,6 +1466,7 @@ public class HighwayContext {
         walkBackTimer++;
         checkBackTimer++;
         stuckTimer++;
+        tickContainerSync();
         if (thiefHuntFailCooldown > 0) {
             thiefHuntFailCooldown--;
             if (thiefHuntFailCooldown == 0) {
@@ -1372,14 +1602,6 @@ public class HighwayContext {
         this.enderChestAccessLoc = enderChestAccessLoc == null
                 ? null
                 : new BlockPos(enderChestAccessLoc.getX(), enderChestAccessLoc.getY(), enderChestAccessLoc.getZ());
-    }
-
-    public boolean repeatCheck() {
-        return repeatCheck;
-    }
-
-    public void setRepeatCheck(boolean repeatCheck) {
-        this.repeatCheck = repeatCheck;
     }
 
     public int startShulkerCount() {
@@ -1701,25 +1923,6 @@ public class HighwayContext {
                 return true;
             }
             return true;
-        }
-        return false;
-    }
-
-    /**
-     * True once the open container shows any item in its chest/shulker slots, i.e. the server's
-     * initial content sync has arrived. False for a genuinely empty container too, so callers
-     * should keep a timer fallback rather than waiting on this forever.
-     */
-    public boolean openContainerHasContents() {
-        AbstractContainerMenu menu = playerContext.player().containerMenu;
-        if (menu == playerContext.player().inventoryMenu) {
-            return false;
-        }
-        int containerSlots = menu.slots.size() - 36;
-        for (int i = 0; i < containerSlots; i++) {
-            if (!menu.getSlot(i).getItem().isEmpty()) {
-                return true;
-            }
         }
         return false;
     }
@@ -2202,7 +2405,7 @@ public class HighwayContext {
 
     public HighwayState placeShulkerBox(Rotation shulkerReachable, Rotation underShulkerReachable, BlockPos shulkerPlaceLoc, HighwayState prevHighwayState, HighwayState currentHighwayState, HighwayState nextHighwayState, ShulkerType shulkerType) {
         // Debug logging to track BlockPos types
-        Helper.HELPER.logDirect("placeShulkerBox called with: " + shulkerPlaceLoc + " (class: " + shulkerPlaceLoc.getClass().getSimpleName() + ")");
+        Helper.HELPER.logDebug("placeShulkerBox called with: " + shulkerPlaceLoc + " (class: " + shulkerPlaceLoc.getClass().getSimpleName() + ")");
 
         BlockState currentState = playerContext.world().getBlockState(shulkerPlaceLoc);
         if (currentState.getBlock() instanceof ShulkerBoxBlock) {

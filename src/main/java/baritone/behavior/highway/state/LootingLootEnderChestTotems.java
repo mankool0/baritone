@@ -31,17 +31,13 @@ public class LootingLootEnderChestTotems extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.timer() < 10) {
-            return;
-        }
-
         if (!(context.playerContext().minecraft().screen instanceof ContainerScreen)) {
             context.transitionTo(HighwayState.OpeningLootEnderChest);
             return;
         }
 
-        if (context.timer() < 40 && !context.openContainerHasContents()) {
-            return; // Wait for the initial content sync; a truly empty container proceeds at 40
+        if (!context.openContainerReady()) {
+            return;
         }
 
         // Already at storage and low on totems: turn this trip into a totem refill (grab a
@@ -59,19 +55,24 @@ public class LootingLootEnderChestTotems extends State {
             wantShulks = Math.max(wantShulks, 1); // this trip has to come back with a shulker to loot from
         }
 
-        if (context.getShulkerCountInventory(ShulkerType.Totem) < wantShulks) {
-            int totemShulksLooted = context.lootShulkerChestSlot(ShulkerType.Totem);
-            if (totemShulksLooted > 0) {
-                Helper.HELPER.logDirect("Looted " + totemShulksLooted + " totem shulker");
-            } else {
-                Helper.HELPER.logDirect("No more totem shulkers. Rolling with what we have.");
-                context.transitionTo(HighwayState.DepositingLootEnderChestDepletedShulkersFinal);
-                context.setEnderChestHasTotemShulks(false);
-            }
-
-            context.resetTimer();
-        } else {
+        if (context.getShulkerCountInventory(ShulkerType.Totem) >= wantShulks) {
             context.transitionTo(HighwayState.DepositingLootEnderChestDepletedShulkersFinal);
+            return;
         }
+
+        if (!context.containerClickReady()) {
+            return;
+        }
+
+        int totemShulksLooted = context.lootShulkerChestSlot(ShulkerType.Totem);
+        context.noteContainerClick();
+        if (totemShulksLooted > 0) {
+            Helper.HELPER.logDirect("Looted " + totemShulksLooted + " totem shulker");
+            return;
+        }
+
+        Helper.HELPER.logDirect("No more totem shulkers. Rolling with what we have.");
+        context.setEnderChestHasTotemShulks(false);
+        context.transitionTo(HighwayState.DepositingLootEnderChestDepletedShulkersFinal);
     }
 }

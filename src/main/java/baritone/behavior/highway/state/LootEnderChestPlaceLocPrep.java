@@ -37,7 +37,7 @@ public class LootEnderChestPlaceLocPrep extends State {
             return;
         }
 
-        context.setRepeatCheck(false);
+        context.clearThresholdConfirm();
         context.resetTimer();
 
         // Start ~7 blocks back and scan further back, then ahead, for a spot we can place into

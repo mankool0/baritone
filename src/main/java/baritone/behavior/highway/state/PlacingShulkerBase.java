@@ -57,10 +57,6 @@ public abstract class PlacingShulkerBase extends State {
     }
 
     protected void handleWithShulkerType(HighwayContext context, ShulkerType shulkerType) {
-        if (placed && context.timer() < 30) {
-            return;
-        }
-
         if (!context.baritone().getBuilderProcess().isPaused() && context.baritone().getBuilderProcess().isActive()) {
             context.resetTimer();
             return; // Wait for build to complete
@@ -68,9 +64,10 @@ public abstract class PlacingShulkerBase extends State {
 
         // Check placement status
         BlockState testState = context.playerContext().world().getBlockState(context.placeLoc());
-        Helper.HELPER.logDirect("State: " + testState + " @ " + context.placeLoc());
-        
-        // If we've attempted placement, wait for the block to appear
+        Helper.HELPER.logDebug("State: " + testState + " @ " + context.placeLoc());
+
+        // Placement is client-predicted, so the block is normally there on the next tick; the
+        // timeout is what covers a placement the server refuses.
         if (placed) {
             if (testState.getBlock() instanceof ShulkerBoxBlock) {
                 Helper.HELPER.logDirect("Shulker has been placed successfully");
@@ -79,7 +76,7 @@ public abstract class PlacingShulkerBase extends State {
                 placed = false;
                 context.resetTimer();
                 return;
-            } else if (context.timer() < 100) {
+            } else if (context.timer() < context.settings().highwayPlaceConfirmTimeout.value) {
                 // Still waiting for server to confirm placement
                 return;
             } else {

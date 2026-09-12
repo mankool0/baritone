@@ -25,16 +25,18 @@ import net.minecraft.core.Vec3i;
 import net.minecraft.world.phys.AABB;
 
 public class BoatRemoval extends State {
+
+    /** Ticks to let the builder pick up a dispatched clearArea before considering another one. */
+    private static final int BUILDER_SPINUP_TICKS = 5;
+
+    private int sinceClearDispatch = BUILDER_SPINUP_TICKS;
+
     public BoatRemoval(HighwayState state) {
         super(state);
     }
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.timer() < 10) {
-            return;
-        }
-
         if (context.boatLocation() == null) {
             Helper.HELPER.logDirect("Boat location is non-existent, restarting builder");
             context.transitionTo(HighwayState.Nothing);
@@ -60,13 +62,20 @@ public class BoatRemoval extends State {
 
         context.settings().buildRepeat.value = new Vec3i(0, 0, 0);
         if (!context.baritone().getBuilderProcess().isPaused() && context.baritone().getBuilderProcess().isActive()) {
+            sinceClearDispatch = BUILDER_SPINUP_TICKS;
             return; // Wait for build to complete
+        }
+
+        if (sinceClearDispatch < BUILDER_SPINUP_TICKS) {
+            sinceClearDispatch++;
+            return; // a dispatched clearArea takes a couple of ticks to show up as an active builder
         }
 
         int depth = context.boatHasPassenger() ? 3 : 1;
         //int yOffset = boatHasPassenger ? -4 : -2;
         //FillSchematic toClear = new FillSchematic(4, depth, 4, Blocks.AIR.defaultBlockState());
         context.baritone().getBuilderProcess().clearArea(context.boatLocation().offset(2, 1, 2), context.boatLocation().offset(-2, -depth, -2));
+        sinceClearDispatch = 0;
 
         // Check if boat is still there
         //if (!baritone.getBuilderProcess().checkNoEntityCollision(new AABB(boatLocation), ctx.player())) {

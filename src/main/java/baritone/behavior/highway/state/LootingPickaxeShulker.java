@@ -30,33 +30,34 @@ public class LootingPickaxeShulker extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.timer() < 10) {
-            return;
-        }
-
         if (!(context.playerContext().minecraft().screen instanceof ShulkerBoxScreen)) {
             context.transitionTo(HighwayState.OpeningPickaxeShulker);
             return;
         }
 
-        if (context.timer() < 40 && !context.openContainerHasContents()) {
-            return; // Wait for the initial content sync; a truly empty container proceeds at 40
+        if (!context.openContainerReady()) {
+            return;
         }
 
-        if (context.getPickCountInventory() < context.picksToHave()) {
-            int picksLooted = context.lootPickaxeChestSlot();
-            if (picksLooted > 0) {
-                Helper.HELPER.logDirect("Looted " + picksLooted + " pickaxe");
-            } else {
-                Helper.HELPER.logDirect("Can't loot/empty shulker. Rolling with what we have.");
-                context.transitionTo(HighwayState.MiningPickaxeShulker);
-                context.playerContext().player().closeContainer();
-            }
-
-            context.resetTimer();
-        } else {
+        if (context.getPickCountInventory() >= context.picksToHave()) {
             context.transitionTo(HighwayState.MiningPickaxeShulker);
             context.playerContext().player().closeContainer();
+            return;
         }
+
+        if (!context.containerClickReady()) {
+            return;
+        }
+
+        int picksLooted = context.lootPickaxeChestSlot();
+        context.noteContainerClick();
+        if (picksLooted > 0) {
+            Helper.HELPER.logDirect("Looted " + picksLooted + " pickaxe");
+            return;
+        }
+
+        Helper.HELPER.logDirect("Can't loot/empty shulker. Rolling with what we have.");
+        context.transitionTo(HighwayState.MiningPickaxeShulker);
+        context.playerContext().player().closeContainer();
     }
 }

@@ -24,20 +24,28 @@ import baritone.behavior.highway.enums.HighwayState;
 import net.minecraft.world.item.ItemStack;
 
 public class FarmingEnderChestPrepPick extends State {
+
+    /** Ticks to keep retrying the hotbar move before giving up on the farm cycle. */
+    private static final int HOTBAR_GIVE_UP_TICKS = 100;
+
     public FarmingEnderChestPrepPick(HighwayState state) {
         super(state);
     }
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.timer() < 10) {
-            return;
-        }
-
         int pickSlot = context.putPickaxeHotbar(true);
         if (pickSlot == -1) {
             Helper.HELPER.logDirect("Error getting pick slot");
             context.transitionTo(HighwayState.Nothing);
+            return;
+        }
+        if (pickSlot >= 9) {
+            // Selecting it anyway desyncs the hand: the server rejects a carried-item slot >= 9.
+            if (ticksInState() > HOTBAR_GIVE_UP_TICKS) {
+                Helper.HELPER.logDirect("Couldn't move a pickaxe onto the hotbar (allowInventory off or moves blocked?)");
+                context.transitionTo(HighwayState.Nothing);
+            }
             return;
         }
         ItemStack stack = context.playerContext().player().getInventory().items.get(pickSlot);

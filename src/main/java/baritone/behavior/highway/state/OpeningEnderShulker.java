@@ -36,10 +36,6 @@ public class OpeningEnderShulker extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.timer() < 10) {
-            return;
-        }
-
         Optional<Rotation> shulkerReachable = RotationUtils.reachable(context.playerContext(), context.placeLoc(), context.playerContext().playerController().getBlockReachDistance());
         shulkerReachable.ifPresent(rotation -> context.baritone().getLookBehavior().updateTarget(rotation, true));
 
@@ -50,13 +46,24 @@ public class OpeningEnderShulker extends State {
             return;
         }
 
-        context.baritone().getInputOverrideHandler().clearAllKeys();
-        if (!(context.playerContext().minecraft().screen instanceof ShulkerBoxScreen)) {
-            context.baritone().getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
-            context.resetTimer();
-        } else {
+        // A placement the server refuses reverts a few ticks after the client predicted it. Without
+        // this we would hold right-click on air forever, since nothing else here ever times out.
+        boolean gone = !(context.playerContext().world().getBlockState(context.placeLoc()).getBlock() instanceof ShulkerBoxBlock);
+        if (gone || ticksInState() > context.settings().highwayPlaceConfirmTimeout.value) {
+            Helper.HELPER.logDirect(gone
+                    ? "Shulker didn't stay placed, retrying the placement."
+                    : "Shulker never opened, retrying the placement.");
             context.baritone().getInputOverrideHandler().clearAllKeys();
-            context.transitionTo(HighwayState.LootingEnderShulker);
+            context.transitionTo(HighwayState.PlacingEnderShulker);
+            context.resetTimer();
+            return;
         }
+
+        context.baritone().getInputOverrideHandler().clearAllKeys();
+        if (context.playerContext().minecraft().screen instanceof ShulkerBoxScreen) {
+            context.transitionTo(HighwayState.LootingEnderShulker);
+            return;
+        }
+        context.baritone().getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
     }
 }

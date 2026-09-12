@@ -36,17 +36,13 @@ public class DepositingStashShulker extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.timer() < 10) {
-            return;
-        }
-
         if (!(context.playerContext().minecraft().screen instanceof ContainerScreen)) {
             context.transitionTo(HighwayState.OpeningLootEnderChest); // stashing flag routes the reopen back here
             return;
         }
 
-        if (context.timer() < 40 && !context.openContainerHasContents()) {
-            return; // Wait for the initial content sync; a truly empty container proceeds at 40
+        if (!context.openContainerReady()) {
+            return;
         }
 
         // Legs run one at a time (each clears its flag before the next starts), so the still-latched
@@ -54,13 +50,17 @@ public class DepositingStashShulker extends State {
         ShulkerType stashType = context.refillingEnderChests() ? ShulkerType.EnderChest
                 : context.refillingGapples() ? ShulkerType.Gapple
                 : ShulkerType.Totem;
+        if (!context.containerClickReady()) {
+            return;
+        }
+
         if (context.depositShulkerChestSlot(stashType) > 0) {
+            context.noteContainerClick();
             Helper.HELPER.logDirect("Stashed " + switch (stashType) {
                 case EnderChest -> "ender chest";
                 case Gapple -> "gapple";
                 default -> "totem";
             } + " shulker back into storage.");
-            context.resetTimer();
             return;
         }
 

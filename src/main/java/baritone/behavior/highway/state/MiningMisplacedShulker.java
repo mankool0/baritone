@@ -32,19 +32,28 @@ public class MiningMisplacedShulker extends State {
 
     private int guardWaitTicks = 0;
 
+    /** Ticks to let the builder pick up a dispatched clearArea before considering another one. */
+    private static final int BUILDER_SPINUP_TICKS = 5;
+
+    private int sinceClearDispatch = BUILDER_SPINUP_TICKS;
+
     public MiningMisplacedShulker(HighwayState state) {
         super(state);
     }
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.timer() < 20) {
-            return;
-        }
-
         if (!context.baritone().getBuilderProcess().isPaused() && context.baritone().getBuilderProcess().isActive()) {
+            sinceClearDispatch = BUILDER_SPINUP_TICKS;
             context.resetTimer();
             return; // Wait for the dispatched clear to complete
+        }
+
+        // A dispatched clearArea takes a couple of ticks to show up as an active builder; don't
+        // queue a second one into that window.
+        if (sinceClearDispatch < BUILDER_SPINUP_TICKS) {
+            sinceClearDispatch++;
+            return;
         }
 
         context.baritone().getPathingBehavior().cancelEverything();
@@ -59,6 +68,7 @@ public class MiningMisplacedShulker extends State {
 
             context.settings().buildRepeat.value = new Vec3i(0, 0, 0);
             context.baritone().getBuilderProcess().clearArea(context.placeLoc(), context.placeLoc());
+            sinceClearDispatch = 0;
             context.resetTimer();
             return;
         }
