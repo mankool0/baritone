@@ -63,6 +63,9 @@ public class LootingEnderShulker extends State {
             Helper.HELPER.logDirect("Looted " + enderChestsLooted + " ender chests");
             return;
         }
+        if (enderChestsLooted < 0) {
+            return; // made room for the next stack, loot it next tick
+        }
 
         Helper.HELPER.logDirect("No more ender chests. Rolling with what we have.");
         context.transitionTo(HighwayState.MiningEnderShulker);

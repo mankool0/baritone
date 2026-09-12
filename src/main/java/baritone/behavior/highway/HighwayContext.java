@@ -2763,21 +2763,19 @@ public class HighwayContext {
                 count += curContainer.getSlot(i).getItem().getCount();
 
                 if (getItemSlot(Item.getId(Items.AIR)) == -1) {
-                    // For some reason we have no air slots so we have to throw out some throwaway items
-                    int throwawaySlot = getAcceptableThrowawaySlot();
-                    if (throwawaySlot == 8) {
-                        throwawaySlot = getAcceptableThrowawaySlotNoHotbar();
-                    }
+                    // No empty slot: toss a throwaway now and quick-move on the next call. Swapping the
+                    // stack straight into the throwaway's slot skips the merge into partial stacks and
+                    // leaves the chests fragmented, which costs a slot when the kept ones are stashed.
+                    int throwawaySlot = getThrowawaySlotToToss();
                     if (throwawaySlot == -1) {
                         return 0;
                     }
-                    playerContext.playerController().windowClick(curContainer.containerId, i, 0, ClickType.PICKUP, playerContext.player());
                     playerContext.playerController().windowClick(curContainer.containerId, throwawaySlot < 9 ? throwawaySlot + 54 : throwawaySlot + 18, 0, ClickType.PICKUP, playerContext.player()); // Have to convert slot id to single chest slot id
                     playerContext.playerController().windowClick(curContainer.containerId, -999, 0, ClickType.PICKUP, playerContext.player());
-                } else {
-                    // There's an air slot so we can just do a quick move
-                    playerContext.playerController().windowClick(curContainer.containerId, i, 0, ClickType.QUICK_MOVE, playerContext.player());
+                    return -1;
                 }
+                // Quick move merges into partial stacks first, then takes the empty slot
+                playerContext.playerController().windowClick(curContainer.containerId, i, 0, ClickType.QUICK_MOVE, playerContext.player());
 
                 return count;
             }
