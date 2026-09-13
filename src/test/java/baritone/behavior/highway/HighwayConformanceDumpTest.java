@@ -48,7 +48,10 @@ import static org.junit.Assert.assertTrue;
  *   retired in-game command wrote (dig cases included), so it diffs against the dumps live clients
  *   took;</li>
  *   <li>{@code nhwdump-profiles.json} - the same geometry at every width, height and deck the
- *   server might be asked to build, which no live client would ever be set to one by one.</li>
+ *   server might be asked to build, which no live client would ever be set to one by one;</li>
+ *   <li>{@code nhwdump-patterns.json} - the angled ({@code nhwbuild ... pattern XXZ}) builds, where
+ *   there is no single cross-section to pin: consecutive slices overlap wherever the pattern jogs,
+ *   so the artifact carries a whole window of slices plus the slice arithmetic that places them.</li>
  * </ul>
  * The self-checks inside the dump are the assertions; a dump that fails them is not written as
  * passing, and a dump that cannot be composed at some profile fails here rather than in a bot.
@@ -124,6 +127,41 @@ public class HighwayConformanceDumpTest {
         assertEquals(profiles.size() * 8 * 5 * ts.length, result.cases.size());
         assertEquals(before, Profile.of(settings));
         write("nhwdump-profiles.json", COMPACT.toJson(HighwayConformanceDump.document(settings, result)));
+    }
+
+    /**
+     * The angled matrix, plus the projection tables the server needs to place a slice at all. The
+     * {@link AngledHighwayPatternTest} invariant is re-proved here over the emitted JSON rather
+     * than over block states: nothing is written unless the cases the server will be pinned to are
+     * themselves free of the overlapping-slice contradiction that rail ownership exists to prevent.
+     */
+    @Test
+    public void thePatternMatrixPassesItsSelfChecks() throws IOException {
+        Settings settings = TestSettings.fresh();
+        Profile stock = Profile.of(settings);
+        List<Profile> profiles = new ArrayList<>();
+        for (int width : HighwayConformanceDump.DEFAULT_WIDTHS) {
+            profiles.add(stock.withWidth(width));
+        }
+        Result result = HighwayConformanceDump.runPatterns(settings, profiles);
+        assertEquals(Collections.emptyList(), result.failures);
+
+        int slices = 0;
+        for (String pattern : HighwayConformanceDump.PATTERNS) {
+            HighwayPattern hp = HighwayPattern.parse(pattern, new Vec3i(1, 0, 1));
+            assertTrue(pattern + " has to be an angled pattern", hp.isCustom());
+            slices += HighwayConformanceDump.lastSlice(hp) - HighwayConformanceDump.firstSlice(hp) + 1;
+        }
+        assertEquals("8 patterns, each over -P-1 .. 2P+1", 156, slices);
+        assertEquals("slices x 4 quadrants x 5 rail combos x pave/dig x 2 widths",
+                slices * 4 * 5 * 2 * 2, result.cases.size());
+        assertEquals(12480, result.cases.size());
+        assertEquals("8 patterns x 4 quadrants", 32, result.projections.size());
+        assertEquals("the run leaves the settings as it found them", stock, Profile.of(settings));
+        assertTrue(settings.highwayRail.value && settings.highwayRailLow.value && settings.highwayRailHigh.value);
+
+        assertEquals(Collections.emptyList(), HighwayConformanceDump.checkPatternCases(result.cases));
+        write("nhwdump-patterns.json", COMPACT.toJson(HighwayConformanceDump.patternDocument(settings, result)));
     }
 
     static List<Profile> sweep() {

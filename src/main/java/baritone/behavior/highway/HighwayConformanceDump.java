@@ -30,8 +30,10 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * The conformance dump: every position the highway builder would target, projected onto the
@@ -57,6 +59,20 @@ public final class HighwayConformanceDump {
     /** Slices far enough apart that a t-dependent placement bug cannot hide between them. */
     public static final int[] DEFAULT_TS = {0, 1, 1000, 999999};
 
+    /**
+     * The angled patterns the dump pins: the one in service, the short shapes that jog on nearly
+     * every slice, both minor-axis orientations, a pattern that jogs twice in a row
+     * ({@code XXXZZ}), and the shallowest angle the bookkeeping has to survive
+     * ({@code XXXXXXXXXZ}).
+     */
+    public static final String[] PATTERNS = {"XXZXXZXXXZ", "XXZ", "XZZ", "XXXXZ", "ZZZXZ", "ZXX", "XXXZZ", "XXXXXXXXXZ"};
+
+    /**
+     * A pattern steps in both world axes and takes only its signs from the direction, so the four
+     * diagonal quadrants are exactly the directions it can be built in.
+     */
+    public static final int[][] QUADRANTS = {{1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
+
     private HighwayConformanceDump() {}
 
     /**
@@ -81,6 +97,8 @@ public final class HighwayConformanceDump {
 
     public static final class Result {
         public final JsonArray cases = new JsonArray();
+        /** Only the pattern matrix fills this; the straight-road documents never read it. */
+        public final JsonArray projections = new JsonArray();
         public final List<String> failures = new ArrayList<>();
         public boolean digEmitted;
     }
@@ -127,7 +145,7 @@ public final class HighwayConformanceDump {
                                 targetsByCase.put(key, targets);
                                 anchorsByCase.put(key, anchor);
                                 if (pave || emitDig) {
-                                    result.cases.add(caseJson(profile, dir, groupA, combo, pave, t, anchor, targets));
+                                    result.cases.add(caseJson(null, profile, dir, groupA, combo, pave, t, anchor, targets));
                                 }
                             }
                         }
@@ -145,6 +163,13 @@ public final class HighwayConformanceDump {
     public static JsonObject document(Settings settings, Result result) {
         JsonObject root = new JsonObject();
         root.addProperty("source", "mankool0/baritone @ 1.21.4-highway");
+        root.add("settings", settingsJson(settings));
+        root.addProperty("dig_cases_emitted", result.digEmitted);
+        root.add("cases", result.cases);
+        return root;
+    }
+
+    private static JsonObject settingsJson(Settings settings) {
         JsonObject settingsJson = new JsonObject();
         settingsJson.addProperty("lowest_y", settings.highwayLowestY.value);
         settingsJson.addProperty("main_y", settings.highwayMainY.value);
@@ -153,10 +178,7 @@ public final class HighwayConformanceDump {
         settingsJson.addProperty("rail", settings.highwayRail.value);
         settingsJson.addProperty("rail_low", settings.highwayRailLow.value);
         settingsJson.addProperty("rail_high", settings.highwayRailHigh.value);
-        root.add("settings", settingsJson);
-        root.addProperty("dig_cases_emitted", result.digEmitted);
-        root.add("cases", result.cases);
-        return root;
+        return settingsJson;
     }
 
     /**
@@ -191,8 +213,11 @@ public final class HighwayConformanceDump {
         return encoded == 1 ? "OBSIDIAN" : "AIR";
     }
 
-    private static JsonObject caseJson(Profile profile, int[] dir, boolean groupA, boolean[] combo, boolean pave, int t, int[] anchor, List<int[]> targets) {
+    private static JsonObject caseJson(String pattern, Profile profile, int[] dir, boolean groupA, boolean[] combo, boolean pave, int t, int[] anchor, List<int[]> targets) {
         JsonObject caseJson = new JsonObject();
+        if (pattern != null) {
+            caseJson.addProperty("pattern", pattern);
+        }
         JsonArray dirJson = new JsonArray();
         dirJson.add(dir[0]);
         dirJson.add(dir[1]);
@@ -353,6 +378,211 @@ public final class HighwayConformanceDump {
             }
         }
         return failures;
+    }
+
+    /**
+     * The angled-pattern matrix: every pattern in every diagonal quadrant, at every rail combo, in
+     * both modes, at every profile, over a window of slice indices that starts a full period before
+     * the origin and runs two periods past it. Unlike a straight road, an angled one has no single
+     * cross-section: slices that share a major-axis coordinate overlap, and which of them carries
+     * the rail on each side is a function of the slice index alone, so the artifact has to pin the
+     * whole window rather than a handful of far-apart slices.
+     *
+     * <p>{@code settings} is set to each profile and rail combo and restored before returning.
+     */
+    public static Result runPatterns(Settings settings, List<Profile> profiles) {
+        Saved saved = new Saved(settings);
+        Result result = new Result();
+        result.digEmitted = true;
+        try {
+            for (Profile profile : profiles) {
+                settings.highwayLowestY.value = profile.lowestY();
+                settings.highwayMainY.value = profile.mainY();
+                settings.highwayWidth.value = profile.width();
+                settings.highwayHeight.value = profile.height();
+
+                for (String pattern : PATTERNS) {
+                    for (int[] dir : QUADRANTS) {
+                        Vec3i direction = new Vec3i(dir[0], 0, dir[1]);
+                        HighwayPattern hp = HighwayPattern.parse(pattern, direction);
+                        if (!hp.isCustom()) {
+                            result.failures.add("pattern " + pattern + " at " + dir[0] + "/" + dir[1]
+                                    + " parsed as the classic straight-line path, so it is not an angled case at all");
+                            continue;
+                        }
+                        // A custom pattern picks its layout from its own driving axis rather than
+                        // from the direction table, and every parallel line agrees on that choice.
+                        boolean groupA = hp.majorIsX();
+                        Vec3 origin = NetherHighwayBuilderBehavior.canonicalOriginVector(groupA, settings);
+                        int ox = (int) Math.round(origin.x);
+                        int oz = (int) Math.round(origin.z);
+                        int ay = settings.highwayLowestY.value;
+                        for (boolean[] combo : RAIL_COMBOS) {
+                            settings.highwayRail.value = combo[0];
+                            settings.highwayRailLow.value = combo[1];
+                            settings.highwayRailHigh.value = combo[2];
+                            for (boolean pave : new boolean[]{true, false}) {
+                                CompositeSchematic[] variants = NetherHighwayBuilderBehavior.composePatternSchematics(direction, groupA, !groupA, pave, settings);
+                                for (int t = firstSlice(hp); t <= lastSlice(hp); t++) {
+                                    int bits = (hp.ownsLowRail(t) ? 1 : 0) | (hp.ownsHighRail(t) ? 2 : 0);
+                                    int ax = ox + hp.worldOffsetX(t);
+                                    int az = oz + hp.worldOffsetZ(t);
+                                    int[] anchor = {ax, ay, az};
+                                    List<int[]> targets = projectSlice(variants[bits], ax, ay, az);
+                                    result.cases.add(caseJson(pattern, profile, dir, groupA, combo, pave, t, anchor, targets));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            result.projections.addAll(projections());
+        } finally {
+            saved.restore(settings);
+        }
+        return result;
+    }
+
+    /** One period before the origin: enough that the window opens mid-period, at every phase. */
+    public static int firstSlice(HighwayPattern pattern) {
+        return -pattern.periodSlices() - 1;
+    }
+
+    /** Two periods past it, so a phase that only recurs every other period still shows up twice. */
+    public static int lastSlice(HighwayPattern pattern) {
+        return 2 * pattern.periodSlices() + 1;
+    }
+
+    /** The pattern artifact: the straight-road document plus the projection tables. */
+    public static JsonObject patternDocument(Settings settings, Result result) {
+        JsonObject root = new JsonObject();
+        root.addProperty("source", "mankool0/baritone @ 1.21.4-highway");
+        root.add("settings", settingsJson(settings));
+        root.addProperty("dig_cases_emitted", result.digEmitted);
+        root.add("projections", result.projections);
+        root.add("cases", result.cases);
+        return root;
+    }
+
+    /**
+     * The pure slice arithmetic, pinned per pattern and quadrant and independent of any profile:
+     * where each slice's anchor sits relative to the line origin, which slice a major coordinate
+     * (and a major/minor pair) maps back to, and which side's rail each slice owns. The server
+     * needs all four to place a slice, and all four are the functions a port silently gets wrong at
+     * negative indices, where floor division and remainder stop agreeing with truncation.
+     */
+    private static JsonArray projections() {
+        JsonArray out = new JsonArray();
+        for (String pattern : PATTERNS) {
+            for (int[] dir : QUADRANTS) {
+                HighwayPattern hp = HighwayPattern.parse(pattern, new Vec3i(dir[0], 0, dir[1]));
+                JsonObject entry = new JsonObject();
+                entry.addProperty("pattern", pattern);
+                JsonArray dirJson = new JsonArray();
+                dirJson.add(dir[0]);
+                dirJson.add(dir[1]);
+                entry.add("direction", dirJson);
+                entry.addProperty("group", hp.majorIsX() ? "A" : "B");
+                entry.addProperty("major_is_x", hp.majorIsX());
+                entry.addProperty("major_sign", hp.majorSign());
+                entry.addProperty("minor_sign", hp.minorSign());
+                entry.addProperty("period_slices", hp.periodSlices());
+                entry.addProperty("period_major", hp.periodMajorBlocks());
+                entry.addProperty("period_minor", hp.periodMinorBlocks());
+                entry.addProperty("period_world_x", hp.periodWorldX());
+                entry.addProperty("period_world_z", hp.periodWorldZ());
+
+                JsonArray anchors = new JsonArray();
+                JsonArray ownsRails = new JsonArray();
+                for (int t = firstSlice(hp); t <= lastSlice(hp); t++) {
+                    anchors.add(row(t, hp.worldOffsetX(t), hp.worldOffsetZ(t)));
+                    JsonArray owns = new JsonArray();
+                    owns.add(t);
+                    owns.add(hp.ownsLowRail(t));
+                    owns.add(hp.ownsHighRail(t));
+                    ownsRails.add(owns);
+                }
+                entry.add("anchors", anchors);
+                entry.add("owns_rails", ownsRails);
+
+                int periodMajor = hp.periodMajorBlocks();
+                JsonArray sliceFromMajor = new JsonArray();
+                JsonArray sliceIndex = new JsonArray();
+                for (int qMajor = -2 * periodMajor; qMajor <= 3 * periodMajor; qMajor++) {
+                    JsonArray fromMajor = new JsonArray();
+                    fromMajor.add(qMajor);
+                    fromMajor.add(hp.sliceFromMajor(qMajor));
+                    sliceFromMajor.add(fromMajor);
+                    for (int qMinor = -2; qMinor <= 10; qMinor++) {
+                        sliceIndex.add(row(qMajor, qMinor, hp.sliceIndex(qMajor, qMinor)));
+                    }
+                }
+                entry.add("slice_from_major", sliceFromMajor);
+                entry.add("slice_index", sliceIndex);
+                out.add(entry);
+            }
+        }
+        return out;
+    }
+
+    private static JsonArray row(int a, int b, int c) {
+        JsonArray row = new JsonArray();
+        row.add(a);
+        row.add(b);
+        row.add(c);
+        return row;
+    }
+
+    /**
+     * The invariant {@link HighwayPattern#ownsLowRail} exists to keep,
+     * re-proved against the emitted cases in the server's own model rather than against block
+     * states: wherever an angled pattern jogs, two or more slices share a major-axis coordinate and
+     * their cross-sections overlap one block apart, so a cell one of them requires OBSIDIAN and
+     * another requires AIR is a road that never finishes - the correctness scan reports it, the
+     * invalid-block fix rebuilds it, and the next scan reports it again.
+     *
+     * <p>Run over the JSON, not over the in-memory lists, so what is checked is what is written.
+     */
+    public static List<String> checkPatternCases(JsonArray cases) {
+        List<String> failures = new ArrayList<>();
+        Map<String, Map<Cell, int[]>> claimsByRoad = new HashMap<>();
+        // one line per broken road rather than one per cell: a side gate on the wrong slice
+        // contradicts thousands of cells, and the first of them names the bug as well as all of them
+        Set<String> reported = new HashSet<>();
+        for (int i = 0; i < cases.size(); i++) {
+            JsonObject caseJson = cases.get(i).getAsJsonObject();
+            JsonArray dir = caseJson.getAsJsonArray("direction");
+            String road = caseJson.get("pattern").getAsString()
+                    + " " + dir.get(0).getAsInt() + "/" + dir.get(1).getAsInt()
+                    + " rail=" + caseJson.get("rail").getAsBoolean()
+                    + " railLow=" + caseJson.get("rail_low").getAsBoolean()
+                    + " railHigh=" + caseJson.get("rail_high").getAsBoolean()
+                    + (caseJson.get("pave").getAsBoolean() ? " pave" : " dig")
+                    + " width=" + caseJson.get("width").getAsInt()
+                    + " height=" + caseJson.get("height").getAsInt()
+                    + " lowestY=" + caseJson.get("lowest_y").getAsInt();
+            Map<Cell, int[]> claims = claimsByRoad.computeIfAbsent(road, key -> new HashMap<>());
+            int t = caseJson.get("t").getAsInt();
+            JsonArray targets = caseJson.getAsJsonArray("targets");
+            for (int j = 0; j < targets.size(); j++) {
+                JsonArray target = targets.get(j).getAsJsonArray();
+                Cell cell = new Cell(target.get(0).getAsInt(), target.get(1).getAsInt(), target.get(2).getAsInt());
+                int requirement = "OBSIDIAN".equals(target.get(3).getAsString()) ? 1 : 0;
+                int[] claimed = claims.putIfAbsent(cell, new int[]{requirement, t});
+                if (claimed != null && claimed[0] != requirement && reported.add(road)) {
+                    failures.add(road + ": " + cell + " is " + requirementName(claimed[0]) + " for slice t="
+                            + claimed[1] + " and " + requirementName(requirement) + " for slice t=" + t);
+                }
+            }
+        }
+        return failures;
+    }
+
+    private record Cell(int x, int y, int z) {
+        @Override
+        public String toString() {
+            return "(" + x + ", " + y + ", " + z + ")";
+        }
     }
 
     /** The settings the matrix overwrites, so the caller gets them back whatever happens. */
