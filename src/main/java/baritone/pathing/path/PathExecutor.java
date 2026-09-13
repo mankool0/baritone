@@ -69,6 +69,13 @@ public class PathExecutor implements IPathExecutor, Helper {
     private Double currentMovementOriginalCostEstimate;
     private Integer costEstimateIndex;
     private boolean failed;
+    /**
+     * Index of a movement that turned out to be much more expensive than planned, so that the path should end just
+     * before it. -1 when there is nothing to cut off.
+     *
+     * @see #cutBeforeChangedMovement()
+     */
+    private int cutoffRequest = -1;
     private boolean recalcBP = true;
     /**
      * Chunks that have been loaded since this path was calculated, and therefore may disagree with the cached copy
@@ -220,15 +227,18 @@ public class PathExecutor implements IPathExecutor, Helper {
                 Movement future = (Movement) path.movements().get(pathPosition + i);
                 double planned = future.getCost();
                 double actual = future.calculateCost(behavior.secretInternalGetCalculationContext());
-                if (actual >= ActionCosts.COST_INF && canCancel) {
-                    logDebug("Something has changed in the world and a future movement has become impossible. Cancelling.");
-                    cancel();
-                    return true;
+                boolean impossible = actual >= ActionCosts.COST_INF;
+                boolean muchWorse = repathWhileLoaded && actual - planned > Baritone.settings().maxCostIncrease.value;
+                if (!impossible && !muchWorse) {
+                    continue;
                 }
-                if (repathWhileLoaded && actual - planned > Baritone.settings().maxCostIncrease.value && canCancel) {
-                    // don't walk right up to the changed blocks and only then notice; drop the path while there is still
-                    // room to go around, same idea as the COST_INF lookahead above
-                    logDebug("Something has changed in the world and movement " + (pathPosition + i) + " went from cost " + planned + " to " + actual + ". Cancelling.");
+                if (repathWhileLoaded) {
+                    logDebug("Something has changed in the world and movement " + (pathPosition + i) + " went from cost " + planned + " to " + actual + ". Ending the path just before it.");
+                    cutoffRequest = pathPosition + i;
+                    break;
+                }
+                if (canCancel) {
+                    logDebug("Something has changed in the world and a future movement has become impossible. Cancelling.");
                     cancel();
                     return true;
                 }
@@ -700,6 +710,33 @@ public class PathExecutor implements IPathExecutor, Helper {
             ret.cacheMismatch = cacheMismatch;
             return ret;
         }).orElseGet(this::cutIfTooLong); // dont actually call cutIfTooLong every tick if we won't actually use it, use a method reference
+    }
+
+    /**
+     * If a movement further along this path became much more expensive than it was planned to be (see
+     * {@link baritone.api.Settings#repathOnLoadedCostIncrease}), end the path just before it. The bot keeps walking
+     * everything up to that point, which is still as good as it was when it was calculated, and covers the calculation
+     * of the replacement segment with actual movement instead of standing still for it.
+     *
+     * @return An executor for the shortened path, or {@code this} if there is nothing to cut off
+     */
+    public PathExecutor cutBeforeChangedMovement() {
+        int cutoff = cutoffRequest;
+        cutoffRequest = -1;
+        if (cutoff <= pathPosition || cutoff > path.length() - 2) {
+            // nothing left to walk before it, or it isn't actually part of this path (anymore)
+            return this;
+        }
+        CutoffPath newPath = new CutoffPath(path, cutoff);
+        PathExecutor ret = new PathExecutor(behavior, newPath);
+        ret.pathPosition = pathPosition;
+        ret.currentMovementOriginalCostEstimate = currentMovementOriginalCostEstimate;
+        ret.costEstimateIndex = costEstimateIndex;
+        ret.ticksOnCurrent = ticksOnCurrent;
+        ret.ticksAway = ticksAway;
+        ret.chunksToVerify.addAll(chunksToVerify);
+        ret.cacheMismatch = cacheMismatch;
+        return ret;
     }
 
     private PathExecutor cutIfTooLong() {

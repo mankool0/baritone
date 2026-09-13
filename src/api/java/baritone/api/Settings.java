@@ -572,8 +572,10 @@ public final class Settings {
      * before we get there, and without this the path is kept and the obsidian mined through instead of just walking
      * on top of it.
      * <p>
-     * Also looks {@link #costVerificationLookahead} movements ahead so the path is dropped before walking up to the
-     * changed blocks.
+     * Also looks {@link #costVerificationLookahead} movements ahead so the change is noticed before walking up to the
+     * changed blocks. A change noticed that early (an impossible movement included, which vanilla cancels on) does not
+     * cancel the path but ends it just before the movement that changed, so the part that is still good gets walked
+     * while the replacement segment is calculated. Cancelling instead stands still for a whole {@link #primaryTimeoutMS}
      */
     public final Setting<Boolean> repathOnLoadedCostIncrease = new Setting<>(true);
 

@@ -61,6 +61,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
     private boolean unpausedLastTick;
     private boolean pausedThisTick;
     private boolean cancelRequested;
+    private boolean urgentPlanAhead;
     private boolean calcFailedLastTick;
 
     private volatile AbstractNodeCostSearch inProgress;
@@ -209,6 +210,20 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
                     findPathInNewThread(expectedSegmentStart, true, context);
                 }
                 return;
+            }
+            // a movement further along the path became much more expensive than planned, so it was cut short just
+            // before that movement instead of being cancelled outright. plan the replacement while we walk the rest
+            PathExecutor cut = current.cutBeforeChangedMovement();
+            if (cut != current) {
+                current = cut;
+                if (next != null) {
+                    // it starts where this path used to end, which we no longer intend to reach
+                    queuePathEvent(PathEvent.DISCARD_NEXT);
+                    next = null;
+                }
+                // only a handful of movements are left to cover the calculation, so it can't take the leisurely
+                // several seconds that planning ahead normally gets
+                urgentPlanAhead = true;
             }
             // at this point, we know current is in progress
             if (safeToCancel && next != null && next.snipsnapifpossible()) {
@@ -511,13 +526,14 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         }
         long primaryTimeout;
         long failureTimeout;
-        if (current == null) {
+        if (current == null || urgentPlanAhead) {
             primaryTimeout = Baritone.settings().primaryTimeoutMS.value;
             failureTimeout = Baritone.settings().failureTimeoutMS.value;
         } else {
             primaryTimeout = Baritone.settings().planAheadPrimaryTimeoutMS.value;
             failureTimeout = Baritone.settings().planAheadFailureTimeoutMS.value;
         }
+        urgentPlanAhead = false;
         AbstractNodeCostSearch pathfinder = createPathfinder(start, goal, current == null ? null : current.getPath(), context);
         if (!Objects.equals(pathfinder.getGoal(), goal)) { // will return the exact same object if simplification didn't happen
             logDebug("Simplifying " + goal.getClass() + " to GoalXZ due to distance");
