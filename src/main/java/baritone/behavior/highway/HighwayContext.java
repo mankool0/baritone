@@ -3999,15 +3999,33 @@ public class HighwayContext {
         return true;
     }
 
+    private static final int CREEP_FLOOR_LOOKAHEAD = 3;
+
     public boolean canWalkOnFloorAhead() {
         BetterBlockPos feet = playerContext.playerFeet();
         int dirX = highwayDirection.getX();
         int dirZ = highwayDirection.getZ();
         int floorY = feet.y - 1;
 
-        // Block we'll be standing on after stepping forward
-        if (!MovementHelper.canWalkOn(baritone.bsi, feet.x + dirX, floorY, feet.z + dirZ)) {
-            return false;
+        int lookahead = Math.max(1, Math.min(CREEP_FLOOR_LOOKAHEAD, settings.highwayEndDistance.value));
+        for (int d = 1; d <= lookahead; d++) {
+            if (!MovementHelper.canWalkOn(baritone.bsi, feet.x + d * dirX, floorY, feet.z + d * dirZ)) {
+                return false;
+            }
+        }
+        // The key walks down the player's yaw, not the axis, and an interact aim can pull it far
+        // enough sideways to drift into the outer lane columns the digging profile never floors,
+        // with the axis scan above still reporting clear floor. So scan the real heading too.
+        Vec3 pos = playerContext.player().position();
+        double yaw = Math.toRadians(playerContext.player().getYRot());
+        double headX = -Math.sin(yaw);
+        double headZ = Math.cos(yaw);
+        for (int d = 1; d <= lookahead; d++) {
+            int x = (int) Math.floor(pos.x + headX * d);
+            int z = (int) Math.floor(pos.z + headZ * d);
+            if (!MovementHelper.canWalkOn(baritone.bsi, x, floorY, z)) {
+                return false;
+            }
         }
         // For diagonals also check the two orthogonally-adjacent floor cells
         if (dirX != 0 && dirZ != 0) {
