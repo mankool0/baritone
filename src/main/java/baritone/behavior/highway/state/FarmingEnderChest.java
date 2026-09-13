@@ -26,7 +26,6 @@ import baritone.behavior.highway.enums.HighwayState;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.AirBlock;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -59,10 +58,16 @@ public class FarmingEnderChest extends State {
         boolean chestVisible = !(state.getBlock() instanceof AirBlock);
         boolean validPick = HighwayContext.validPicksList.contains(context.playerContext().player().getItemInHand(InteractionHand.MAIN_HAND).getItem());
         boolean instantMine = context.settings().highwayEnderChestInstantMine.value;
+        // Last tick placed a chest, so it is standing server-side whatever the client shows. A
+        // foreign block in view (anything but a chest) drops back to the legacy path below.
         boolean pipelining = instantMine && validPick && context.instantMineCalibrated()
-                && context.lastEchestPlaceTick() == context.playerContext().player().tickCount - 1;
+                && context.lastEchestPlaceTick() == context.playerContext().player().tickCount - 1
+                && (!chestVisible || state.is(Blocks.ENDER_CHEST));
 
-        if (chestVisible) {
+        if (pipelining) {
+            context.instantMineTick(context.placeLoc());
+            context.setEchestPlacedServerSide(false);
+        } else if (chestVisible) {
             if (!validPick) {
                 return;
             }
@@ -80,11 +85,9 @@ public class FarmingEnderChest extends State {
                 return;
             }
 
-            if (!pipelining || !state.is(Blocks.ENDER_CHEST)) {
-                context.instantMineTick(context.placeLoc());
-                context.setEchestPlacedServerSide(false);
-                return;
-            }
+            context.instantMineTick(context.placeLoc());
+            context.setEchestPlacedServerSide(false);
+            return;
         } else {
             context.setEchestPlacedServerSide(false);
         }
@@ -104,11 +107,6 @@ public class FarmingEnderChest extends State {
         }
 
         if (outOfChests || needsEchest) {
-            if (chestVisible) {
-                context.instantMineTick(context.placeLoc());
-                context.setEchestPlacedServerSide(false);
-            }
-
             if (outOfChests) {
                 // Out of ender chests to farm, swap the offhand back and move on.
                 context.baritone().getInputOverrideHandler().clearAllKeys();
@@ -123,44 +121,24 @@ public class FarmingEnderChest extends State {
 
         if (pipelining) {
             if (chestVisible) {
-                // Only the client still sees a chest here: server side this tick's break clears it
-                // (it is sent after this tick's place), so mirror that to get place() past
-                // canBeReplaced.
+                // Only the client still sees a chest here: server side this tick's break (already
+                // sent) clears it, so mirror that to get place() past canBeReplaced.
                 context.playerContext().world().removeBlock(context.placeLoc(), false);
             }
         } else {
             // Nothing placed yet: face the support block and drop a fresh ender chest from the offhand.
-            // A pipelining tick keeps its aim on the mine target instead (set by instantMineTick below).
+            // A pipelining tick keeps its aim on the mine target instead (set by instantMineTick above).
             Optional<Rotation> support = RotationUtils.reachable(context.playerContext(), context.placeLoc().below(), context.playerContext().playerController().getBlockReachDistance());
-            support.ifPresent(rotation -> context.baritone().getLookBehavior().updateTarget(rotation, true));
+            support.ifPresent(rotation -> context.baritone().getLookBehavior().updateTarget(context.farmAim(rotation), true));
         }
 
-        boolean refused = context.echestPlacedServerSide();
+        // A place that falls through needs no recovery: a pipelining tick has already dug, so
+        // nothing is left standing, and the stale place tick drops the next tick back to the
+        // legacy path.
         if (context.place(context.placeLoc(), 5.0f, false, false, InteractionHand.OFF_HAND) == HighwayContext.PlaceResult.Placed) {
-            if (refused) {
-                restoreOffhandEnderChest(context);
-            }
             context.setEchestPlacedServerSide(true);
             context.setLastEchestPlaceTick(context.playerContext().player().tickCount);
-            if (pipelining) {
-                context.instantMineTick(context.placeLoc());
-                context.setEchestPlacedServerSide(false);
-            }
             context.resetTimer();
-        } else if (pipelining && chestVisible) {
-            // Placement fell through after the position was cleared locally: break whatever is still
-            // standing there
-            context.instantMineTick(context.placeLoc());
-            context.setEchestPlacedServerSide(false);
-        }
-    }
-
-    private void restoreOffhandEnderChest(HighwayContext context) {
-        ItemStack offhand = context.playerContext().player().getOffhandItem();
-        if (offhand.isEmpty()) {
-            context.playerContext().player().setItemInHand(InteractionHand.OFF_HAND, new ItemStack(Blocks.ENDER_CHEST.asItem()));
-        } else if (offhand.getItem().equals(Blocks.ENDER_CHEST.asItem())) {
-            offhand.grow(1);
         }
     }
 }

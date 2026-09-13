@@ -4748,11 +4748,16 @@ public class HighwayContext {
         } catch (Exception ignored) {}
     }
 
+    public Rotation farmAim(Rotation rotation) {
+        float wobble = (playerContext.player().tickCount & 1) == 0 ? 0.5f : -0.5f;
+        return new Rotation(rotation.getYaw(), rotation.getPitch() + wobble);
+    }
+
     private Direction faceMineTarget(BlockPos pos) {
         double reach = playerContext.playerController().getBlockReachDistance();
         Optional<Rotation> rotation = RotationUtils.reachable(playerContext, pos, reach);
         if (rotation.isPresent()) {
-            baritone.getLookBehavior().updateTarget(rotation.get(), true);
+            baritone.getLookBehavior().updateTarget(farmAim(rotation.get()), true);
             HitResult hit = RayTraceUtils.rayTraceTowards(playerContext.player(), rotation.get(), reach);
             if (hit instanceof BlockHitResult blockHit && blockHit.getBlockPos().equals(pos)) {
                 return blockHit.getDirection();
