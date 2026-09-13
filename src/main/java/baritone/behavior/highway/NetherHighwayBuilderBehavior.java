@@ -120,11 +120,16 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
     @Override
     public void build(int startX, int startZ, Vec3i direct, boolean selfSolve, boolean pave, Vec3i endCoords, Vec3i startCoords) {
+        build(startX, startZ, direct, selfSolve, pave, endCoords, startCoords, null);
+    }
+
+    @Override
+    public void build(int startX, int startZ, Vec3i direct, boolean selfSolve, boolean pave, Vec3i endCoords, Vec3i startCoords, String pattern) {
         HighwayPattern parsedPattern;
         try {
-            parsedPattern = HighwayPattern.parse(settings.highwayPattern.value, direct);
+            parsedPattern = HighwayPattern.parse(pattern, direct);
         } catch (IllegalArgumentException e) {
-            Helper.HELPER.logDirect("highwayPattern rejected: " + e.getMessage());
+            Helper.HELPER.logDirect("pattern rejected: " + e.getMessage());
             stop();
             return;
         }

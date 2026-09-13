@@ -50,6 +50,16 @@ public interface INetherHighwayBuilderBehavior extends IBehavior {
     void build(int startX, int startZ, Vec3i direct, boolean selfSolve, boolean pave, Vec3i endCoords, Vec3i startCoords);
 
     /**
+     * @param pattern One {@code X} or {@code Z} character per slice in absolute world axes, e.g.
+     *                {@code XXZXXZXXXZ} for 7 blocks of X per 3 of Z (about 23 degrees off the X
+     *                axis), to build an angled highway. The direction only supplies the two signs,
+     *                so a pattern using both axes needs both of them non-zero. Null, empty, or a
+     *                pattern that uses one axis only or both equally builds the classic
+     *                straight/diagonal road.
+     */
+    void build(int startX, int startZ, Vec3i direct, boolean selfSolve, boolean pave, Vec3i endCoords, Vec3i startCoords, String pattern);
+
+    /**
      * True when the active build follows a custom slice pattern (an angled highway) rather than a
      * straight or 45-degree diagonal line.
      */

@@ -68,7 +68,7 @@ public class HighwayBuilderCommands {
                 if (!selfSolve) {
                     // getAsOrDefault leaves a non-integer token in place, so a missing pair
                     // used to fall through as (-69, -69) and anchor the road there.
-                    if (!args.has(2) || isStartKeyword(args.peekString())) {
+                    if (!args.has(2) || isKeyword(args.peekString())) {
                         logDirect("selfSolve=false needs <origX> <origZ> before the end coordinates");
                         return;
                     }
@@ -78,20 +78,27 @@ public class HighwayBuilderCommands {
                 logDirect("origX: " + origX + " origZ: " + origZ);
 
                 Vec3i endCoords = null;
-                if (args.has(2) && !isStartKeyword(args.peekString())) {
+                if (args.has(2) && !isKeyword(args.peekString())) {
                     int endX = args.getAs(Integer.class);
                     int endZ = args.getAs(Integer.class);
                     endCoords = new Vec3i(endX, 0, endZ);
                     logDirect("End: " + endX + ", " + endZ);
                 }
 
+                // Trailing keyword arguments, in any order, after the positional coordinates
                 Vec3i startCoords = null;
-                if (args.hasAny() && isStartKeyword(args.peekString())) {
-                    args.get(); // the keyword
-                    int buildStartX = args.getAs(Integer.class);
-                    int buildStartZ = args.getAs(Integer.class);
-                    startCoords = new Vec3i(buildStartX, 0, buildStartZ);
-                    logDirect("Start: " + buildStartX + ", " + buildStartZ);
+                String pattern = null;
+                while (args.hasAny() && isKeyword(args.peekString())) {
+                    String keyword = args.getString();
+                    if (isStartKeyword(keyword)) {
+                        int buildStartX = args.getAs(Integer.class);
+                        int buildStartZ = args.getAs(Integer.class);
+                        startCoords = new Vec3i(buildStartX, 0, buildStartZ);
+                        logDirect("Start: " + buildStartX + ", " + buildStartZ);
+                    } else {
+                        pattern = args.getString();
+                        logDirect("Pattern: " + pattern);
+                    }
                 }
                 if (args.hasAny()) {
                     logDirect("Ignoring leftover arguments (end coords need both <endX> <endZ>)");
@@ -99,7 +106,7 @@ public class HighwayBuilderCommands {
 
                 logDirect("Calculating build location");
 
-                baritone.getNetherHighwayBuilderBehavior().build(origX, origZ, new Vec3i(xDir, 0, zDir), selfSolve, doPaving, endCoords, startCoords);
+                baritone.getNetherHighwayBuilderBehavior().build(origX, origZ, new Vec3i(xDir, 0, zDir), selfSolve, doPaving, endCoords, startCoords, pattern);
             }
 
             @Override
@@ -123,9 +130,14 @@ public class HighwayBuilderCommands {
                         "> nhwbuild - <dirX> <dirZ> <pave> <selfSolve> <origX> <origZ> - Where selfSolve is false if you want a custom origin. Default is true",
                         "> nhwbuild - <dirX> <dirZ> <pave> <selfSolve> [<origX> <origZ>] <endX> <endZ> - Stop once the highway is built through the end coords",
                         "> nhwbuild - ... start <startX> <startZ> - Begin the build at the named point on the highway line instead of at your feet",
+                        "> nhwbuild - ... pattern <pattern> - Build at an angle instead of straight or 45 degrees",
                         "",
-                        "Set highwayPattern (e.g. XXZXXZXXXZ, 7 X per 3 Z) to build at an angle instead of straight or 45 degrees.",
-                        "A two-axis pattern needs both signs, so give it a quadrant: `nhwbuild 1 1`, not `nhwbuild 1 0`."
+                        "The pattern is one X or Z per slice in absolute world axes, e.g. `pattern XXZXXZXXXZ`",
+                        "is 7 blocks of X per 3 of Z, about 23 degrees off the X axis. The direction only supplies",
+                        "the two signs, so an angled build needs a quadrant: `nhwbuild 1 1`, not `nhwbuild 1 0`.",
+                        "Patterns that use one axis only, or both equally, build the classic straight/diagonal road.",
+                        "",
+                        "The keyword arguments may come in either order: `nhwbuild 1 1 true pattern XXZ start 100 100`."
                 );
             }
         };
@@ -188,7 +200,20 @@ public class HighwayBuilderCommands {
         };
     }
 
+    /**
+     * Keywords introduce the optional trailing arguments. The positional coordinate pairs are all
+     * optional too, so every place that decides whether a pair is present has to stop at a keyword
+     * rather than try to read it as a number.
+     */
+    private static boolean isKeyword(String arg) {
+        return isStartKeyword(arg) || isPatternKeyword(arg);
+    }
+
     private static boolean isStartKeyword(String arg) {
         return arg.equalsIgnoreCase("start") || arg.equalsIgnoreCase("--start");
+    }
+
+    private static boolean isPatternKeyword(String arg) {
+        return arg.equalsIgnoreCase("pattern") || arg.equalsIgnoreCase("--pattern");
     }
 }

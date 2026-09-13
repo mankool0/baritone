@@ -109,23 +109,24 @@ public final class HighwayPattern {
     }
 
     /**
-     * Parse the {@code highwayPattern} setting against the requested build direction.
+     * Parse the {@code pattern} argument of {@code nhwbuild} against the requested build
+     * direction.
      *
      * <p>The pattern string is a sequence of {@code X} and {@code Z} characters in absolute world
      * axes, one per slice, e.g. {@code XXZXXZXXXZ}. The direction supplies the signs: a pattern
      * that steps in X needs {@code direction.x != 0}, one that steps in Z needs
      * {@code direction.z != 0}; for a two-axis pattern that means requesting a diagonal quadrant
-     * such as {@code ne}. Patterns using only one axis, or using both axes equally (that is just a
+     * such as {@code 1 1}. Patterns using only one axis, or using both axes equally (that is just a
      * 45&deg; diagonal), fall back to {@link #NONE} so the classic code path runs.
      *
      * @throws IllegalArgumentException with a user-readable message when the pattern string is
      *                                  malformed or incompatible with the direction
      */
-    public static HighwayPattern parse(String setting, Vec3i direction) {
-        if (setting == null) {
+    public static HighwayPattern parse(String pattern, Vec3i direction) {
+        if (pattern == null) {
             return NONE;
         }
-        String s = setting.trim().toUpperCase();
+        String s = pattern.trim().toUpperCase();
         if (s.isEmpty()) {
             return NONE;
         }

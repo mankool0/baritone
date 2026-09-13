@@ -43,7 +43,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
- * The geometry an angled ({@code highwayPattern}) build produces, checked slice by slice against
+ * The geometry an angled ({@code nhwbuild ... pattern XXZ}) build produces, checked slice by slice against
  * every other slice it overlaps.
  *
  * <p>Unlike a straight or 45-degree build, consecutive slices of an angled one can share a
