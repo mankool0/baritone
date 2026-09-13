@@ -505,9 +505,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         // Handle distance to keep from end of highway
         boolean walk = false;
         if (settings.highwayEndDistance.value != -1 && highwayContext.currentState().getState() == HighwayState.BuildingHighway) {
-            boolean interacting = baritone.getLookBehavior().hasInteractTargetThisTick();
             boolean pathing = baritone.getPathingBehavior().isPathing();
-            if (!pathing && !interacting && baritone.getInputOverrideHandler().isInputForcedDown(Input.SNEAK)) {
+            BlockPos builderAim = baritone.getBuilderProcess().stationaryAimTarget();
+            if (!pathing && builderAim == null && baritone.getInputOverrideHandler().isInputForcedDown(Input.SNEAK)) {
                 // forced sneak left over from a finished stationary placement: with no path
                 // running nothing ever clears it, and a latched movement override keeps the
                 // override movement input installed, which ignores the real walk key entirely
@@ -544,26 +544,46 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 // while a segment executes the path executor owns the movement keys; forcing
                 // the walk key under it would shove the player off the moves it planned
                 walkBlocker = "pathing";
-            } else if (interacting && baritone.getInputOverrideHandler().isInputForcedDown(Input.SNEAK)) {
-                // a stationary sneak-placement needs stillness in either mode
+            } else if (baritone.getBuilderProcess().isBreakingInPlace()) {
+                // a dig that spans ticks only finishes if the crosshair holds on the block: walking
+                // slides the hit result onto a neighbour and vanilla restarts the progress there
+                walkBlocker = "breaking in place";
+            } else if (builderAim != null && builderAim.getY() >= ctx.playerFeet().y
+                    && !highwayContext.inWalkLane(builderAim.getX(), builderAim.getZ())) {
+                // A rail column is outside the lane the front scan watches, so nothing above knows
+                // the builder is working on one. The walk key runs along the aim yaw, which points
+                // at the rail, so it walks the bot into the rail it's trying to clear and slides it
+                // along the face until the block it was aiming at isn't in the crosshair any more.
+                // Only from our own feet up: nothing lower than that is in the way of a walk, and
+                // a support column offset out under the rails is dug from the lane all day.
+                walkBlocker = "interacting off the lane";
+            } else if (builderAim != null && baritone.getInputOverrideHandler().isInputForcedDown(Input.SNEAK)) {
+                // a stationary sneak-placement needs stillness in either mode. The key is read a
+                // tick late like the aim is, which is right: the builder clears every forced input
+                // at the top of its own tick, so what's still down is what it set on the last one
                 walkBlocker = "sneak placement";
-            } else if (interacting && !highwayContext.paving()
-                    && !baritone.getLookBehavior().getTargetRotation()
-                    .map(rot -> Math.abs(Mth.degreesDifference(rot.getYaw(), highwayContext.highwayDirectionYaw())) <= 50)
-                    .orElse(false)) {
+            } else if (builderAim != null && !highwayContext.paving() && !aimAlongHighway(builderAim)) {
                 walkBlocker = "aim off the highway";
             }
             walk = walkBlocker == null;
             highwayContext.noteWalkGate(walkBlocker);
-            if (walk && !baritone.getLookBehavior().hasTargetThisTick()) {
-                // nothing owns the look this tick; without this the held key walks wherever
-                // the last rotation happened to leave the camera
+            if (walk) {
+                // the key walks along the player's yaw, so point it down the highway every tick we
+                // hold it; without this it walks wherever the last rotation left the camera
                 highwayContext.faceHighwayDirection();
             }
         }
         setWalkForward(walk);
 
         highwayContext.handle();
+    }
+
+    /**
+     * Whether an aim at the given block still points roughly down the highway
+     */
+    private boolean aimAlongHighway(BlockPos target) {
+        float yaw = RotationUtils.calcRotationFromVec3d(ctx.playerHead(), VecUtils.getBlockPosCenter(target), ctx.playerRotations()).getYaw();
+        return Math.abs(Mth.degreesDifference(yaw, highwayContext.highwayDirectionYaw())) <= 50;
     }
 
     private void setWalkForward(boolean walk) {

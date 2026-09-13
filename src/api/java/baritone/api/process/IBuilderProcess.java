@@ -67,6 +67,15 @@ public interface IBuilderProcess extends IBaritoneProcess {
 
     void resume();
 
+    boolean isBreakingInPlace();
+
+    /**
+     * @return the block the stationary break/place path aimed at on the builder's last tick, or
+     * null if it wasn't aiming at one. While it is, the look behavior points the player's yaw at
+     * that block, so anything holding the walk key walks at it rather than where it meant to go.
+     */
+    BlockPos stationaryAimTarget();
+
     void clearArea(BlockPos corner1, BlockPos corner2);
 
     /**

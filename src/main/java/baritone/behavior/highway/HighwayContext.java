@@ -4157,6 +4157,26 @@ public class HighwayContext {
         return -(x - ox) * highwayDirection.getZ() + (z - oz) * highwayDirection.getX();
     }
 
+    /**
+     * The cross-section column the given block sits in, counted the way the schematic counts: 0 is
+     * the low-side rail, 1 to {@code highwayWidth} the walk lane, {@code highwayWidth + 1} the
+     * high-side rail. That is {@link #lateralColumn} with the direction's sign taken back out, so
+     * the same column reads the same number whichever of the eight directions we're heading.
+     */
+    public int crossSectionColumn(int x, int z) {
+        // Group A lays the cross-section out along Z and group B along X; the perpendicular grows
+        // one per column in both, up to this sign. Same crossPerp scanFrontDistance measures with.
+        int crossPerp = NetherHighwayBuilderBehavior.isGroupA(highwayDirection)
+                ? highwayDirection.getX() : -highwayDirection.getZ();
+        return crossPerp < 0 ? -lateralColumn(x, z) : lateralColumn(x, z);
+    }
+
+    /** Whether the given block is in the walk lane rather than one of the rail columns beside it. */
+    public boolean inWalkLane(int x, int z) {
+        int column = crossSectionColumn(x, z);
+        return column >= 1 && column <= settings.highwayWidth.value;
+    }
+
     /** The yaw that points straight down the highway direction. */
     public float highwayDirectionYaw() {
         return (float) Math.toDegrees(Math.atan2(-highwayDirection.getX(), highwayDirection.getZ()));
