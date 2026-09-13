@@ -3758,6 +3758,7 @@ public class HighwayContext {
 
     // what the last scanFrontDistance was pinned on, for nhwstatus
     private BlockPos frontBlockerSlice;
+    private CompositeSchematic frontBlockerSchem;
     private int frontBlockerX;
     private int frontBlockerY;
     private int frontBlockerZ;
@@ -3800,10 +3801,24 @@ public class HighwayContext {
         return sb.toString();
     }
 
-    /** Blocks of travel per schematic slice: 1 on a straight highway, sqrt(2) on a diagonal. */
+    /**
+     * Blocks of travel per schematic slice: 1 on a straight highway, sqrt(2) on a diagonal, and a
+     * period's length over its slice count on an angled pattern, whose slices step one world axis
+     * each and so advance the heading by a fraction of a block apiece.
+     */
     private double stepLength() {
+        if (pattern.isCustom()) {
+            return Math.hypot(pattern.periodWorldX(), pattern.periodWorldZ()) / pattern.periodSlices();
+        }
         return Math.sqrt(highwayDirection.getX() * highwayDirection.getX()
                 + highwayDirection.getZ() * highwayDirection.getZ());
+    }
+
+    /** World offset from the slice at {@code t0} to the one {@code steps} further up the highway. */
+    private Vec3i sliceOffset(int t0, int steps) {
+        return pattern.isCustom()
+                ? sliceDelta(t0, steps)
+                : new Vec3i(steps * highwayDirection.getX(), 0, steps * highwayDirection.getZ());
     }
 
     /**
@@ -3820,35 +3835,51 @@ public class HighwayContext {
      * creeped at all and built the whole road from pathed break goals, stopping at each end of the
      * 45-degree slice in turn. On a straight highway a slice is exactly one block along travel and
      * this returns what the slice count returned.
+     * <p>
+     * An angled pattern is that problem again, worse: its slices each step a single world axis, so no
+     * slice step is the heading, consecutive slices jog sideways instead of stacking up a straight
+     * line, and where the pattern jogs the neighbouring slices hand the rail columns between them, so
+     * a cell's own slice decides what the cross-section wants there. The scan is therefore written
+     * against a heading vector - {@link #highwayDirection} on a classic highway, the world offset of a
+     * whole period on a pattern - with slices walked by {@link #sliceOffset} and cells checked against
+     * {@link #schematicForSlice}. With the classic heading that is the original arithmetic verbatim.
      */
     private int scanFrontDistance(int maxBlocks) {
         Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
         Vec3 curPosPlayer = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
         BlockPos startCheckPos = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z), direction, curPosPlayer, LocationType.HighwayBuild);
 
-        int dirX = highwayDirection.getX();
-        int dirZ = highwayDirection.getZ();
-        int lenSq = dirX * dirX + dirZ * dirZ;
-        double stepLen = stepLength();
+        boolean custom = pattern.isCustom();
+        int scanT0 = custom ? sliceIndexOf(startCheckPos, originVector) : 0;
+        // The heading, unnormalised: the direction vector on a classic highway, a whole period's world
+        // offset on a pattern (7 by 3 for XXZXXZXXXZ), since no single pattern slice travels it.
+        double headX = custom ? pattern.periodWorldX() : highwayDirection.getX();
+        double headZ = custom ? pattern.periodWorldZ() : highwayDirection.getZ();
+        double headLen = Math.sqrt(headX * headX + headZ * headZ);
+        // Least along-the-heading progress one slice can make, unnormalised, for the scan bounds only:
+        // a full step on a classic highway, a jog (minor axis) step on a pattern. Bounding with the
+        // slowest slice overshoots the scan on a pattern, which the break below cuts short anyway.
+        double minAdvance = custom ? Math.min(Math.abs(headX), Math.abs(headZ)) : headX * headX + headZ * headZ;
 
         boolean crossZ = schematic.lengthZ() >= schematic.widthX();
         int crossLen = crossZ ? schematic.lengthZ() : schematic.widthX();
         // One column across the highway shifts a cell crossAlong along the highway and crossPerp across
-        // it, both unnormalised, so both come out in blocks once divided by stepLen. crossAlong is 0 on
-        // a straight, where a slice is perpendicular to travel, and +-1 on a diagonal, where it isn't.
-        int crossAlong = crossZ ? dirZ : dirX;
-        int crossPerp = crossZ ? dirX : -dirZ;
+        // it, both unnormalised, so both come out in blocks once divided by headLen. crossAlong is 0 on
+        // a straight, where a slice is perpendicular to travel, and non-zero wherever it isn't.
+        double crossAlong = crossZ ? headZ : headX;
+        double crossPerp = crossZ ? headX : -headZ;
         // measured from the centre of the block we're standing in, so the reading only moves when we
         // change block rather than jittering with the walk; the +0.5s cancel between the two centres
         int relX = startCheckPos.getX() - playerContext.playerFeet().getX();
         int relZ = startCheckPos.getZ() - playerContext.playerFeet().getZ();
-        double alongBase = relX * dirX + relZ * dirZ;
-        double perpBase = -relX * dirZ + relZ * dirX;
+        double alongBase = relX * headX + relZ * headZ;
+        double perpBase = -relX * headZ + relZ * headX;
 
         // The corridor the creep walks down: the column we stand in and one either side, clamped to
         // the walk lane at cross-axis offsets [1, highwayWidth] so the rails stay out of it. This is
         // the N-block generalisation of canWalkOnFloorAhead/canWalkThroughAhead, which ask the same
-        // question about the single next step.
+        // question about the single next step. Columns are read per slice, against that slice's own
+        // cross-section, so on a pattern the corridor jogs sideways with the road the way we do.
         //
         // Not the full width, because on a diagonal the road's outer columns lie ahead as well as to
         // the side: measured in game at width 7, column 7 of 8 sat 2.8 to 3.5 blocks across and 1.4
@@ -3864,16 +3895,18 @@ public class HighwayContext {
         int laneLo = Math.max(1, bodyColumn - 1);
         int laneHi = Math.min(Math.min(crossLen - 1, settings.highwayWidth.value), bodyColumn + 1);
 
-        // A cell of slice i in column j sits (alongBase + i * lenSq + j * crossAlong) / stepLen blocks
-        // along the highway from us. Solve that for the slices that can put a cell in [0, maxBlocks]:
-        // on a diagonal that reaches back past startCheckPos, since a slice trails cells behind its
-        // own origin, and one of those can be the nearest thing left unbuilt.
-        int alongSpanLo = Math.min(0, (crossLen - 1) * crossAlong);
-        int alongSpanHi = Math.max(0, (crossLen - 1) * crossAlong);
-        int iLo = (int) Math.floor((-alongBase - alongSpanHi) / lenSq);
-        int iHi = (int) Math.ceil((maxBlocks * stepLen - alongBase - alongSpanLo) / lenSq);
+        // A cell of slice i in column j sits (sliceAlong(i) + j * crossAlong) / headLen blocks along
+        // the highway from us, where sliceAlong(i) is its own slice's anchor. Solve that for the
+        // slices that can put a cell in [0, maxBlocks]: on a diagonal or a pattern that reaches back
+        // past startCheckPos, since a slice trails cells behind its own origin, and one of those can
+        // be the nearest thing left unbuilt.
+        double alongSpanLo = Math.min(0, (crossLen - 1) * crossAlong);
+        double alongSpanHi = Math.max(0, (crossLen - 1) * crossAlong);
+        int iLo = (int) Math.floor((-alongBase - alongSpanHi) / minAdvance);
+        int iHi = (int) Math.ceil((maxBlocks * headLen - alongBase - alongSpanLo) / minAdvance);
 
         frontBlockerSlice = null;
+        frontBlockerSchem = schematic;
         frontBlockerCrossLen = crossLen;
         frontBlockerPlayerColumn = playerColumn;
         frontBlockerLaneLo = laneLo;
@@ -3881,17 +3914,24 @@ public class HighwayContext {
 
         double nearest = maxBlocks; // an all-correct scan means "at least this far built ahead"
         if (endPos != null) {
-            int stepsToEnd = stepsAlongHighway(startCheckPos, endPos);
+            // endPos anchors the build line, so on a pattern its slice index is exact; the major-axis
+            // count stepsAlongHighway uses is only exact to the length of a jog run
+            int stepsToEnd = custom ? sliceIndexOf(endPos, originVector) - scanT0 : stepsAlongHighway(startCheckPos, endPos);
             iHi = Math.min(iHi, stepsToEnd);
             // past the last slice there is only the end, not more highway
-            nearest = Math.min(nearest, Math.max(0, (alongBase + stepsToEnd * lenSq) / stepLen));
+            Vec3i toEnd = sliceOffset(scanT0, stepsToEnd);
+            nearest = Math.min(nearest, Math.max(0, (alongBase + toEnd.getX() * headX + toEnd.getZ() * headZ) / headLen));
         }
 
         for (int i = iLo; i <= iHi; i++) {
-            if ((alongBase + i * lenSq + alongSpanLo) / stepLen >= nearest) {
+            Vec3i delta = sliceOffset(scanT0, i);
+            double sliceAlong = alongBase + delta.getX() * headX + delta.getZ() * headZ;
+            if ((sliceAlong + alongSpanLo) / headLen >= nearest) {
                 break; // this slice and every one past it is further off than what we already found
             }
-            BlockPos curPos = startCheckPos.offset(i * dirX, 0, i * dirZ);
+            double slicePerp = perpBase + (-delta.getX() * headZ + delta.getZ() * headX);
+            BlockPos curPos = startCheckPos.offset(delta);
+            CompositeSchematic sliceSchem = schematicForSlice(scanT0 + i);
             for (int y = 0; y < schematic.heightY(); y++) {
                 for (int z = 0; z < schematic.lengthZ(); z++) {
                     for (int x = 0; x < schematic.widthX(); x++) {
@@ -3899,18 +3939,19 @@ public class HighwayContext {
                         if (j < laneLo || j > laneHi) {
                             continue;
                         }
-                        double along = (alongBase + i * lenSq + j * crossAlong) / stepLen;
+                        double along = (sliceAlong + j * crossAlong) / headLen;
                         if (along < 0 || along >= nearest) {
                             continue; // behind us, or no closer than what we already found
                         }
-                        if (cellScan(curPos, x, y, z) == CellScan.MISMATCH) {
+                        if (cellScan(sliceSchem, curPos, x, y, z) == CellScan.MISMATCH) {
                             nearest = along;
                             frontBlockerSlice = curPos;
+                            frontBlockerSchem = sliceSchem;
                             frontBlockerX = x;
                             frontBlockerY = y;
                             frontBlockerZ = z;
                             frontBlockerAlong = along;
-                            frontBlockerCross = (perpBase + j * crossPerp) / stepLen;
+                            frontBlockerCross = (slicePerp + j * crossPerp) / headLen;
                             frontBlockerColumn = j;
                         }
                     }
@@ -3936,7 +3977,9 @@ public class HighwayContext {
         }
         BlockPos pos = frontBlockerSlice.offset(frontBlockerX, frontBlockerY, frontBlockerZ);
         BlockState current = playerContext.world().getBlockState(pos);
-        BlockState desired = schematic.desiredState(frontBlockerX, frontBlockerY, frontBlockerZ, current, this.approxPlaceable);
+        // the pinning slice's own cross-section, which on a jogged pattern is not the same one its
+        // neighbours are built against - they split the rail columns between them
+        BlockState desired = frontBlockerSchem.desiredState(frontBlockerX, frontBlockerY, frontBlockerZ, current, this.approxPlaceable);
         return String.format("Front: %d blocks, pinned by %d,%d,%d (column %d of %d, %.2f along, %.2f across, y+%d): is %s, wants %s [%s]",
                 dist, pos.getX(), pos.getY(), pos.getZ(),
                 frontBlockerColumn, frontBlockerCrossLen - 1, frontBlockerAlong, frontBlockerCross, frontBlockerY,
