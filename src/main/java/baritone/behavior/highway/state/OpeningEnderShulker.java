@@ -50,10 +50,15 @@ public class OpeningEnderShulker extends State {
         // this we would hold right-click on air forever, since nothing else here ever times out.
         boolean gone = !(context.playerContext().world().getBlockState(context.placeLoc()).getBlock() instanceof ShulkerBoxBlock);
         if (gone || ticksInState() > context.settings().highwayPlaceConfirmTimeout.value) {
+            context.baritone().getInputOverrideHandler().clearAllKeys();
+            // A box that is still standing and still won't open is usually facing something solid,
+            // which re-placing into the same spot can never fix on its own
+            if (!gone && context.handleShulkerWouldNotOpen(context.placeLoc())) {
+                return;
+            }
             Helper.HELPER.logDirect(gone
                     ? "Shulker didn't stay placed, retrying the placement."
                     : "Shulker never opened, retrying the placement.");
-            context.baritone().getInputOverrideHandler().clearAllKeys();
             context.transitionTo(HighwayState.PlacingEnderShulker);
             context.resetTimer();
             return;
@@ -61,6 +66,7 @@ public class OpeningEnderShulker extends State {
 
         context.baritone().getInputOverrideHandler().clearAllKeys();
         if (context.playerContext().minecraft().screen instanceof ShulkerBoxScreen) {
+            context.noteShulkerOpened();
             context.transitionTo(HighwayState.LootingEnderShulker);
             return;
         }

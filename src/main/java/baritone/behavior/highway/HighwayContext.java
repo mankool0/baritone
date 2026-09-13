@@ -47,6 +47,7 @@ import net.minecraft.world.InteractionResult;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.monster.Shulker;
 import net.minecraft.world.entity.vehicle.Boat;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ClickType;
@@ -73,10 +74,12 @@ import java.util.Collections;
 import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -166,6 +169,25 @@ public class HighwayContext {
     private static final int SHULKER_PLACE_ANCHOR_BACK = 7; // where a box goes when the lane behind us is fine
     private static final int SHULKER_PLACE_MAX_BACK = 31; // how far back the scan walks looking for one that isn't
     private static final int SHULKER_PLACE_MAX_AHEAD = 16; // last resort, for a start with nothing usable behind it
+    private static final int SHULKER_OPEN_RETRIES = 3; // plain re-places to spend before treating an open as stuck
+    private static final int SHULKER_OPEN_UNBLOCK_TRIES = 3; // digs at whatever the lid is pushing into, after those
+    private static final int SHULKER_SPOT_MEMORY = 64; // how many hopeless spots to remember before starting over
+    private BlockPos shulkerOpenFailSpot = null; // spot the open failures below are counted against
+    private int shulkerOpenFailTries = 0;
+    private final Set<BlockPos> badShulkerSpots = new HashSet<>();
+    private static final int SHULKER_SIGHT_DIGS = 6; // a reach-length of blocks is the most that can be in the way
+    private static final int SHULKER_SIGHT_WALKS = 3; // rounds of stepping back onto the standing spot
+    private static final int SHULKER_SIGHT_DIG_SPINUP = 5; // ticks a dispatched clearArea takes to read as an active builder
+    private static final int SHULKER_STAND_CLEAR_TRIES = 3; // walks off the spot to try before giving it up
+    private static final int SHULKER_PLACE_REFUSALS = 40; // refused clicks to sit through before the spot is the problem
+    private BlockPos placeRefusedSpot = null;
+    private int placeRefusedTries = 0;
+    private BlockPos standClearSpot = null; // spot the step-off-it attempts below are counted against
+    private int standClearTries = 0;
+    private BlockPos shulkerSightFailSpot = null; // spot the sight failures below are counted against
+    private int shulkerSightDigs = 0;
+    private int shulkerSightWalks = 0;
+    private long shulkerSightLastDigTick = Long.MIN_VALUE / 2;
     private boolean travellingToEnd = false; // walking up an already-built stretch because the builder found nothing to do
     private Goal travelGoal = null; // the goal object we handed the custom goal process, so we only ever cancel our own walk
     private BetterBlockPos travelTarget = null;
@@ -1325,6 +1347,10 @@ public class HighwayContext {
      */
     public boolean isShulkerPlaceSpotUsable(BlockPos placeLoc) {
         if (!isSideStorageSpotSafe(placeLoc)) {
+            return false;
+        }
+
+        if (isShulkerSpotKnownBad(placeLoc) || !shulkerColumnWorkable(placeLoc)) {
             return false;
         }
         if (!hasFloorUnder(placeLoc) && !(canBuildSupportBlock() && hasSturdyNeighbor(placeLoc.below()))) {
@@ -2633,7 +2659,7 @@ public class HighwayContext {
         return shulkerSlot;
     }
 
-    public HighwayState placeShulkerBox(Rotation shulkerReachable, Rotation underShulkerReachable, BlockPos shulkerPlaceLoc, HighwayState prevHighwayState, HighwayState currentHighwayState, HighwayState nextHighwayState, ShulkerType shulkerType) {
+    public HighwayState placeShulkerBox(BlockPos shulkerPlaceLoc, HighwayState prevHighwayState, HighwayState currentHighwayState, HighwayState nextHighwayState, ShulkerType shulkerType) {
         // Debug logging to track BlockPos types
         Helper.HELPER.logDebug("placeShulkerBox called with: " + shulkerPlaceLoc + " (class: " + shulkerPlaceLoc.getClass().getSimpleName() + ")");
 
@@ -2665,31 +2691,28 @@ public class HighwayContext {
             return currentHighwayState;
         }
 
-        // Determine placement direction and target position
-        Direction placeSide = getBestPlaceSide(shulkerPlaceLoc);
+        // Determine placement direction and target position. The side matters twice over for a
+        // shulker: it is what the box attaches to, and it decides which way the box faces.
+        Direction placeSide = getBestPlaceSide(shulkerPlaceLoc, true);
         if (placeSide == null) {
-            Helper.HELPER.logDirect("No valid placement side found");
+            Helper.HELPER.logDirect("No side to place the shulker against that would leave it openable");
+            return prevHighwayState;
+        }
+
+        // Last line of defence against placing through a wall: the caller clears the way first,
+        // but a click we can't see the face for puts the box somewhere nothing can reach it again.
+        Optional<Rotation> targetRotation = shulkerPlaceAim(shulkerPlaceLoc, placeSide);
+        if (targetRotation.isEmpty()) {
+            Helper.HELPER.logDirect("No clear line to the shulker spot at " + shulkerPlaceLoc.toShortString() + ", not placing");
             return prevHighwayState;
         }
 
         BlockPos neighbor = shulkerPlaceLoc.relative(placeSide);
-        Vec3 hitPos = Vec3.atCenterOf(shulkerPlaceLoc).add(
-            placeSide.getStepX() * 0.5,
-            placeSide.getStepY() * 0.5,
-            placeSide.getStepZ() * 0.5
-        );
-
+        Vec3 hitPos = placeHitPos(shulkerPlaceLoc, placeSide);
         BlockHitResult blockHitResult = new BlockHitResult(hitPos, placeSide.getOpposite(), neighbor, false);
 
-        // Calculate rotation for placement
-        Rotation targetRotation = RotationUtils.calcRotationFromVec3d(
-            RayTraceUtils.inferSneakingEyePosition(playerContext.player()),
-            hitPos,
-            playerContext.playerRotations()
-        );
-
         // Use look behavior to rotate to target, then place
-        baritone.getLookBehavior().updateTarget(targetRotation, true);
+        baritone.getLookBehavior().updateTarget(targetRotation.get(), true);
 
         // Select the shulker slot
         playerContext.player().getInventory().selected = shulkerSlot;
@@ -2707,8 +2730,7 @@ public class HighwayContext {
             Helper.HELPER.logDirect("Shulker placement attempted at " + shulkerPlaceLoc);
             return currentHighwayState; // Let the calling state handle waiting for confirmation
         } else {
-            Helper.HELPER.logDirect("Failed to place shulker at " + shulkerPlaceLoc);
-            return prevHighwayState;
+            return noteShulkerPlaceRefused(shulkerPlaceLoc, prevHighwayState);
         }
     }
 
@@ -2810,6 +2832,10 @@ public class HighwayContext {
         if (!isSideStorageSpotSafe(placeLoc)) {
             return false;
         }
+
+        if (isShulkerSpotKnownBad(placeLoc) || !shulkerColumnWorkable(placeLoc)) {
+            return false;
+        }
         // Under the box: either solid already, or a face the support block can be placed against -
         // and that second half only counts while we still carry a block to build the support out of
         if (!MovementHelper.canWalkOn(baritone.bsi, placeLoc.getX(), placeLoc.getY() - 1, placeLoc.getZ())
@@ -2843,7 +2869,27 @@ public class HighwayContext {
         return currentState.canBeReplaced() || currentState.getBlock() instanceof SnowLayerBlock;
     }
 
+    /** Whether a block placed at {@code pos} has something to attach to on {@code side}. */
+    private boolean canPlaceAgainst(BlockPos pos, Direction side) {
+        BlockPos neighbor = pos.relative(side);
+        BlockState neighborState = playerContext.world().getBlockState(neighbor);
+        return !neighborState.isAir()
+                && neighborState.getFluidState().isEmpty()
+                && neighborState.isFaceSturdy(playerContext.world(), neighbor, side.getOpposite());
+    }
+
     private Direction getBestPlaceSide(BlockPos pos) {
+        return getBestPlaceSide(pos, false);
+    }
+
+    private Direction getBestPlaceSide(BlockPos pos, boolean openableFacing) {
+        // Set on the floor, a box faces up into the cell above - the one the place states clear and
+        // the spot scan insists on. Any other support side leaves it facing sideways at whatever the
+        // lane happens to hold, so take the floor whenever there is one.
+        if (openableFacing && canPlaceAgainst(pos, Direction.DOWN) && canShulkerOpenToward(pos, Direction.UP)) {
+            return Direction.DOWN;
+        }
+
         Vec3 eyePos = playerContext.player().getEyePosition();
         Vec3 blockCenter = Vec3.atCenterOf(pos);
         Vec3 lookVec = blockCenter.subtract(eyePos);
@@ -2852,16 +2898,13 @@ public class HighwayContext {
         Direction bestSide = null;
 
         for (Direction side : Direction.values()) {
-            BlockPos neighbor = pos.relative(side);
-            BlockState neighborState = playerContext.world().getBlockState(neighbor);
-
-            // Check if neighbor can be placed against
-            if (neighborState.isAir() || !neighborState.isFaceSturdy(playerContext.world(), neighbor, side.getOpposite())) {
+            // Check if neighbor can be placed against (and isn't a fluid)
+            if (!canPlaceAgainst(pos, side)) {
                 continue;
             }
 
-            // Check if neighbor is a fluid
-            if (!neighborState.getFluidState().isEmpty()) {
+            // The box would face the other way; no room for the lid there means no opening it, ever
+            if (openableFacing && !canShulkerOpenToward(pos, side.getOpposite())) {
                 continue;
             }
 
@@ -2873,6 +2916,262 @@ public class HighwayContext {
         }
 
         return bestSide;
+    }
+
+    public boolean canShulkerOpenToward(BlockPos pos, Direction facing) {
+        AABB lid = Shulker.getProgressDeltaAabb(1.0F, facing, 0.0F, 0.5F, pos.getBottomCenter()).deflate(1.0E-6);
+        return playerContext.world().noBlockCollision(null, lid);
+    }
+
+    /** A cell a box can sit in or open into: already clear, or something the builder can dig out. */
+    private boolean clearOrClearable(BlockPos pos) {
+        BlockState state = playerContext.world().getBlockState(pos);
+        if (state.getFluidState().is(FluidTags.LAVA)) {
+            return false;
+        }
+        return state.canBeReplaced() || state.getDestroySpeed(playerContext.world(), pos) >= 0;
+    }
+
+    private boolean shulkerColumnWorkable(BlockPos placeLoc) {
+        return clearOrClearable(placeLoc) && clearOrClearable(placeLoc.above());
+    }
+
+    public boolean isShulkerSpotKnownBad(BlockPos pos) {
+        return badShulkerSpots.contains(new BlockPos(pos.getX(), pos.getY(), pos.getZ()));
+    }
+
+    private void rememberBadShulkerSpot(BlockPos spot) {
+        if (badShulkerSpots.size() >= SHULKER_SPOT_MEMORY) {
+            badShulkerSpots.clear(); // the lane moves on, so old entries can never come up again
+        }
+        badShulkerSpots.add(spot);
+    }
+
+    private static Vec3 placeHitPos(BlockPos pos, Direction placeSide) {
+        return Vec3.atCenterOf(pos).add(placeSide.getStepX() * 0.5, placeSide.getStepY() * 0.5, placeSide.getStepZ() * 0.5);
+    }
+
+    private Optional<Rotation> shulkerPlaceAim(BlockPos placeLoc, Direction placeSide) {
+        return RotationUtils.reachable(playerContext, placeLoc.relative(placeSide),
+                playerContext.playerController().getBlockReachDistance());
+    }
+
+    public boolean canReachShulkerPlacement(BlockPos placeLoc) {
+        Direction placeSide = getBestPlaceSide(placeLoc, true);
+        return placeSide == null || shulkerPlaceAim(placeLoc, placeSide).isPresent();
+    }
+
+    private BlockPos shulkerPlaceSightBlocker(BlockPos placeLoc) {
+        Direction placeSide = getBestPlaceSide(placeLoc, true);
+        if (placeSide == null) {
+            return null;
+        }
+        BlockPos neighbor = placeLoc.relative(placeSide);
+        Rotation aim = RotationUtils.calcRotationFromVec3d(playerContext.player().getEyePosition(1.0F),
+                VecUtils.calculateBlockCenter(playerContext.world(), neighbor), playerContext.playerRotations());
+        HitResult hit = RayTraceUtils.rayTraceTowards(playerContext.player(),
+                baritone.getLookBehavior().getAimProcessor().peekRotation(aim),
+                playerContext.playerController().getBlockReachDistance(), false);
+        if (hit != null && hit.getType() == HitResult.Type.BLOCK) {
+            BlockPos hitAt = ((BlockHitResult) hit).getBlockPos();
+            if (!hitAt.equals(neighbor)) {
+                return hitAt;
+            }
+        }
+        return null; // the ray ran out rather than stopping on something: too far, not walled off
+    }
+
+    public boolean handleShulkerPlaceOutOfSight(BlockPos placeLoc, HighwayState walkCloserState, HighwayState relocateState) {
+        BlockPos key = new BlockPos(placeLoc.getX(), placeLoc.getY(), placeLoc.getZ());
+        if (canReachShulkerPlacement(key)) {
+            return false;
+        }
+        if (!key.equals(shulkerSightFailSpot)) {
+            shulkerSightFailSpot = key;
+            shulkerSightDigs = 0;
+            shulkerSightWalks = 0;
+        }
+
+        BlockPos blocker = shulkerPlaceSightBlocker(key);
+        if (blocker != null) {
+            // A dispatched clearArea takes a couple of ticks to read as an active builder, and until
+            // it does we land back here with the wall still standing. Re-sending it into that window
+            // would spend the whole dig budget in six ticks without a single block being mined.
+            if (contextTick - shulkerSightLastDigTick < SHULKER_SIGHT_DIG_SPINUP) {
+                resetTimer();
+                return true;
+            }
+            if (shulkerSightDigs++ < SHULKER_SIGHT_DIGS) {
+                Helper.HELPER.logDirect("No line to the shulker spot at " + key.toShortString() + ", digging out the "
+                        + playerContext.world().getBlockState(blocker).getBlock().getName().getString()
+                        + " at " + blocker.toShortString() + ".");
+                baritone.getPathingBehavior().cancelEverything();
+                settings.buildRepeat.value = new Vec3i(0, 0, 0);
+                baritone.getBuilderProcess().clearArea(blocker, blocker);
+                shulkerSightLastDigTick = contextTick;
+                resetTimer();
+                return true;
+            }
+        } else if (shulkerSightWalks++ < SHULKER_SIGHT_WALKS) {
+            transitionTo(walkCloserState); // nothing in the way, we just aren't on the standing spot
+            resetTimer();
+            return true;
+        }
+
+        rememberBadShulkerSpot(key);
+        Helper.HELPER.logDirect("Still can't get a clear line to the shulker spot at " + key.toShortString()
+                + ", picking a different one.");
+        shulkerSightFailSpot = null;
+        baritone.getPathingBehavior().cancelEverything();
+        transitionTo(relocateState != null ? relocateState : HighwayState.Nothing);
+        resetTimer();
+        return true;
+    }
+
+    /** A placement that went through is proof the spot works; drop the line-of-sight failures there. */
+    public void noteShulkerPlaced() {
+        shulkerSightFailSpot = null;
+        shulkerSightDigs = 0;
+        shulkerSightWalks = 0;
+        standClearSpot = null;
+        standClearTries = 0;
+        placeRefusedSpot = null;
+        placeRefusedTries = 0;
+    }
+
+    private HighwayState noteShulkerPlaceRefused(BlockPos spot, HighwayState prevHighwayState) {
+        BlockPos key = new BlockPos(spot.getX(), spot.getY(), spot.getZ());
+        if (!key.equals(placeRefusedSpot)) {
+            placeRefusedSpot = key;
+            placeRefusedTries = 0;
+        }
+        if (placeRefusedTries++ < SHULKER_PLACE_REFUSALS) {
+            if (placeRefusedTries == 1) {
+                Helper.HELPER.logDirect("Failed to place shulker at " + key.toShortString() + ", retrying");
+            }
+            return prevHighwayState;
+        }
+        rememberBadShulkerSpot(key);
+        Helper.HELPER.logDirect("Placing a shulker at " + key.toShortString()
+                + " keeps being refused, picking a different spot.");
+        placeRefusedSpot = null;
+        placeRefusedTries = 0;
+        return HighwayState.Nothing;
+    }
+
+    public boolean playerInWayOfPlacement(BlockPos placeLoc) {
+        AABB cell = new AABB(placeLoc.getX(), placeLoc.getY(), placeLoc.getZ(),
+                placeLoc.getX() + 1.0, placeLoc.getY() + 1.0, placeLoc.getZ() + 1.0);
+        return playerContext.player().getBoundingBox().intersects(cell);
+    }
+
+    private BlockPos clearStandingSpotFor(BlockPos placeLoc) {
+        BetterBlockPos feet = playerContext.playerFeet();
+        // Step back on whichever side of the spot we already stand: the flows differ on that, and
+        // crossing over the box to reach the far side is a walk we don't need to make
+        int side = Integer.signum((feet.x - placeLoc.getX()) * highwayDirection.getX()
+                + (feet.z - placeLoc.getZ()) * highwayDirection.getZ());
+        if (side == 0) {
+            side = 1;
+        }
+        for (int step : new int[]{2 * side, 3 * side, -2 * side, -3 * side}) {
+            BlockPos candidate = placeLoc.offset(step * highwayDirection.getX(), 0, step * highwayDirection.getZ());
+            if (candidate.getX() == feet.x && candidate.getZ() == feet.z) {
+                continue; // where we already are, so pathing there would move us nowhere
+            }
+            if (hasFloorUnder(candidate)
+                    && passableForRecovery(candidate.getX(), candidate.getY(), candidate.getZ())
+                    && passableForRecovery(candidate.getX(), candidate.getY() + 1, candidate.getZ())) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    public boolean handleStandingInPlaceSpot(BlockPos placeLoc, HighwayState relocateState) {
+        BlockPos key = new BlockPos(placeLoc.getX(), placeLoc.getY(), placeLoc.getZ());
+        if (!playerInWayOfPlacement(key)) {
+            standClearSpot = null;
+            standClearTries = 0;
+            return false;
+        }
+        if (baritone.getCustomGoalProcess().isActive()) {
+            resetTimer();
+            return true; // already walking off it
+        }
+        if (!key.equals(standClearSpot)) {
+            standClearSpot = key;
+            standClearTries = 0;
+        }
+
+        BlockPos clear = clearStandingSpotFor(key);
+        if (clear != null && standClearTries++ < SHULKER_STAND_CLEAR_TRIES) {
+            Helper.HELPER.logDirect("Standing in the shulker spot at " + key.toShortString()
+                    + ", stepping back to " + clear.toShortString() + ".");
+            baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(new BetterBlockPos(clear)));
+            resetTimer();
+            return true;
+        }
+
+        // Nowhere to step to, or the walk never took: the spot itself is the thing to give up on
+        rememberBadShulkerSpot(key);
+        Helper.HELPER.logDirect("Can't get out of the shulker spot at " + key.toShortString() + ", picking a different one.");
+        standClearSpot = null;
+        standClearTries = 0;
+        baritone.getPathingBehavior().cancelEverything();
+        transitionTo(relocateState != null ? relocateState : HighwayState.Nothing);
+        resetTimer();
+        return true;
+    }
+
+    /** A box that opened is proof its spot is fine; don't carry earlier failures there forward. */
+    public void noteShulkerOpened() {
+        shulkerOpenFailSpot = null;
+        shulkerOpenFailTries = 0;
+    }
+
+    public boolean handleShulkerWouldNotOpen(BlockPos spot) {
+        BlockPos key = new BlockPos(spot.getX(), spot.getY(), spot.getZ());
+        if (!key.equals(shulkerOpenFailSpot)) {
+            shulkerOpenFailSpot = key;
+            shulkerOpenFailTries = 0;
+        }
+        shulkerOpenFailTries++;
+
+        BlockState state = playerContext.world().getBlockState(key);
+        if (!(state.getBlock() instanceof ShulkerBoxBlock)) {
+            return false; // the box isn't there at all, which is the caller's re-place case
+        }
+        Direction facing = state.getValue(ShulkerBoxBlock.FACING);
+        boolean lidHasRoom = canShulkerOpenToward(key, facing);
+
+        if (lidHasRoom && shulkerOpenFailTries <= SHULKER_OPEN_RETRIES) {
+            return false; // nothing in the way, so something transient ate the open - retry as before
+        }
+
+        // Something is in the lid's way. Digging it out beats a new spot
+        if (!lidHasRoom && facing != Direction.DOWN
+                && shulkerOpenFailTries <= SHULKER_OPEN_RETRIES + SHULKER_OPEN_UNBLOCK_TRIES) {
+            BlockPos blocked = key.relative(facing);
+            Helper.HELPER.logDirect("Shulker at " + key.toShortString() + " is facing " + facing + " into "
+                    + playerContext.world().getBlockState(blocked).getBlock().getName().getString()
+                    + ", digging that out so it can open.");
+            baritone.getPathingBehavior().cancelEverything();
+            settings.buildRepeat.value = new Vec3i(0, 0, 0);
+            baritone.getBuilderProcess().clearArea(blocked, blocked);
+            return false; // the placing state waits the builder out, then hands the box back to us
+        }
+
+        rememberBadShulkerSpot(key);
+        Helper.HELPER.logDirect("Shulker at " + key.toShortString() + " still won't open after "
+                + shulkerOpenFailTries + " tries, mining it back to place it somewhere else.");
+        shulkerOpenFailSpot = null;
+        shulkerOpenFailTries = 0;
+        baritone.getPathingBehavior().cancelEverything();
+        setPlaceLoc(key);
+        transitionTo(HighwayState.MiningMisplacedShulker);
+        resetTimer();
+        return true;
     }
 
     private int getDepletedPickSlot() {
