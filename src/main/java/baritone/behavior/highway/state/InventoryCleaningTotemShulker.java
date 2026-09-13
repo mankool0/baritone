@@ -17,38 +17,31 @@
 
 package baritone.behavior.highway.state;
 
+import baritone.api.utils.Rotation;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
-import net.minecraft.core.BlockPos;
-import net.minecraft.world.item.Item;
-import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.inventory.ClickType;
 
-public class LootEnderChestPlaceLocPrep extends State {
-    public LootEnderChestPlaceLocPrep(HighwayState state) {
+public class InventoryCleaningTotemShulker extends State {
+    public InventoryCleaningTotemShulker(HighwayState state) {
         super(state);
     }
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) == 0) {
-            context.baritone().getPathingBehavior().cancelEverything();
-            context.pause("No ender chest to place.");
+        if (!context.containerClickReady()) {
             return;
         }
 
-        context.clearThresholdConfirm();
-        context.resetTimer();
-
-        // Start ~7 blocks back and scan further back, then ahead, for a spot we can place into
-        BlockPos safeLoc = context.findSafeSideStorageSpot(7, 25);
-        if (safeLoc == null) {
-            context.baritone().getPathingBehavior().cancelEverything();
-            context.pause("Couldn't find a usable ender chest spot.");
+        int throwawaySlot = context.getThrowawaySlotToToss();
+        if (throwawaySlot == -1) {
             return;
         }
-
-        context.setPlaceLoc(safeLoc);
-        context.transitionTo(HighwayState.GoingToLootEnderChestPlaceLoc);
+        context.baritone().getLookBehavior().updateTarget(new Rotation(45, 0), true);
+        context.playerContext().playerController().windowClick(context.playerContext().player().inventoryMenu.containerId, throwawaySlot < 9 ? throwawaySlot + 36 : throwawaySlot, 0, ClickType.PICKUP, context.playerContext().player());
+        context.playerContext().playerController().windowClick(context.playerContext().player().inventoryMenu.containerId, -999, 0, ClickType.PICKUP, context.playerContext().player());
+        context.noteContainerClick();
+        context.transitionTo(HighwayState.CollectingTotemShulker);
     }
 }

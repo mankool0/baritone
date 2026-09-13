@@ -30,9 +30,6 @@ public class FarmingEnderChestSwapBack extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.timer() < 10) {
-            return;
-        }
         Item curItem = context.playerContext().player().getOffhandItem().getItem();
         if (curItem.equals(context.instantMineOriginalOffhandItem())) {
             context.resetTimer();
@@ -40,10 +37,14 @@ public class FarmingEnderChestSwapBack extends State {
             return;
         }
 
+        if (!context.containerClickReady()) {
+            return;
+        }
+
         // Unload the leftover chests merge-first so the reserve lands on an existing partial loose
         // stack instead of fragmenting into a fresh slot (or the original item's old slot)
         if (context.stashOffhandEnderChests()) {
-            context.resetTimer();
+            context.noteContainerClick();
             return; // re-check next tick; a merge can leave a remainder in the offhand
         }
 
@@ -52,7 +53,7 @@ public class FarmingEnderChestSwapBack extends State {
             int origItemSlot = context.getItemSlot(Item.getId(context.instantMineOriginalOffhandItem()));
             if (origItemSlot != -1) {
                 context.swapOffhand(origItemSlot);
-                context.resetTimer();
+                context.noteContainerClick();
                 return;
             }
             // Original offhand item is gone (e.g. totem popped mid-farm): settle for an empty hand

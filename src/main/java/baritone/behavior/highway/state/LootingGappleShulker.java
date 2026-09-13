@@ -32,33 +32,34 @@ public class LootingGappleShulker extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.timer() < 10) {
-            return;
-        }
-
         if (!(context.playerContext().minecraft().screen instanceof ShulkerBoxScreen)) {
             context.transitionTo(HighwayState.OpeningGappleShulker);
             return;
         }
 
-        if (context.timer() < 40 && !context.openContainerHasContents()) {
-            return; // Wait for the initial content sync; a truly empty container proceeds at 40
+        if (!context.openContainerReady()) {
+            return;
         }
 
-        if (context.getItemCountInventory(Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) < context.settings().highwayGapplesToHave.value) {
-            int gapplesLooted = context.lootGappleChestSlot();
-            if (gapplesLooted > 0) {
-                Helper.HELPER.logDirect("Looted " + gapplesLooted + " gapples");
-            } else {
-                Helper.HELPER.logDirect("Can't loot/empty shulker. Rolling with what we have.");
-                context.transitionTo(HighwayState.MiningGappleShulker);
-                context.playerContext().player().closeContainer();
-            }
-
-            context.resetTimer();
-        } else {
+        if (context.getItemCountInventory(Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) >= context.settings().highwayGapplesToHave.value) {
             context.transitionTo(HighwayState.MiningGappleShulker);
             context.playerContext().player().closeContainer();
+            return;
         }
+
+        if (!context.containerClickReady()) {
+            return;
+        }
+
+        int gapplesLooted = context.lootGappleChestSlot();
+        context.noteContainerClick();
+        if (gapplesLooted > 0) {
+            Helper.HELPER.logDirect("Looted " + gapplesLooted + " gapples");
+            return;
+        }
+
+        Helper.HELPER.logDirect("Can't loot/empty shulker. Rolling with what we have.");
+        context.transitionTo(HighwayState.MiningGappleShulker);
+        context.playerContext().player().closeContainer();
     }
 }

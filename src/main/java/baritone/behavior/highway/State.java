@@ -24,6 +24,14 @@ public abstract class State {
 
     protected final HighwayState state;
 
+    /**
+     * Ticks this state object has been handled for. A fresh instance is built on every transition
+     * (see {@link StateFactory}), so this counts from zero on entry and, unlike the context-wide
+     * timer, no other state can reset it out from under us. The first {@link #handle} of a state
+     * sees zero.
+     */
+    private int ticksInState;
+
     public State(HighwayState state) {
         this.state = state;
     }
@@ -32,5 +40,15 @@ public abstract class State {
         return state;
     }
 
+    public int ticksInState() {
+        return ticksInState;
+    }
+
+    void noteHandled() {
+        ticksInState++;
+    }
+
     public abstract void handle(HighwayContext context);
+
+    public void onExit(HighwayContext context) {}
 }

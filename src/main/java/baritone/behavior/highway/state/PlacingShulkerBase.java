@@ -18,18 +18,14 @@
 package baritone.behavior.highway.state;
 
 import baritone.api.utils.Helper;
-import baritone.api.utils.Rotation;
-import baritone.api.utils.RotationUtils;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
 import baritone.behavior.highway.enums.ShulkerType;
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.block.AirBlock;
+import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.ShulkerBoxBlock;
 import net.minecraft.world.level.block.state.BlockState;
-
-import java.util.Optional;
 
 public abstract class PlacingShulkerBase extends State {
     private boolean placed = false;
@@ -57,10 +53,6 @@ public abstract class PlacingShulkerBase extends State {
     }
 
     protected void handleWithShulkerType(HighwayContext context, ShulkerType shulkerType) {
-        if (placed && context.timer() < 30) {
-            return;
-        }
-
         if (!context.baritone().getBuilderProcess().isPaused() && context.baritone().getBuilderProcess().isActive()) {
             context.resetTimer();
             return; // Wait for build to complete
@@ -68,18 +60,20 @@ public abstract class PlacingShulkerBase extends State {
 
         // Check placement status
         BlockState testState = context.playerContext().world().getBlockState(context.placeLoc());
-        Helper.HELPER.logDirect("State: " + testState + " @ " + context.placeLoc());
-        
-        // If we've attempted placement, wait for the block to appear
+        Helper.HELPER.logDebug("State: " + testState + " @ " + context.placeLoc());
+
+        // Placement is client-predicted, so the block is normally there on the next tick; the
+        // timeout is what covers a placement the server refuses.
         if (placed) {
             if (testState.getBlock() instanceof ShulkerBoxBlock) {
                 Helper.HELPER.logDirect("Shulker has been placed successfully");
+                context.noteShulkerPlaced();
                 context.baritone().getInputOverrideHandler().clearAllKeys();
                 context.transitionTo(getNextState());
                 placed = false;
                 context.resetTimer();
                 return;
-            } else if (context.timer() < 100) {
+            } else if (context.timer() < context.settings().highwayPlaceConfirmTimeout.value) {
                 // Still waiting for server to confirm placement
                 return;
             } else {
@@ -102,9 +96,15 @@ public abstract class PlacingShulkerBase extends State {
             return;
         }
 
-        // Shulker box spot isn't air or shulker, lets fix that
-        BlockState testStateAbove = context.playerContext().world().getBlockState(context.placeLoc().above());
-        if (!(testState.getBlock() instanceof AirBlock) && !(testStateAbove.getBlock() instanceof AirBlock) && !(testState.getBlock() instanceof ShulkerBoxBlock)) {
+        // Shulker box spot isn't air or shulker, lets fix that. A solid block in the spot itself
+        // counts on its own: a spot picked in unpaved ground (nowhere behind us to place into) is
+        // netherrack with air above it, and waiting for both to be blocked left that looping on
+        // "Cannot place shulker" forever. Replaceable blocks (snow, liquids) still place as before.
+        // The cell above counts on its own too: that is where the lid of a box set on the floor
+        // swings, so leaving a ceiling over the spot puts down a box nobody can ever open.
+        boolean spotBlocked = !testState.canBeReplaced();
+        boolean lidBlocked = !context.canShulkerOpenToward(context.placeLoc(), Direction.UP);
+        if ((spotBlocked || lidBlocked) && !(testState.getBlock() instanceof ShulkerBoxBlock)) {
             context.baritone().getPathingBehavior().cancelEverything();
             context.baritone().getBuilderProcess().clearArea(context.placeLoc(), context.placeLoc().above());
             placed = false;
@@ -112,12 +112,20 @@ public abstract class PlacingShulkerBase extends State {
             return;
         }
 
+        if (context.handleStandingInPlaceSpot(context.placeLoc(), relocateState)) {
+            placed = false;
+            return;
+        }
+
+        if (context.handleShulkerPlaceOutOfSight(context.placeLoc(), getPreviousState(), relocateState)) {
+            placed = false;
+            return;
+        }
+
         // Convert to regular BlockPos to avoid BetterBlockPos/BlockPos collision in block entity maps
         BlockPos placeLoc = new BlockPos(context.placeLoc().getX(), context.placeLoc().getY(), context.placeLoc().getZ());
-        
-        Optional<Rotation> shulkerReachable = RotationUtils.reachable(context.playerContext(), placeLoc, context.playerContext().playerController().getBlockReachDistance());
-        Optional<Rotation> underShulkerReachable = RotationUtils.reachable(context.playerContext(), placeLoc.below(), context.playerContext().playerController().getBlockReachDistance());
-        HighwayState result = context.placeShulkerBox(shulkerReachable.orElse(null), underShulkerReachable.orElse(null), placeLoc, getPreviousState(), this.getState(), getNextState(), shulkerType);
+
+        HighwayState result = context.placeShulkerBox(placeLoc, getPreviousState(), this.getState(), getNextState(), shulkerType);
         
         if (result == this.getState()) {
             placed = true;

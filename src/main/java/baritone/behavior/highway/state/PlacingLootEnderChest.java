@@ -42,11 +42,6 @@ public class PlacingLootEnderChest extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        // Give the placement a few ticks to register before we start polling for the block
-        if (placed && context.timer() < 30) {
-            return;
-        }
-
         // Wait for an in-progress clear to finish
         if (!context.baritone().getBuilderProcess().isPaused() && context.baritone().getBuilderProcess().isActive()) {
             context.resetTimer();
@@ -65,9 +60,10 @@ public class PlacingLootEnderChest extends State {
             return;
         }
 
-        // We attempted a placement - wait for the server to confirm the chest appears
+        // Placement is client-predicted, so the chest is normally there on the next tick; the
+        // timeout is what covers a placement the server refuses.
         if (placed) {
-            if (context.timer() < 100) {
+            if (context.timer() < context.settings().highwayPlaceConfirmTimeout.value) {
                 return;
             }
             Helper.HELPER.logDirect("Ender chest placement timed out, relocating.");
@@ -105,7 +101,7 @@ public class PlacingLootEnderChest extends State {
         }
 
         // Placement isn't getting accepted after a while (not the block being in the way, we already cleared it) - relocate
-        if (context.timer() > 200) {
+        if (context.timer() > 2 * context.settings().highwayPlaceConfirmTimeout.value) {
             Helper.HELPER.logDirect("Ender chest placement not progressing, relocating.");
             context.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);
             context.resetTimer();

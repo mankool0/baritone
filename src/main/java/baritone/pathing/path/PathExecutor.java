@@ -32,9 +32,12 @@ import baritone.pathing.movement.Movement;
 import baritone.pathing.movement.MovementHelper;
 import baritone.pathing.movement.movements.*;
 import baritone.utils.BlockStateInterface;
+import it.unimi.dsi.fastutil.longs.LongIterator;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.util.Tuple;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.phys.Vec3;
 import java.util.*;
 
@@ -66,7 +69,20 @@ public class PathExecutor implements IPathExecutor, Helper {
     private Double currentMovementOriginalCostEstimate;
     private Integer costEstimateIndex;
     private boolean failed;
+    /**
+     * Index of a movement that turned out to be much more expensive than planned, so that the path should end just
+     * before it. -1 when there is nothing to cut off.
+     *
+     * @see #cutBeforeChangedMovement()
+     */
+    private int cutoffRequest = -1;
     private boolean recalcBP = true;
+    /**
+     * Chunks that have been loaded since this path was calculated, and therefore may disagree with the cached copy
+     * of themselves that the path was calculated from.
+     */
+    private final LongOpenHashSet chunksToVerify = new LongOpenHashSet();
+    private boolean cacheMismatch;
     private HashSet<BlockPos> toBreak = new HashSet<>();
     private HashSet<BlockPos> toPlace = new HashSet<>();
     private HashSet<BlockPos> toWalkInto = new HashSet<>();
@@ -191,12 +207,37 @@ public class PathExecutor implements IPathExecutor, Helper {
             }
         }
         boolean canCancel = movement.safeToCancel();
+        if (!chunksToVerify.isEmpty()) {
+            cacheMismatch |= verifyNewlyLoadedChunks();
+        }
+        if (cacheMismatch && canCancel) {
+            cancel();
+            return true;
+        }
+        // vanilla only cancels on a cost increase if the movement was calculated from cached chunk data, on the
+        // assumption that a loaded chunk only changes because of what this bot does (part of the path interfering with
+        // a later part). with several bots on one highway a loaded chunk changes under our feet all the time: a paving
+        // bot inside render distance turns the floor the path was planned across into obsidian before we get there
+        boolean repathWhileLoaded = Baritone.settings().repathOnLoadedCostIncrease.value;
         if (costEstimateIndex == null || costEstimateIndex != pathPosition) {
             costEstimateIndex = pathPosition;
             // do this only once, when the movement starts, and deliberately get the cost as cached when this path was calculated, not the cost as it is right now
             currentMovementOriginalCostEstimate = movement.getCost();
             for (int i = 1; i < Baritone.settings().costVerificationLookahead.value && pathPosition + i < path.length() - 1; i++) {
-                if (((Movement) path.movements().get(pathPosition + i)).calculateCost(behavior.secretInternalGetCalculationContext()) >= ActionCosts.COST_INF && canCancel) {
+                Movement future = (Movement) path.movements().get(pathPosition + i);
+                double planned = future.getCost();
+                double actual = future.calculateCost(behavior.secretInternalGetCalculationContext());
+                boolean impossible = actual >= ActionCosts.COST_INF;
+                boolean muchWorse = repathWhileLoaded && actual - planned > Baritone.settings().maxCostIncrease.value;
+                if (!impossible && !muchWorse) {
+                    continue;
+                }
+                if (repathWhileLoaded) {
+                    logDebug("Something has changed in the world and movement " + (pathPosition + i) + " went from cost " + planned + " to " + actual + ". Ending the path just before it.");
+                    cutoffRequest = pathPosition + i;
+                    break;
+                }
+                if (canCancel) {
                     logDebug("Something has changed in the world and a future movement has become impossible. Cancelling.");
                     cancel();
                     return true;
@@ -209,9 +250,7 @@ public class PathExecutor implements IPathExecutor, Helper {
             cancel();
             return true;
         }
-        if (!movement.calculatedWhileLoaded() && currentCost - currentMovementOriginalCostEstimate > Baritone.settings().maxCostIncrease.value && canCancel) {
-            // don't do this if the movement was calculated while loaded
-            // that means that this isn't a cache error, it's just part of the path interfering with a later part
+        if ((repathWhileLoaded || !movement.calculatedWhileLoaded()) && currentCost - currentMovementOriginalCostEstimate > Baritone.settings().maxCostIncrease.value && canCancel) {
             logDebug("Original cost " + currentMovementOriginalCostEstimate + " current cost " + currentCost + ". Cancelling.");
             cancel();
             return true;
@@ -577,6 +616,59 @@ public class PathExecutor implements IPathExecutor, Helper {
         return next instanceof MovementDiagonal && Baritone.settings().allowOvershootDiagonalDescend.value;
     }
 
+    /**
+     * Called when the server sends us a chunk. The chunk cache is only refreshed when this client loads, unloads, or
+     * edits a chunk, so anything another player changed while the chunk was outside of our render distance is invisible
+     * to us until this moment. Any movement of this path that was planned against the cached copy of that chunk has to
+     * be re-checked against what actually arrived.
+     *
+     * @param chunkX The chunk X coordinate
+     * @param chunkZ The chunk Z coordinate
+     */
+    public void onChunkLoaded(int chunkX, int chunkZ) {
+        if (!Baritone.settings().verifyCachedPathOnChunkLoad.value) {
+            return;
+        }
+        chunksToVerify.add(ChunkPos.asLong(chunkX, chunkZ));
+    }
+
+    /**
+     * @return Whether a movement calculated from cached chunk data has been invalidated by what the server sent
+     */
+    private boolean verifyNewlyLoadedChunks() {
+        CalculationContext context = behavior.secretInternalGetCalculationContext();
+        if (context == null) {
+            return false;
+        }
+        LongIterator it = chunksToVerify.iterator();
+        while (it.hasNext()) {
+            long chunk = it.nextLong();
+            int chunkX = ChunkPos.getX(chunk);
+            int chunkZ = ChunkPos.getZ(chunk);
+            if (!context.bsi.worldContainsLoadedChunk(chunkX << 4, chunkZ << 4)) {
+                continue; // our view of the world predates the chunk arriving, try again next tick
+            }
+            it.remove();
+            for (int i = pathPosition; i < path.movements().size(); i++) {
+                Movement m = (Movement) path.movements().get(i);
+                if (m.calculatedWhileLoaded()) {
+                    continue; // planned against the real world rather than the cache, so it was never a guess
+                }
+                if (m.getDest().x >> 4 != chunkX || m.getDest().z >> 4 != chunkZ) {
+                    continue;
+                }
+                double planned = m.getCost();
+                double actual = m.calculateCost(context);
+                if (actual >= ActionCosts.COST_INF || actual - planned > Baritone.settings().maxCostIncrease.value) {
+                    logDebug("Chunk " + chunkX + ", " + chunkZ + " doesn't match the cached copy this path was calculated from"
+                            + " (movement " + i + " cost " + planned + " -> " + actual + "). Cancelling.");
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private void onChangeInPathPosition() {
         clearKeys();
         ticksOnCurrent = 0;
@@ -614,8 +706,37 @@ public class PathExecutor implements IPathExecutor, Helper {
             ret.currentMovementOriginalCostEstimate = currentMovementOriginalCostEstimate;
             ret.costEstimateIndex = costEstimateIndex;
             ret.ticksOnCurrent = ticksOnCurrent;
+            ret.chunksToVerify.addAll(chunksToVerify);
+            ret.cacheMismatch = cacheMismatch;
             return ret;
         }).orElseGet(this::cutIfTooLong); // dont actually call cutIfTooLong every tick if we won't actually use it, use a method reference
+    }
+
+    /**
+     * If a movement further along this path became much more expensive than it was planned to be (see
+     * {@link baritone.api.Settings#repathOnLoadedCostIncrease}), end the path just before it. The bot keeps walking
+     * everything up to that point, which is still as good as it was when it was calculated, and covers the calculation
+     * of the replacement segment with actual movement instead of standing still for it.
+     *
+     * @return An executor for the shortened path, or {@code this} if there is nothing to cut off
+     */
+    public PathExecutor cutBeforeChangedMovement() {
+        int cutoff = cutoffRequest;
+        cutoffRequest = -1;
+        if (cutoff <= pathPosition || cutoff > path.length() - 2) {
+            // nothing left to walk before it, or it isn't actually part of this path (anymore)
+            return this;
+        }
+        CutoffPath newPath = new CutoffPath(path, cutoff);
+        PathExecutor ret = new PathExecutor(behavior, newPath);
+        ret.pathPosition = pathPosition;
+        ret.currentMovementOriginalCostEstimate = currentMovementOriginalCostEstimate;
+        ret.costEstimateIndex = costEstimateIndex;
+        ret.ticksOnCurrent = ticksOnCurrent;
+        ret.ticksAway = ticksAway;
+        ret.chunksToVerify.addAll(chunksToVerify);
+        ret.cacheMismatch = cacheMismatch;
+        return ret;
     }
 
     private PathExecutor cutIfTooLong() {
@@ -635,6 +756,8 @@ public class PathExecutor implements IPathExecutor, Helper {
                 ret.costEstimateIndex = costEstimateIndex - cutoffAmt;
             }
             ret.ticksOnCurrent = ticksOnCurrent;
+            ret.chunksToVerify.addAll(chunksToVerify);
+            ret.cacheMismatch = cacheMismatch;
             return ret;
         }
         return this;

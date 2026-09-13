@@ -33,10 +33,18 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
 public class FallRecovery extends State {
-    private boolean holdingJump = false;
 
     public FallRecovery(HighwayState state) {
         super(state);
+    }
+
+    @Override
+    public void onExit(HighwayContext context) {
+        // Every way out, not just our own: the jump and use keys we hold, the hitResult
+        // suppression that stops ALL block and container interaction while it is set, and
+        // allowSwimThroughLava. A build restarted on top of any of those looks alive and can
+        // place nothing.
+        context.resetRecovery();
     }
 
     @Override
@@ -51,11 +59,7 @@ public class FallRecovery extends State {
         boolean pathing = context.baritone().getPathingBehavior().isPathing();
 
         // Float at the lava surface while we eat and while baritone is still planning
-        boolean wantJump = inLava && !pathing;
-        if (wantJump != holdingJump) {
-            context.playerContext().minecraft().options.keyJump.setDown(wantJump);
-            holdingJump = wantJump;
-        }
+        context.setRecoveryHoldingJump(inLava && !pathing);
 
         if (inLava) {
             // Treat lava as a swimmable fluid so baritone can swim us up and out of it.

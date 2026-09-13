@@ -17,39 +17,58 @@
 
 package baritone.behavior.highway.state;
 
+import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
-import net.minecraft.client.gui.screens.inventory.ContainerScreen;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Blocks;
 
 public class FarmingEnderChestPrepEchest extends State {
+
+    /** Ticks to keep retrying the offhand swap before moving on anyway, as the old code did. */
+    private static final int SWAP_GIVE_UP_TICKS = 100;
+
     public FarmingEnderChestPrepEchest(HighwayState state) {
         super(state);
     }
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.timer() < 10) {
-            return;
-        }
-
-        if (context.playerContext().minecraft().screen instanceof ContainerScreen) {
-            // Close container screen if it somehow didn't close
+        if (context.playerContext().player().hasContainerOpen()) {
+            // Checking our own container rather than any screen keeps an incidental pause screen
+            // from wedging the farm here.
             context.playerContext().player().closeContainer();
-            context.resetTimer();
             return;
         }
 
         Item origItem = context.playerContext().player().getOffhandItem().getItem();
-        if (!(origItem instanceof BlockItem) || !(((BlockItem) origItem).getBlock().equals(Blocks.ENDER_CHEST))) {
-            int eChestSlot = context.getLargestItemSlot(Item.getId(Blocks.ENDER_CHEST.asItem()));
-            context.swapOffhand(eChestSlot);
+        if (origItem instanceof BlockItem && ((BlockItem) origItem).getBlock().equals(Blocks.ENDER_CHEST)) {
+            context.transitionTo(HighwayState.FarmingEnderChestPrepPick);
+            context.resetTimer();
+            return;
         }
 
-        context.transitionTo(HighwayState.FarmingEnderChestPrepPick);
-        context.resetTimer();
+        int eChestSlot = context.getLargestItemSlot(Item.getId(Blocks.ENDER_CHEST.asItem()));
+        if (eChestSlot == -1) {
+            // Nothing left to load; FarmingEnderChest sees the empty offhand and routes to SwapBack
+            context.transitionTo(HighwayState.FarmingEnderChestPrepPick);
+            context.resetTimer();
+            return;
+        }
+
+        if (ticksInState() > SWAP_GIVE_UP_TICKS) {
+            Helper.HELPER.logDirect("Couldn't get an ender chest into the offhand, moving on.");
+            context.transitionTo(HighwayState.FarmingEnderChestPrepPick);
+            context.resetTimer();
+            return;
+        }
+
+        if (!context.containerClickReady()) {
+            return;
+        }
+        context.swapOffhand(eChestSlot);
+        context.noteContainerClick();
     }
 }

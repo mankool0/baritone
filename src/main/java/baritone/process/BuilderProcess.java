@@ -156,6 +156,13 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private int printerBreakCooldown;
     private int printerBreakGrace;
     private boolean legitBreakSessionLastTick;
+    /**
+     * What the stationary break/place path did on the builder's last tick: whether its break target
+     * needed more than one tick of digging, and the block it aimed at. Both are read by the highway
+     * walk-creep, which ticks before any process does, so they describe the tick before this one.
+     */
+    private boolean legitSlowBreakLastTick;
+    private BetterBlockPos legitAimTargetLastTick;
     private int printerBreakStarvation;
     /**
      * Snapshot of {@link LookBehavior#isMovementInputForced()} taken before the forced inputs are
@@ -261,6 +268,16 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     @Override
     public boolean isPaused() {
         return paused;
+    }
+
+    @Override
+    public boolean isBreakingInPlace() {
+        return legitSlowBreakLastTick;
+    }
+
+    @Override
+    public BlockPos stationaryAimTarget() {
+        return legitAimTargetLastTick;
     }
 
     @Override
@@ -1197,6 +1214,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         // engage on ticks it didn't act, since they'd send conflicting packets otherwise.
         boolean breakSession = legitBreakSessionLastTick;
         legitBreakSessionLastTick = false;
+        legitSlowBreakLastTick = false;
+        legitAimTargetLastTick = null;
         // Never place while a stationary break is being lined up: a placement skips the break
         // branch for that tick, releasing the attack and resetting the dig progress, and the
         // placed block can wall off the break target. Nor let placements starve breaking forever.
@@ -1230,6 +1249,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             if (chosen.isPresent()) {
                 Rotation rot = chosen.get().getB();
                 BetterBlockPos pos = chosen.get().getA();
+                legitAimTargetLastTick = pos;
                 baritone.getLookBehavior().updateTarget(rot, true);
                 MovementHelper.switchToBestToolFor(ctx, bcc.get(pos));
                 if (ctx.player().isCrouching()) {
@@ -1242,6 +1262,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                     baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_LEFT, true);
                 }
                 if (!printerCanInstaBreak(bcc.get(pos), pos)) {
+                    // a dig that spans ticks only lands if the crosshair stays on the block, so
+                    // anything moving the player has to let go until it's done
+                    legitSlowBreakLastTick = true;
                     printerBreakGrace = Math.max(printerBreakGrace, Math.max(1, Baritone.settings().blockBreakSpeed.value));
                 }
             }
@@ -1253,6 +1276,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         if (!printerAction.acted() && toPlace.isPresent() && isSafeToCancel && ctx.player().onGround() && ticks <= 0) {
             if (!printerInventoryUnsettled()) {
                 Rotation rot = toPlace.get().rot;
+                legitAimTargetLastTick = new BetterBlockPos(toPlace.get().placeAgainst);
                 baritone.getLookBehavior().updateTarget(rot, true);
                 ctx.player().getInventory().selected = toPlace.get().hotbarSelection;
                 baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
@@ -1824,6 +1848,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         printerBreakCooldown = 0;
         printerBreakGrace = 0;
         legitBreakSessionLastTick = false;
+        legitSlowBreakLastTick = false;
+        legitAimTargetLastTick = null;
         printerBreakStarvation = 0;
         printerMovementForced = false;
         printerResetNoRotateDetection();

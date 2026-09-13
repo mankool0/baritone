@@ -30,20 +30,18 @@ public class InventoryCleaningPickaxeShulker extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.timer() < 10) {
+        if (!context.containerClickReady()) {
             return;
         }
 
-        int throwawaySlot = context.getAcceptableThrowawaySlot();
-        if (throwawaySlot == 8) {
-            throwawaySlot = context.getAcceptableThrowawaySlotNoHotbar();
-        }
+        int throwawaySlot = context.getThrowawaySlotToToss();
         if (throwawaySlot == -1) {
             return;
         }
         context.baritone().getLookBehavior().updateTarget(new Rotation(45, 0), true);
         context.playerContext().playerController().windowClick(context.playerContext().player().inventoryMenu.containerId, throwawaySlot < 9 ? throwawaySlot + 36 : throwawaySlot, 0, ClickType.PICKUP, context.playerContext().player());
         context.playerContext().playerController().windowClick(context.playerContext().player().inventoryMenu.containerId, -999, 0, ClickType.PICKUP, context.playerContext().player());
+        context.noteContainerClick();
 
         context.transitionTo(HighwayState.CollectingPickaxeShulker);
     }

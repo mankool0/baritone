@@ -112,6 +112,33 @@ public class StateFactory {
             case InventoryCleaningGappleShulker -> {
                 return new InventoryCleaningGappleShulker(highwayState);
             }
+            case TotemShulkerPlaceLocPrep -> {
+                return new TotemShulkerPlaceLocPrep(highwayState);
+            }
+            case GoingToPlaceLocTotemShulker -> {
+                return new GoingToPlaceLocTotemShulker(highwayState);
+            }
+            case PlacingTotemShulkerSupport -> {
+                return new PlacingShulkerSupport(highwayState);
+            }
+            case PlacingTotemShulker -> {
+                return new PlacingTotemShulker(highwayState);
+            }
+            case OpeningTotemShulker -> {
+                return new OpeningTotemShulker(highwayState);
+            }
+            case LootingTotemShulker -> {
+                return new LootingTotemShulker(highwayState);
+            }
+            case MiningTotemShulker -> {
+                return new MiningTotemShulker(highwayState);
+            }
+            case CollectingTotemShulker -> {
+                return new CollectingTotemShulker(highwayState);
+            }
+            case InventoryCleaningTotemShulker -> {
+                return new InventoryCleaningTotemShulker(highwayState);
+            }
             case ShulkerCollection -> {
                 return new ShulkerCollection(highwayState);
             }
@@ -153,6 +180,9 @@ public class StateFactory {
             }
             case LootingLootEnderChestGapples -> {
                 return new LootingLootEnderChestGapples(highwayState);
+            }
+            case LootingLootEnderChestTotems -> {
+                return new LootingLootEnderChestTotems(highwayState);
             }
             case EchestMiningPlaceLocPrep -> {
                 return new EchestMiningPlaceLocPrep(highwayState);

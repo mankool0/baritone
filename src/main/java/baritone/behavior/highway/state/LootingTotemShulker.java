@@ -21,17 +21,17 @@ import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
-import net.minecraft.client.gui.screens.inventory.ContainerScreen;
+import net.minecraft.client.gui.screens.inventory.ShulkerBoxScreen;
 
-public class LootingLootEnderChestPicks extends State {
-    public LootingLootEnderChestPicks(HighwayState state) {
+public class LootingTotemShulker extends State {
+    public LootingTotemShulker(HighwayState state) {
         super(state);
     }
 
     @Override
     public void handle(HighwayContext context) {
-        if (!(context.playerContext().minecraft().screen instanceof ContainerScreen)) {
-            context.transitionTo(HighwayState.OpeningLootEnderChest);
+        if (!(context.playerContext().minecraft().screen instanceof ShulkerBoxScreen)) {
+            context.transitionTo(HighwayState.OpeningTotemShulker);
             return;
         }
 
@@ -39,8 +39,9 @@ public class LootingLootEnderChestPicks extends State {
             return;
         }
 
-        if (context.getShulkerCountInventory(context.picksToUse()) >= context.settings().highwayPickShulksToHave.value) {
-            context.transitionTo(HighwayState.LootingLootEnderChestEnderChests);
+        if (context.getTotemCountInventory() >= context.totemsToHave()) {
+            context.transitionTo(HighwayState.MiningTotemShulker);
+            context.playerContext().player().closeContainer();
             return;
         }
 
@@ -48,15 +49,15 @@ public class LootingLootEnderChestPicks extends State {
             return;
         }
 
-        int picksShulksLooted = context.lootShulkerChestSlot(context.picksToUse());
+        int totemsLooted = context.lootTotemChestSlot();
         context.noteContainerClick();
-        if (picksShulksLooted > 0) {
-            Helper.HELPER.logDirect("Looted " + picksShulksLooted + " pickaxe shulker");
+        if (totemsLooted > 0) {
+            Helper.HELPER.logDirect("Looted " + totemsLooted + " totems");
             return;
         }
 
-        Helper.HELPER.logDirect("No more pickaxe shulkers. Rolling with what we have.");
-        context.setEnderChestHasPickShulks(false);
-        context.transitionTo(HighwayState.LootingLootEnderChestEnderChests);
+        Helper.HELPER.logDirect("Can't loot/empty shulker. Rolling with what we have.");
+        context.transitionTo(HighwayState.MiningTotemShulker);
+        context.playerContext().player().closeContainer();
     }
 }

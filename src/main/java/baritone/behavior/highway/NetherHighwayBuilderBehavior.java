@@ -40,6 +40,9 @@ import baritone.utils.BlockStateInterface;
 import baritone.utils.IRenderer;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import net.minecraft.core.*;
+import net.minecraft.network.protocol.game.ClientboundContainerSetContentPacket;
+import net.minecraft.network.protocol.game.ClientboundLoginPacket;
+import net.minecraft.network.protocol.game.ClientboundRespawnPacket;
 import net.minecraft.network.protocol.game.ClientboundSystemChatPacket;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.util.Mth;
@@ -117,9 +120,6 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
     @Override
     public void build(int startX, int startZ, Vec3i direct, boolean selfSolve, boolean pave, Vec3i endCoords, Vec3i startCoords) {
-        highwayContext.setEndPos(null); // a stale end would clamp the projections below
-        highwayContext.setFirstStartingPos(null); // and a stale start from a paused leg would too, under the NEW direction
-
         HighwayPattern parsedPattern;
         try {
             parsedPattern = HighwayPattern.parse(settings.highwayPattern.value, direct);
@@ -134,6 +134,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             // the schematic group table, canonicalOriginVector).
             direct = new Vec3i(Integer.signum(direct.getX()), 0, Integer.signum(direct.getZ()));
         }
+        teardown(); // nhwbuild is a restart, not an overlay: nothing the last build held survives it
+        highwayContext.resetStateDwell(); // per build, so a stop leaves the last run's timings readable
         highwayContext.setHighwayDirection(direct);
         highwayContext.setPaving(pave);
         highwayContext.setPattern(parsedPattern);
@@ -143,7 +145,6 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         highwayContext.setCachedHealth(ctx.player().getHealth());
         highwayContext.setCachedAbsorption(ctx.player().getAbsorptionAmount());
         startDimension = ctx.world().dimension();
-        wrongDimension = false;
 
         if (!highwayContext.paving()) {
             // Only digging so any pickaxe works
@@ -266,8 +267,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         if (endCoords != null) {
             BetterBlockPos end = highwayContext.getClosestPoint(origin, direction, new Vec3(endCoords.getX(), 0, endCoords.getZ()), LocationType.HighwayBuild);
             int endSteps = highwayContext.stepsAlongHighway(highwayContext.firstStartingPos(), end);
-            if (endSteps <= 0) {
-                Helper.HELPER.logDirect("End " + endCoords.getX() + ", " + endCoords.getZ() + " is not ahead of the start " + highwayContext.firstStartingPos().toString() + ", not starting");
+            if (endSteps < 0) {
+                Helper.HELPER.logDirect("End " + endCoords.getX() + ", " + endCoords.getZ() + " is behind the start " + highwayContext.firstStartingPos().toString() + ", not starting");
                 stop();
                 return;
             }
@@ -281,25 +282,38 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 + (!railLow && !railHigh ? "none" : ""));
         Helper.HELPER.logDirect("Building from " + highwayContext.originBuild().toString());
         settings.buildRepeat.value = new Vec3i(highwayContext.highwayDirection().getX(), 0, highwayContext.highwayDirection().getZ());
-        baritone.getPathingBehavior().cancelEverything();
-
 
         highwayContext.setEnderChestHasPickShulks(true);
         highwayContext.setEnderChestHasEnderShulks(true);
         highwayContext.setEnderChestHasGappleShulks(true);
+        highwayContext.setEnderChestHasTotemShulks(true);
         highwayContext.setRefillingEnderChests(false);
         highwayContext.setRefillingGapples(false);
+        highwayContext.setRefillingTotems(false);
         highwayContext.setStashingShulker(false);
         highwayContext.setEnderChestAccessLoc(null);
-        highwayContext.setRepeatCheck(false);
         highwayContext.resetThiefHunt();
         highwayContext.clearLostShulkerRelogAttempt();
         highwayContext.setStartShulkerCount(highwayContext.getShulkerCountInventory(ShulkerType.Any));
         highwayContext.setPaused(false);
         highwayContext.resetThroughWallDetection();
+        highwayContext.transitionTo(HighwayState.Nothing);
+    }
+
+    private void teardown() {
+        highwayContext.clearThresholdConfirm();
+        wrongDimension = false;
+        highwayContext.resetRecovery(); // held keys, suppressHitResult, and settings (e.g. allowSwimThroughLava) overridden during recovery
         highwayContext.clearInvalidBlockFix();
         highwayContext.stopTravelTowardsEnd();
-        highwayContext.transitionTo(HighwayState.Nothing);
+        highwayContext.transitionTo(HighwayState.Nothing); // onExit: whatever the state we interrupt holds
+        setWalkForward(false);
+        baritone.getInputOverrideHandler().clearAllKeys();
+        baritone.getPathingBehavior().cancelEverything();
+        highwayContext.setFirstStartingPos(null); // a stale start or end clamps every projection the next build makes
+        highwayContext.setOriginBuild(null);
+        highwayContext.setEndPos(null);
+        settings.buildRepeatCount.value = -1; // Nothing clamps it while an end is set
     }
 
     /** +X, -X, +X+Z, -X-Z: the schematic is 1 wide in X and extends in Z; the cross-axis is Z. */
@@ -514,19 +528,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         Helper.HELPER.logDirect("STOPPING NETHERHIGHWAYBUILDER");
         Helper.HELPER.logDirect("Was at state " + highwayContext.currentState().getState() + " before termination");
 
+        teardown();
         highwayContext.setPaused(true);
-        highwayContext.setRepeatCheck(false);
-        wrongDimension = false;
-        highwayContext.resetRecovery(); // restore any settings (e.g. allowSwimThroughLava) overridden during recovery
-        highwayContext.clearInvalidBlockFix();
-        highwayContext.stopTravelTowardsEnd();
-        highwayContext.transitionTo(HighwayState.Nothing);
-        setWalkForward(false);
-        baritone.getPathingBehavior().cancelEverything();
-        highwayContext.setFirstStartingPos(null);
-        highwayContext.setOriginBuild(null);
-        highwayContext.setEndPos(null);
-        settings.buildRepeatCount.value = -1; // Nothing clamps it while an end is set
     }
 
     @Override
@@ -535,9 +538,15 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         if (highwayContext.endPos() != null) {
             Helper.HELPER.logDirect("End: " + highwayContext.endPos().toString());
         }
-        Helper.HELPER.logDirect("Paused: " + highwayContext.paused());
+        Helper.HELPER.logDirect("Paused: " + highwayContext.paused()); // true/false alone: hive.py reads this line
+        if (highwayContext.pauseReason() != null) {
+            Helper.HELPER.logDirect("Pause reason: " + highwayContext.pauseReason());
+        }
         Helper.HELPER.logDirect("Timer: " + highwayContext.timer());
         Helper.HELPER.logDirect("startShulkerCount: " + highwayContext.startShulkerCount());
+        Helper.HELPER.logDirect(highwayContext.frontDistanceDiagnostic());
+        Helper.HELPER.logDirect(highwayContext.walkGateDiagnostic());
+        highwayContext.stateDwellDiagnostic(12).forEach(Helper.HELPER::logDirect);
     }
 
     @Override
@@ -599,52 +608,85 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         // Handle distance to keep from end of highway
         boolean walk = false;
         if (settings.highwayEndDistance.value != -1 && highwayContext.currentState().getState() == HighwayState.BuildingHighway) {
-            boolean interacting = baritone.getLookBehavior().hasInteractTargetThisTick();
             boolean pathing = baritone.getPathingBehavior().isPathing();
-            if (!pathing && !interacting && baritone.getInputOverrideHandler().isInputForcedDown(Input.SNEAK)) {
+            BlockPos builderAim = baritone.getBuilderProcess().stationaryAimTarget();
+            if (!pathing && builderAim == null && baritone.getInputOverrideHandler().isInputForcedDown(Input.SNEAK)) {
                 // forced sneak left over from a finished stationary placement: with no path
                 // running nothing ever clears it, and a latched movement override keeps the
                 // override movement input installed, which ignores the real walk key entirely
                 baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, false);
             }
-            int lengthFront = highwayContext.getHighwayLengthFront();
+            // both sides of these comparisons are blocks along the highway, including creepMaxOvershoot
+            int frontDistance = highwayContext.getHighwayFrontDistance();
             // a dispatched repair needs to path to a block behind us; creeping forward (and
             // steering back to the lane center) would drag the bot off that path every tick
-            walk = !highwayContext.invalidBlockFixActive()
-                    && lengthFront >= settings.highwayEndDistance.value
-                    // only creep while the build front is right in front of us
-                    && lengthFront < settings.highwayEndDistance.value + highwayContext.creepMaxOvershoot()
-                    && highwayContext.canWalkOnFloorAhead()
-                    // a solid at body height on an all-correct stretch is schematic-valid (the
-                    // ledge of a paved section, the wall of a pocket in the floor) and will never
-                    // be dug; the creep can't jump it, so release and let the builder path instead
-                    && highwayContext.canWalkThroughAhead()
-                    // never creep into a lit portal waiting for its frame to be mined
-                    && highwayContext.noPortalAhead()
-                    // release the key while an inventory move waits for a tick without movement input
-                    && !baritone.getInventoryPauserProcess().calmPausePending()
-                    // while a segment executes the path executor owns the movement keys; forcing
-                    // the walk key under it would shove the player off the moves it planned
-                    && !pathing;
-            if (walk && interacting) {
-                if (baritone.getInputOverrideHandler().isInputForcedDown(Input.SNEAK)) {
-                    // a stationary sneak-placement needs stillness in either mode
-                    walk = false;
-                } else if (!highwayContext.paving()) {
-                    walk = baritone.getLookBehavior().getTargetRotation()
-                            .map(rot -> Math.abs(Mth.degreesDifference(rot.getYaw(), highwayContext.highwayDirectionYaw())) <= 50)
-                            .orElse(false);
-                }
+            // Same conditions in the same order as before, evaluated one at a time so nhwstatus can
+            // say which one is actually holding the key down
+            String walkBlocker = null;
+            if (highwayContext.invalidBlockFixActive()) {
+                walkBlocker = "invalid-block repair";
+            } else if (frontDistance < settings.highwayEndDistance.value) {
+                walkBlocker = "front too close";
+            } else if (frontDistance >= settings.highwayEndDistance.value + highwayContext.creepMaxOvershoot()) {
+                // only creep while the build front is right in front of us
+                walkBlocker = "front too far";
+            } else if (!highwayContext.canWalkOnFloorAhead()) {
+                walkBlocker = "no floor ahead";
+            } else if (!highwayContext.canWalkThroughAhead()) {
+                // a solid at body height on an all-correct stretch is schematic-valid (the
+                // ledge of a paved section, the wall of a pocket in the floor) and will never
+                // be dug; the creep can't jump it, so release and let the builder path instead
+                walkBlocker = "blocked at body height ahead";
+            } else if (!highwayContext.noPortalAhead()) {
+                // never creep into a lit portal waiting for its frame to be mined
+                walkBlocker = "portal ahead";
+            } else if (baritone.getInventoryPauserProcess().calmPausePending()) {
+                // release the key while an inventory move waits for a tick without movement input
+                walkBlocker = "inventory pause";
+            } else if (pathing) {
+                // while a segment executes the path executor owns the movement keys; forcing
+                // the walk key under it would shove the player off the moves it planned
+                walkBlocker = "pathing";
+            } else if (baritone.getBuilderProcess().isBreakingInPlace()) {
+                // a dig that spans ticks only finishes if the crosshair holds on the block: walking
+                // slides the hit result onto a neighbour and vanilla restarts the progress there
+                walkBlocker = "breaking in place";
+            } else if (builderAim != null && builderAim.getY() >= ctx.playerFeet().y
+                    && !highwayContext.inWalkLane(builderAim.getX(), builderAim.getZ())) {
+                // A rail column is outside the lane the front scan watches, so nothing above knows
+                // the builder is working on one. The walk key runs along the aim yaw, which points
+                // at the rail, so it walks the bot into the rail it's trying to clear and slides it
+                // along the face until the block it was aiming at isn't in the crosshair any more.
+                // Only from our own feet up: nothing lower than that is in the way of a walk, and
+                // a support column offset out under the rails is dug from the lane all day.
+                walkBlocker = "interacting off the lane";
+            } else if (builderAim != null && baritone.getInputOverrideHandler().isInputForcedDown(Input.SNEAK)) {
+                // a stationary sneak-placement needs stillness in either mode. The key is read a
+                // tick late like the aim is, which is right: the builder clears every forced input
+                // at the top of its own tick, so what's still down is what it set on the last one
+                walkBlocker = "sneak placement";
+            } else if (builderAim != null && !highwayContext.paving() && !aimAlongHighway(builderAim)) {
+                walkBlocker = "aim off the highway";
             }
-            if (walk && !baritone.getLookBehavior().hasTargetThisTick()) {
-                // nothing owns the look this tick; without this the held key walks wherever
-                // the last rotation happened to leave the camera
+            walk = walkBlocker == null;
+            highwayContext.noteWalkGate(walkBlocker);
+            if (walk) {
+                // the key walks along the player's yaw, so point it down the highway every tick we
+                // hold it; without this it walks wherever the last rotation left the camera
                 highwayContext.faceHighwayDirection();
             }
         }
         setWalkForward(walk);
 
         highwayContext.handle();
+    }
+
+    /**
+     * Whether an aim at the given block still points roughly down the highway
+     */
+    private boolean aimAlongHighway(BlockPos target) {
+        float yaw = RotationUtils.calcRotationFromVec3d(ctx.playerHead(), VecUtils.getBlockPosCenter(target), ctx.playerRotations()).getYaw();
+        return Math.abs(Mth.degreesDifference(yaw, highwayContext.highwayDirectionYaw())) <= 50;
     }
 
     private void setWalkForward(boolean walk) {
@@ -737,6 +779,16 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
     @Override
     public void onReceivePacket(PacketEvent event) {
+        if (event.getState() == EventState.POST) {
+            // Runs on the netty thread, so only flags are written here.
+            if (event.getPacket() instanceof ClientboundContainerSetContentPacket contents) {
+                highwayContext.noteContainerSync(contents.getContainerId());
+            } else if (event.getPacket() instanceof ClientboundLoginPacket
+                    || event.getPacket() instanceof ClientboundRespawnPacket) {
+                highwayContext.noteInventoryDesynced();
+            }
+        }
+
         if (event.getPacket() instanceof ClientboundSystemChatPacket packet && event.getState() == EventState.POST) {
             String message = packet.content().getString();
             

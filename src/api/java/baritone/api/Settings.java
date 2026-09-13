@@ -552,6 +552,34 @@ public final class Settings {
     public final Setting<Integer> costVerificationLookahead = new Setting<>(5);
 
     /**
+     * Whenever a chunk is loaded, re-check the movements of the current path that go through it and were calculated
+     * from cached chunk data instead of from the real world. If the chunk the server actually sent doesn't match what
+     * the cache claimed (someone else built or mined there while it was outside of render distance), cancel and
+     * recalculate instead of walking into it.
+     * <p>
+     * Matters when more than one bot is changing the same area: the cache of a chunk is only refreshed when this
+     * client loads, unloads, or edits it, so another bot's work is invisible until we get close enough to load it.
+     */
+    public final Setting<Boolean> verifyCachedPathOnChunkLoad = new Setting<>(true);
+
+    /**
+     * Cancel and recalculate when a movement of the current path has become more than {@link #maxCostIncrease} more
+     * expensive than planned, even if it was calculated from a loaded chunk rather than from cached chunk data.
+     * <p>
+     * Vanilla Baritone only does this for movements calculated from the cache, on the assumption that a loaded chunk
+     * only changes because of what the bot itself does. That assumption doesn't hold with several bots working on the
+     * same highway: a paving bot inside render distance will turn the floor the path was planned across into obsidian
+     * before we get there, and without this the path is kept and the obsidian mined through instead of just walking
+     * on top of it.
+     * <p>
+     * Also looks {@link #costVerificationLookahead} movements ahead so the change is noticed before walking up to the
+     * changed blocks. A change noticed that early (an impossible movement included, which vanilla cancels on) does not
+     * cancel the path but ends it just before the movement that changed, so the part that is still good gets walked
+     * while the replacement segment is calculated. Cancelling instead stands still for a whole {@link #primaryTimeoutMS}
+     */
+    public final Setting<Boolean> repathOnLoadedCostIncrease = new Setting<>(true);
+
+    /**
      * Static cutoff factor. 0.9 means cut off the last 10% of all paths, regardless of chunk load state
      */
     public final Setting<Double> pathCutoffFactor = new Setting<>(0.9);
@@ -1593,6 +1621,40 @@ public final class Settings {
     public final Setting<Integer> highwayFireRestMinDuration = new Setting<>(1200);
 
     /**
+     * How long, in ticks, to keep waiting for the server to send the contents of a shulker box or
+     * ender chest we just opened before giving up and treating what we can see as the whole story.
+     *
+     * <p>The builder normally proceeds the moment the server's content packet lands, so this only
+     * costs anything when that packet never arrives; it is deliberately generous so a bad ping or a
+     * lagging server can't make a full container look empty.
+     */
+    public final Setting<Integer> highwayContainerSyncTimeout = new Setting<>(200);
+
+    /**
+     * Minimum ticks between the individual slot moves the builder makes inside an open container.
+     * Loot and deposit both move one slot per click, so this paces the click packets; lower is
+     * faster but sends them in tighter bursts.
+     */
+    public final Setting<Integer> highwayContainerClickInterval = new Setting<>(4);
+
+    /**
+     * How long, in ticks, an inventory threshold (picks, gapples, ender chests, totems) has to stay
+     * tripped before the builder commits to a storage trip or pauses.
+     *
+     * <p>An inventory the server hasn't sent yet is handled by waiting for the sync instead, so this
+     * only rides out a count that flickers while items are still being shuffled. It does not stop
+     * the builder, the travel walk or the correctness scans.
+     */
+    public final Setting<Integer> highwayThresholdConfirmTicks = new Setting<>(40);
+
+    /**
+     * How long, in ticks, to keep polling for a shulker box or ender chest we placed to show up
+     * before deciding the placement was refused and relocating.
+     */
+    public final Setting<Integer> highwayPlaceConfirmTimeout = new Setting<>(100);
+
+
+    /**
      * If enabled, liquid removal places blocks without requiring line of sight and without
      * rotating, limited only by normal block reach distance
      */
@@ -1624,6 +1686,29 @@ public final class Settings {
     public final Setting<Integer> highwayGapplesToHave = new Setting<>(48);
 
     /**
+     * Grab a totem shulker from ender storage and top totems of undying back up when they run low.
+     * Off by default so bots that don't stock totem shulkers never go looking for one.
+     */
+    public final Setting<Boolean> highwayRefillTotems = new Setting<>(false);
+
+    /**
+     * Totem threshold for acquiring more totems. Counts the offhand totem too.
+     */
+    public final Setting<Integer> highwayTotemsThreshold = new Setting<>(2);
+
+    /**
+     * Minimum amount of totems (offhand included) to stop looting. Raised to at least
+     * highwayTotemsThreshold + 1 so a refill always clears its own trigger.
+     */
+    public final Setting<Integer> highwayTotemsToHave = new Setting<>(5);
+
+    /**
+     * Pause when totems run low and ender storage has no totem shulker left. Off by default:
+     * totems are a safety net, not a build input, so an empty totem stash just keeps building.
+     */
+    public final Setting<Boolean> highwayPauseWhenOutOfTotems = new Setting<>(false);
+
+    /**
      * Obsidian threshold for acquiring more obsidian
      */
     public final Setting<Integer> highwayObsidianThreshold = new Setting<>(32);
@@ -1650,6 +1735,19 @@ public final class Settings {
      * and deposit the shulker back into the ender chest.
      */
     public final Setting<Boolean> highwayStashGappleShulkers = new Setting<>(true);
+
+    /**
+     * Totem shulkers to have in inventory during looting. Only used when
+     * highwayStashTotemShulkers is false.
+     */
+    public final Setting<Integer> highwayTotemShulksToHave = new Setting<>(1);
+
+    /**
+     * Keep totem shulkers in the ender chest instead of the inventory: when totems run low,
+     * grab a totem shulker from the ender chest, loot totems up to highwayTotemsToHave,
+     * and deposit the shulker back into the ender chest.
+     */
+    public final Setting<Boolean> highwayStashTotemShulkers = new Setting<>(true);
 
     /**
      * Ender chests to loot for obsidian farming
@@ -1865,7 +1963,7 @@ public final class Settings {
     public final Setting<Boolean> highwayRailHigh = new Setting<>(true);
 
     /**
-     * If not -1 will keep this distance from the end of the highway
+     * If not -1 will keep this distance, in blocks along the highway, from the end of the highway
      * Useful for digging small tunnels quicker
      */
     public final Setting<Integer> highwayEndDistance = new Setting<>(-1);

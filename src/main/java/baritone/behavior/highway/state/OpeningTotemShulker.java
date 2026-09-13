@@ -29,8 +29,8 @@ import net.minecraft.world.level.block.ShulkerBoxBlock;
 
 import java.util.Optional;
 
-public class OpeningGappleShulker extends State {
-    public OpeningGappleShulker(HighwayState state) {
+public class OpeningTotemShulker extends State {
+    public OpeningTotemShulker(HighwayState state) {
         super(state);
     }
 
@@ -52,7 +52,7 @@ public class OpeningGappleShulker extends State {
             Helper.HELPER.logDirect(gone
                     ? "Shulker didn't stay placed, retrying the placement."
                     : "Shulker never opened, retrying the placement.");
-            context.transitionTo(HighwayState.PlacingGappleShulker);
+            context.transitionTo(HighwayState.PlacingTotemShulker);
             context.resetTimer();
             return;
         }
@@ -60,7 +60,7 @@ public class OpeningGappleShulker extends State {
         context.baritone().getInputOverrideHandler().clearAllKeys();
         if (context.playerContext().minecraft().screen instanceof ShulkerBoxScreen) {
             context.noteShulkerOpened();
-            context.transitionTo(HighwayState.LootingGappleShulker);
+            context.transitionTo(HighwayState.LootingTotemShulker);
             return;
         }
         context.baritone().getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);

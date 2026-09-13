@@ -77,7 +77,7 @@ public class LiquidRemovalPrep extends State {
             curPos = new Vec3(context.playerContext().playerFeet().getX() + (7 * context.highwayDirection().getX()), context.playerContext().playerFeet().getY(), context.playerContext().playerFeet().getZ() + (7 * context.highwayDirection().getZ()));
         }
 
-        context.setPlaceLoc(context.getClosestPoint(new Vec3(context.backPathOriginVector().x, context.backPathOriginVector().y, context.backPathOriginVector().z), new Vec3(context.highwayDirection().getX(), context.highwayDirection().getY(), context.highwayDirection().getZ()), curPos, LocationType.ShulkerEchestInteraction));
+        context.setPlaceLoc(context.liftOntoPavement(context.getClosestPoint(new Vec3(context.backPathOriginVector().x, context.backPathOriginVector().y, context.backPathOriginVector().z), new Vec3(context.highwayDirection().getX(), context.highwayDirection().getY(), context.highwayDirection().getZ()), curPos, LocationType.ShulkerEchestInteraction)));
         // Get the closest point
         if (!context.sourceBlocks().isEmpty()) {
             context.baritone().getPathingBehavior().cancelEverything();

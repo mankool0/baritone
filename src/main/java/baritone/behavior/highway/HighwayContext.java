@@ -47,6 +47,7 @@ import net.minecraft.world.InteractionResult;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.monster.Shulker;
 import net.minecraft.world.entity.vehicle.Boat;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ClickType;
@@ -69,10 +70,16 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 import java.awt.*;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -150,6 +157,7 @@ public class HighwayContext {
     private int preMineShulkerCount = -1; // inventory shulker count snapshotted before a refill box is mined
     private BetterBlockPos recoveryTarget = null;
     private int recoveryExtraBack = 0;
+    private boolean recoveryHoldingJump = false; // here, not on FallRecovery: transitionTo throws the state object away, and a latched jump key would outlive it
     private Boolean recoverySwimThroughLavaSaved = null; // non-null while we've overridden allowSwimThroughLava for recovery
     private boolean invalidBlockFixActive = false;
     private int invalidBlockFixNoPathTicks = 0;
@@ -158,6 +166,28 @@ public class HighwayContext {
     private int invalidBlockFixScanDist = 0;
     private final ArrayList<String> invalidBlockFixLastMismatches = new ArrayList<>(); // mismatch snapshot of the last check, to spot progress
     private static final int TRAVEL_STALL_TICKS = 200; // a walk that hasn't closed any distance in this long isn't going to
+    private static final int SHULKER_PLACE_ANCHOR_BACK = 7; // where a box goes when the lane behind us is fine
+    private static final int SHULKER_PLACE_MAX_BACK = 31; // how far back the scan walks looking for one that isn't
+    private static final int SHULKER_PLACE_MAX_AHEAD = 16; // last resort, for a start with nothing usable behind it
+    private static final int SHULKER_OPEN_RETRIES = 3; // plain re-places to spend before treating an open as stuck
+    private static final int SHULKER_OPEN_UNBLOCK_TRIES = 3; // digs at whatever the lid is pushing into, after those
+    private static final int SHULKER_SPOT_MEMORY = 64; // how many hopeless spots to remember before starting over
+    private BlockPos shulkerOpenFailSpot = null; // spot the open failures below are counted against
+    private int shulkerOpenFailTries = 0;
+    private final Set<BlockPos> badShulkerSpots = new HashSet<>();
+    private static final int SHULKER_SIGHT_DIGS = 6; // a reach-length of blocks is the most that can be in the way
+    private static final int SHULKER_SIGHT_WALKS = 3; // rounds of stepping back onto the standing spot
+    private static final int SHULKER_SIGHT_DIG_SPINUP = 5; // ticks a dispatched clearArea takes to read as an active builder
+    private static final int SHULKER_STAND_CLEAR_TRIES = 3; // walks off the spot to try before giving it up
+    private static final int SHULKER_PLACE_REFUSALS = 40; // refused clicks to sit through before the spot is the problem
+    private BlockPos placeRefusedSpot = null;
+    private int placeRefusedTries = 0;
+    private BlockPos standClearSpot = null; // spot the step-off-it attempts below are counted against
+    private int standClearTries = 0;
+    private BlockPos shulkerSightFailSpot = null; // spot the sight failures below are counted against
+    private int shulkerSightDigs = 0;
+    private int shulkerSightWalks = 0;
+    private long shulkerSightLastDigTick = Long.MIN_VALUE / 2;
     private boolean travellingToEnd = false; // walking up an already-built stretch because the builder found nothing to do
     private Goal travelGoal = null; // the goal object we handed the custom goal process, so we only ever cancel our own walk
     private BetterBlockPos travelTarget = null;
@@ -179,6 +209,7 @@ public class HighwayContext {
     private HighwayPattern pattern = HighwayPattern.NONE;
     private boolean paving = false;
     private boolean paused = false;
+    private String pauseReason = null;
     private boolean cursorStackNonEmpty = false;
 
     public BlockPos placeLoc() {
@@ -194,11 +225,12 @@ public class HighwayContext {
     private boolean enderChestHasPickShulks = true;
     private boolean enderChestHasEnderShulks = true;
     private boolean enderChestHasGappleShulks = true;
+    private boolean enderChestHasTotemShulks = true;
     private boolean refillingEnderChests = false;
     private boolean refillingGapples = false;
+    private boolean refillingTotems = false;
     private boolean stashingShulker = false;
     private BlockPos enderChestAccessLoc = null;
-    private boolean repeatCheck = false;
     private ShulkerType picksToUse;
     private BetterBlockPos cachedPlayerFeet = null;
     private int startShulkerCount = 0;
@@ -269,6 +301,171 @@ public class HighwayContext {
     }
 
     private int timer = 0;
+
+    // --- Server round-trip tracking -------------------------------------------------------------
+
+    /** containerId of the last full content sync the server sent. Written from the netty thread. */
+    private volatile int syncedContainerId = NO_CONTAINER;
+    /** Whether the server has sent our own inventory since we last joined. */
+    private volatile boolean inventorySynced = true;
+    private int ticksSinceInventoryDesync = 0;
+    /** Ticks the currently open (non-inventory) container menu has been open for. */
+    private int containerOpenTicks = 0;
+    private int openContainerId = NO_CONTAINER;
+    /** Main-thread snapshot of {@link #syncedContainerId} taken at the start of the previous tick. */
+    private int syncSeenLastTick = NO_CONTAINER;
+    /** Whether the open container's slots have definitely been filled in on the main thread. */
+    private boolean containerContentsApplied = false;
+    /** Our own tick counter: a respawn hands us a fresh player whose tickCount restarts at zero. */
+    private long contextTick = 0;
+    private long lastContainerClickTick = Long.MIN_VALUE / 4;
+
+    private static final int NO_CONTAINER = Integer.MIN_VALUE;
+
+    /**
+     * Latch a full container content sync. Called off the netty thread from the packet handler, so
+     * the field is volatile and nothing here touches the world or the player.
+     */
+    public void noteContainerSync(int containerId) {
+        syncedContainerId = containerId;
+        if (containerId == 0) {
+            inventorySynced = true;
+        }
+    }
+
+    /** A fresh join/respawn invalidates the inventory we were reading counts off. */
+    public void noteInventoryDesynced() {
+        inventorySynced = false;
+        syncedContainerId = NO_CONTAINER;
+        ticksSinceInventoryDesync = 0;
+    }
+
+    /**
+     * Whether inventory counts can be trusted. Straight after a login or a dimension change the
+     * client's copy is empty, and acting on it would send us on a storage trip for items we are
+     * actually carrying. Assumed true at startBuild (the player is already in-world by then) and
+     * only cleared by a login/respawn packet.
+     */
+    public boolean inventorySynced() {
+        if (inventorySynced) {
+            return true;
+        }
+        // Fallback so an unusual join sequence that never resends the inventory can't wedge every
+        // threshold forever. onTick already refuses to run while the inventory is fully empty.
+        return ticksSinceInventoryDesync >= settings.highwayContainerSyncTimeout.value
+                && !playerContext.player().getInventory().isEmpty();
+    }
+
+    /**
+     * Whether the contents of the open container can be trusted - i.e. the server has sent the
+     * full slot list for this exact container id, so an empty slot really is empty rather than
+     * not-yet-delivered. This is the check that keeps a slow/lagging sync from being read as "this
+     * shulker is empty"; the timeout below is only a wedge guard, not the normal path.
+     */
+    public boolean openContainerReady() {
+        AbstractContainerMenu menu = playerContext.player().containerMenu;
+        if (menu == playerContext.player().inventoryMenu) {
+            return false;
+        }
+        return containerContentsApplied || containerOpenTicks >= settings.highwayContainerSyncTimeout.value;
+    }
+
+    /**
+     * Container clicks are spaced out rather than fired every tick: the loot/deposit helpers move a
+     * slot per call and the server (and anticheat) sees a click packet for each one.
+     */
+    public boolean containerClickReady() {
+        return contextTick - lastContainerClickTick >= settings.highwayContainerClickInterval.value;
+    }
+
+    public void noteContainerClick() {
+        lastContainerClickTick = contextTick;
+    }
+
+    private long lastObsidianStuckLogTick = Long.MIN_VALUE / 2;
+
+    /** Rate limit for the "obsidian doesn't fit" log: states are re-created on every transition, so the throttle lives here. */
+    public boolean obsidianStuckLogDue() {
+        if (contextTick - lastObsidianStuckLogTick < 200) {
+            return false;
+        }
+        lastObsidianStuckLogTick = contextTick;
+        return true;
+    }
+
+    private void tickContainerSync() {
+        contextTick++;
+        if (!inventorySynced) {
+            ticksSinceInventoryDesync++;
+        }
+        AbstractContainerMenu menu = playerContext.player().containerMenu;
+        int latchedNow = syncedContainerId;
+        if (menu == playerContext.player().inventoryMenu) {
+            containerOpenTicks = 0;
+            openContainerId = NO_CONTAINER;
+            containerContentsApplied = false;
+            syncSeenLastTick = latchedNow;
+            return;
+        }
+        if (menu.containerId != openContainerId) {
+            openContainerId = menu.containerId;
+            containerOpenTicks = 0;
+            containerContentsApplied = false;
+            syncSeenLastTick = latchedNow;
+            return;
+        }
+        containerOpenTicks++;
+        // The packet handler latches from the netty thread, but the slots themselves are filled in
+        // on the main thread when Minecraft drains its task queue at the top of a tick. Only accept
+        // a latch that was already set when the previous tick began, so the fill can never still be
+        // pending when a state reads the slots - otherwise a sync arriving mid-tick would make a
+        // full container look empty, which is exactly what this check exists to prevent.
+        if (syncSeenLastTick == menu.containerId) {
+            containerContentsApplied = true;
+        }
+        syncSeenLastTick = latchedNow;
+    }
+
+    // --- Inventory threshold confirmation ---------------------------------------------------------
+
+    private HighwayState pendingThresholdState = null;
+    private String pendingThresholdKey = null;
+    private long pendingThresholdTick = 0;
+
+    /**
+     * Double-check a tripped inventory threshold before committing to something expensive (a storage
+     * trip, or pausing the build). A count read off an inventory the server hasn't sent us is zero,
+     * which used to be covered by standing still for 120 ticks before every such decision; the
+     * inventory sync latch covers that case directly now, and the short confirm window only rides
+     * out a count that flickers while items are still being moved around.
+     *
+     * <p>Returns false (and keeps returning false) until the same threshold has stayed tripped for
+     * {@code highwayThresholdConfirmTicks}. Unlike the old gate this does not stop the builder, the
+     * travel walk or the correctness scans while it waits.
+     */
+    public boolean thresholdConfirmed(String what) {
+        if (!inventorySynced) {
+            return false;
+        }
+        long now = contextTick;
+        if (pendingThresholdState != currentState.getState() || !what.equals(pendingThresholdKey)) {
+            pendingThresholdState = currentState.getState();
+            pendingThresholdKey = what;
+            pendingThresholdTick = now;
+            Helper.HELPER.logDebug(what + " under threshold, confirming over " + settings.highwayThresholdConfirmTicks.value + " ticks.");
+            return false;
+        }
+        if (now - pendingThresholdTick < settings.highwayThresholdConfirmTicks.value) {
+            return false;
+        }
+        clearThresholdConfirm();
+        return true;
+    }
+
+    public void clearThresholdConfirm() {
+        pendingThresholdState = null;
+        pendingThresholdKey = null;
+    }
 
     public int walkBackTimer() {
         return walkBackTimer;
@@ -356,6 +553,20 @@ public class HighwayContext {
     }
 
     private Item instantMineOriginalOffhandItem;
+
+    /**
+     * Loose ender chest count the running farm session stops at: the configured keep, or more when
+     * the obsidian would not fit (see enderChestFarmKeep). Set on farm entry; never below the setting.
+     */
+    public int farmEnderChestsToKeep() {
+        return Math.max(settings.highwayEnderChestsToKeep.value, farmEnderChestsToKeep);
+    }
+
+    public void setFarmEnderChestsToKeep(int farmEnderChestsToKeep) {
+        this.farmEnderChestsToKeep = farmEnderChestsToKeep;
+    }
+
+    private int farmEnderChestsToKeep = -1;
 
     public void setBoatLocation(BlockPos boatLocation) {
         this.boatLocation = boatLocation;
@@ -618,6 +829,9 @@ public class HighwayContext {
                 playerContext.minecraft().options.keyUse.setDown(false);
             }
         }
+        if (currentState != null && currentState.getState() != nextState) {
+            currentState.onExit(this);
+        }
         currentState = StateFactory.getState(nextState);
     }
 
@@ -694,6 +908,11 @@ public class HighwayContext {
         this.preMineShulkerCount = count;
     }
 
+    // Whether the box mined by the last Mining*Shulker state has reached the inventory.
+    public boolean minedShulkerLanded() {
+        return preMineShulkerCount < 0 || getShulkerCountInventory(ShulkerType.Any) > preMineShulkerCount;
+    }
+
     public void resetThiefHunt() {
         thiefTarget = null;
         thiefHuntReturnState = null;
@@ -744,10 +963,22 @@ public class HighwayContext {
         restoreLavaSwimming();
         recoveryTarget = null;
         recoveryExtraBack = 0;
+        recoveryHoldingJump = false;
         NetherHighwayBuilderBehavior.suppressHitResult = false;
         if (playerContext.minecraft() != null) {
             playerContext.minecraft().options.keyJump.setDown(false);
             playerContext.minecraft().options.keyUse.setDown(false);
+        }
+    }
+
+    /** Hold (or release) the jump key that floats us at the lava surface during recovery. */
+    public void setRecoveryHoldingJump(boolean holding) {
+        if (recoveryHoldingJump == holding) {
+            return;
+        }
+        recoveryHoldingJump = holding;
+        if (playerContext.minecraft() != null) {
+            playerContext.minecraft().options.keyJump.setDown(holding);
         }
     }
 
@@ -826,6 +1057,22 @@ public class HighwayContext {
 
     public int highwayFloorY() {
         return highwayFeetY() - 1;
+    }
+
+    /**
+     * Lifts a point on the walking/placement lane onto the pavement when the road under it is
+     * already obsidian. A digging-only run aims at highwayMainY because that's the floor it digs
+     * down to, but a dig that starts on (or runs through) an already-paved stretch finds obsidian
+     * sitting there: the shulker, the ender chest and our own feet all belong one block up, exactly
+     * where a paving run puts them. Without this the bot mines the road out from under itself and
+     * then keeps failing to place into the block it just tried to stand in.
+     */
+    public BetterBlockPos liftOntoPavement(BetterBlockPos lanePos) {
+        if (paving) {
+            return lanePos; // already one above the obsidian the printer lays
+        }
+        Block at = baritone.bsi.get0(lanePos.x, lanePos.y, lanePos.z).getBlock();
+        return (at == Blocks.OBSIDIAN || at == Blocks.CRYING_OBSIDIAN) ? lanePos.above() : lanePos;
     }
 
     /**
@@ -1142,27 +1389,111 @@ public class HighwayContext {
         playerContext.player().swing(InteractionHand.MAIN_HAND);
     }
 
-    public BetterBlockPos shulkerPlaceLocClearOfThieves() {
+    /**
+     * The interaction-lane spot {@code back} blocks behind us (negative is ahead). The projection is
+     * taken at our own position and stepped from there, because {@link #getClosestPoint} clamps
+     * every point to the build start: projecting an already shifted position would snap the whole
+     * scan onto the first slice and never reach the pavement laid before this build began.
+     */
+    private BetterBlockPos shulkerPlaceLocAt(int back) {
         Vec3 origin = new Vec3(backPathOriginVector.x, backPathOriginVector.y, backPathOriginVector.z);
         Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
+        Vec3 feet = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
+        BetterBlockPos lane = getClosestPoint(origin, direction, feet, LocationType.ShulkerEchestInteraction);
+        return liftOntoPavement(new BetterBlockPos(lane.offset(back * -highwayDirection.getX(), 0, back * -highwayDirection.getZ())));
+    }
+
+    /**
+     * Where to set a shulker box (or the obsidian farm's ender chest) down: anchored
+     * {@value #SHULKER_PLACE_ANCHOR_BACK} blocks back, walked further back along the lane when that
+     * spot can't hold a box or piglins are standing by it, and only then tried ahead of us. Starting
+     * a build at the end of an already paved stretch used to hand back the anchor no matter what,
+     * which over the drop past the pavement is thin air: with no block left to prop the box up with,
+     * placing there can never succeed and the place/support states just ping-pong forever.
+     */
+    public BetterBlockPos shulkerPlaceLocClearOfThieves() {
         double radius = settings.highwayShulkerTheftGuardRadius.value;
-        BetterBlockPos firstChoice = null;
-        for (int backOff = 7; backOff <= 31; backOff += 8) {
-            Vec3 curPos = new Vec3(playerContext.playerFeet().getX() + (backOff * -highwayDirection.getX()),
-                    playerContext.playerFeet().getY(),
-                    playerContext.playerFeet().getZ() + (backOff * -highwayDirection.getZ()));
-            BetterBlockPos candidate = getClosestPoint(origin, direction, curPos, LocationType.ShulkerEchestInteraction);
-            if (firstChoice == null) {
-                firstChoice = candidate;
+        BetterBlockPos anchor = shulkerPlaceLocAt(SHULKER_PLACE_ANCHOR_BACK);
+        boolean anchorUsable = isShulkerPlaceSpotUsable(anchor);
+        BetterBlockPos thiefDirty = null;
+        for (int back : shulkerPlaceScanOffsets()) {
+            BetterBlockPos candidate = back == SHULKER_PLACE_ANCHOR_BACK ? anchor : shulkerPlaceLocAt(back);
+            if (!isShulkerPlaceSpotUsable(candidate)) {
+                continue;
             }
-            if (!shulkerThiefNear(candidate, radius)) {
-                if (backOff != 7) {
-                    Helper.HELPER.logDirect("Piglins that could steal the shulker are near the placing location, placing it " + (backOff - 7) + " blocks further back.");
+            if (shulkerThiefNear(candidate, radius)) {
+                if (thiefDirty == null) {
+                    thiefDirty = candidate;
                 }
-                return candidate;
+                continue;
+            }
+            if (back != SHULKER_PLACE_ANCHOR_BACK) {
+                String where = back >= 0 ? (back - SHULKER_PLACE_ANCHOR_BACK) + " blocks further back" : -back + " blocks ahead";
+                Helper.HELPER.logDirect(anchorUsable
+                        ? "Piglins that could steal the shulker are near the placing location, placing it " + where + "."
+                        : "Nothing to set the shulker on at the placing location, placing it " + where + ".");
+            }
+            return candidate;
+        }
+        // every usable candidate is dirty; the mining guard and the thief hunt cover the rest
+        return thiefDirty != null ? thiefDirty : anchor;
+    }
+
+    /** Lane offsets to try, in order: back onto what's already paved, then closer in, then ahead of us. */
+    private int[] shulkerPlaceScanOffsets() {
+        int[] offsets = new int[SHULKER_PLACE_MAX_BACK + SHULKER_PLACE_MAX_AHEAD + 1];
+        int i = 0;
+        for (int back = SHULKER_PLACE_ANCHOR_BACK; back <= SHULKER_PLACE_MAX_BACK; back++) {
+            offsets[i++] = back;
+        }
+        for (int back = SHULKER_PLACE_ANCHOR_BACK - 1; back >= -SHULKER_PLACE_MAX_AHEAD; back--) {
+            offsets[i++] = back;
+        }
+        return offsets;
+    }
+
+    /**
+     * A lane spot we can actually place into and reach: lava-free, with something solid under the
+     * box - or, while we still carry a block to build one with, a face a support block can go on -
+     * and a floor under the spots the go-to states stand on (two back for the ender chest flow, one
+     * ahead for the shulker ones). A spot hanging over the end of the pavement has none of that.
+     */
+    public boolean isShulkerPlaceSpotUsable(BlockPos placeLoc) {
+        if (!isSideStorageSpotSafe(placeLoc)) {
+            return false;
+        }
+
+        if (isShulkerSpotKnownBad(placeLoc) || !shulkerColumnWorkable(placeLoc)) {
+            return false;
+        }
+        if (!hasFloorUnder(placeLoc) && !(canBuildSupportBlock() && hasSturdyNeighbor(placeLoc.below()))) {
+            return false;
+        }
+        for (int step = -2; step <= 1; step++) {
+            if (step == 0) {
+                continue;
+            }
+            if (!hasFloorUnder(placeLoc.offset(step * highwayDirection.getX(), 0, step * highwayDirection.getZ()))) {
+                return false;
             }
         }
-        return firstChoice; // every candidate is dirty; the mining guard and the thief hunt cover the rest
+        return true;
+    }
+
+    private boolean hasFloorUnder(BlockPos pos) {
+        return MovementHelper.canWalkOn(baritone.bsi, pos.getX(), pos.getY() - 1, pos.getZ());
+    }
+
+    /**
+     * True while we still carry something the support block under a placing spot could be built out
+     * of: any acceptableThrowawayItems block, the netherrack that schematic asks for by default, or
+     * the obsidian it falls back to. Out of all three, a spot with nothing under it can never be
+     * made placeable, and sending the builder at it only parks it on missing materials.
+     */
+    public boolean canBuildSupportBlock() {
+        return getAcceptableThrowawaySlot() != -1
+                || getItemCountInventory(Item.getId(Blocks.NETHERRACK.asItem())) > 0
+                || getItemCountInventory(Item.getId(Blocks.OBSIDIAN.asItem())) > 0;
     }
 
     public void handle() {
@@ -1222,7 +1553,82 @@ public class HighwayContext {
             transitionTo(HighwayState.FallRecovery);
             return;
         }
-        currentState.handle(this);
+
+        for (int i = 0; ; i++) {
+            State handled = currentState;
+            if (i == 0) {
+                noteStateTick(handled.getState()); // chained instant states are free, so charge one tick
+            }
+            handled.handle(this);
+            handled.noteHandled();
+            if (i >= CHAIN_LIMIT || currentState == handled || !INSTANT_STATES.contains(currentState.getState())) {
+                break;
+            }
+        }
+    }
+
+    private static final int CHAIN_LIMIT = 4;
+
+    /**
+     * States safe to run in the same tick they were entered: each one reads the world, picks a
+     * position or a schematic, and transitions. None of them clicks, places, mines, paths or waits
+     * on a reply, so nothing is gained by spreading them over separate ticks.
+     */
+    private static final EnumSet<HighwayState> INSTANT_STATES = EnumSet.of(
+            HighwayState.Nothing,
+            HighwayState.FloatingFixPrep,
+            HighwayState.PickaxeShulkerPlaceLocPrep,
+            HighwayState.GappleShulkerPlaceLocPrep,
+            HighwayState.TotemShulkerPlaceLocPrep,
+            HighwayState.EchestMiningPlaceLocPrep,
+            HighwayState.EmptyShulkerPlaceLocPrep,
+            HighwayState.EnderChestStashPlaceLocPrep,
+            HighwayState.LootEnderChestPlaceLocPrep,
+            HighwayState.ShulkerSearchPrep
+    );
+
+    // --- Per-state dwell instrumentation ----------------------------------------------------------
+
+    private final EnumMap<HighwayState, int[]> stateDwell = new EnumMap<>(HighwayState.class);
+    private HighwayState lastDwellState = null;
+    private int dwellTotalTicks = 0;
+
+    private void noteStateTick(HighwayState state) {
+        int[] entry = stateDwell.computeIfAbsent(state, k -> new int[2]);
+        entry[0]++;
+        if (state != lastDwellState) {
+            entry[1]++;
+            lastDwellState = state;
+        }
+        dwellTotalTicks++;
+    }
+
+    public void resetStateDwell() {
+        stateDwell.clear();
+        lastDwellState = null;
+        dwellTotalTicks = 0;
+    }
+
+    /**
+     * Ticks spent in each state since the build started, worst first. This is the measurement the
+     * wait tuning is meant to be judged on: a state whose share is far above the work it actually
+     * does is sitting on a timer it shouldn't be.
+     */
+    public List<String> stateDwellDiagnostic(int limit) {
+        List<String> out = new ArrayList<>();
+        if (dwellTotalTicks == 0) {
+            out.add("No state time recorded yet.");
+            return out;
+        }
+        out.add(String.format("State time over %d ticks (%.1fs), worst first:", dwellTotalTicks, dwellTotalTicks / 20.0));
+        stateDwell.entrySet().stream()
+                .sorted((a, b) -> Integer.compare(b.getValue()[0], a.getValue()[0]))
+                .limit(limit)
+                .forEach(e -> out.add(String.format("  %s - %d ticks (%.1fs, %.1f%%) over %d visit(s), avg %.1ft",
+                        e.getKey(), e.getValue()[0], e.getValue()[0] / 20.0,
+                        100.0 * e.getValue()[0] / dwellTotalTicks, e.getValue()[1],
+                        (double) e.getValue()[0] / e.getValue()[1])));
+        return out;
     }
 
     public void incrementTimers() {
@@ -1230,6 +1636,7 @@ public class HighwayContext {
         walkBackTimer++;
         checkBackTimer++;
         stuckTimer++;
+        tickContainerSync();
         if (thiefHuntFailCooldown > 0) {
             thiefHuntFailCooldown--;
             if (thiefHuntFailCooldown == 0) {
@@ -1273,6 +1680,10 @@ public class HighwayContext {
         this.picksToHave = picksToHave;
     }
 
+    public int totemsToHave() {
+        return Math.max(settings.highwayTotemsToHave.value, settings.highwayTotemsThreshold.value + 1);
+    }
+
     public List<BlockState> blackListBlocks() {
         return blackListBlocks;
     }
@@ -1301,6 +1712,14 @@ public class HighwayContext {
         this.enderChestHasGappleShulks = enderChestHasGappleShulks;
     }
 
+    public boolean enderChestHasTotemShulks() {
+        return enderChestHasTotemShulks;
+    }
+
+    public void setEnderChestHasTotemShulks(boolean enderChestHasTotemShulks) {
+        this.enderChestHasTotemShulks = enderChestHasTotemShulks;
+    }
+
     public boolean refillingEnderChests() {
         return refillingEnderChests;
     }
@@ -1317,6 +1736,14 @@ public class HighwayContext {
         this.refillingGapples = refillingGapples;
     }
 
+    public boolean refillingTotems() {
+        return refillingTotems;
+    }
+
+    public void setRefillingTotems(boolean refillingTotems) {
+        this.refillingTotems = refillingTotems;
+    }
+
     public boolean stashingShulker() {
         return stashingShulker;
     }
@@ -1329,18 +1756,22 @@ public class HighwayContext {
         return enderChestAccessLoc;
     }
 
+    /**
+     * Forget the remembered storage access chest, but only once no refill leg is still latched:
+     * trips are chained (an ender chest grab can queue a gapple and a totem top-up behind it), and
+     * whichever leg finishes first would otherwise strand the later ones into placing a fresh chest
+     * a few blocks from the perfectly good one this trip already put down.
+     */
+    public void releaseEnderChestAccessLoc() {
+        if (!refillingEnderChests && !refillingGapples && !refillingTotems) {
+            enderChestAccessLoc = null;
+        }
+    }
+
     public void setEnderChestAccessLoc(BlockPos enderChestAccessLoc) {
         this.enderChestAccessLoc = enderChestAccessLoc == null
                 ? null
                 : new BlockPos(enderChestAccessLoc.getX(), enderChestAccessLoc.getY(), enderChestAccessLoc.getZ());
-    }
-
-    public boolean repeatCheck() {
-        return repeatCheck;
-    }
-
-    public void setRepeatCheck(boolean repeatCheck) {
-        this.repeatCheck = repeatCheck;
     }
 
     public int startShulkerCount() {
@@ -1355,8 +1786,25 @@ public class HighwayContext {
         return paused;
     }
 
+    public String pauseReason() {
+        return pauseReason;
+    }
+
+    /**
+     * Stop the state machine where it stands and say why. Nothing leaves this by itself - only a
+     * new nhwbuild or an nhwstop - so the one line it logs is how whoever drives the bot learns
+     * about it, instead of having to poll nhwstatus for it. The machine is not ticked while paused,
+     * so it is said exactly once.
+     */
+    public void pause(String reason) {
+        paused = true;
+        pauseReason = reason;
+        Helper.HELPER.logDirect("PAUSED NETHERHIGHWAYBUILDER: " + reason);
+    }
+
     public void setPaused(boolean paused) {
         this.paused = paused;
+        this.pauseReason = null;
     }
 
     public BetterBlockPos getClosestPoint(Vec3 origin, Vec3 direction, Vec3 point, LocationType locType) {
@@ -1614,10 +2062,7 @@ public class HighwayContext {
         }
         // No partial chest stack and no empty slot: toss a throwaway stack so the next tick's
         // stash has somewhere to land. Chests always outrank netherrack.
-        int throwawaySlot = getAcceptableThrowawaySlot();
-        if (throwawaySlot == 8) {
-            throwawaySlot = getAcceptableThrowawaySlotNoHotbar();
-        }
+        int throwawaySlot = getThrowawaySlotToToss();
         if (throwawaySlot == -1) {
             return false;
         }
@@ -1651,10 +2096,7 @@ public class HighwayContext {
                         return true;
                     } else {
                         // We don't have throwaway items on our cursor, might be important so swap with throwaway items and throw away the throwaway
-                        int throwawaySlot = getAcceptableThrowawaySlot();
-                        if (throwawaySlot == 8) {
-                            throwawaySlot = getAcceptableThrowawaySlotNoHotbar();
-                        }
+                        int throwawaySlot = getThrowawaySlotToToss();
                         if (throwawaySlot != -1) {
                             playerContext.playerController().windowClick(curContainer.containerId, invSlotToMenuSlot(throwawaySlot), 0, ClickType.PICKUP, playerContext.player());
                             playerContext.playerController().windowClick(curContainer.containerId, -999, 0, ClickType.PICKUP, playerContext.player());
@@ -1669,25 +2111,6 @@ public class HighwayContext {
                 return true;
             }
             return true;
-        }
-        return false;
-    }
-
-    /**
-     * True once the open container shows any item in its chest/shulker slots, i.e. the server's
-     * initial content sync has arrived. False for a genuinely empty container too, so callers
-     * should keep a timer fallback rather than waiting on this forever.
-     */
-    public boolean openContainerHasContents() {
-        AbstractContainerMenu menu = playerContext.player().containerMenu;
-        if (menu == playerContext.player().inventoryMenu) {
-            return false;
-        }
-        int containerSlots = menu.slots.size() - 36;
-        for (int i = 0; i < containerSlots; i++) {
-            if (!menu.getSlot(i).getItem().isEmpty()) {
-                return true;
-            }
         }
         return false;
     }
@@ -2007,6 +2430,22 @@ public class HighwayContext {
         return gappleCount;
     }
 
+    private int isTotemShulker(ItemStack shulker) {
+        NonNullList<ItemStack> contents = getShulkerContents(shulker);
+
+        int totemCount = 0;
+        for (ItemStack curStack : contents) {
+            if (Item.getId(curStack.getItem()) != Item.getId(Items.AIR) && Item.getId(curStack.getItem()) != Item.getId(Items.TOTEM_OF_UNDYING)) {
+                return 0;
+            }
+
+            if (Item.getId(curStack.getItem()) == Item.getId(Items.TOTEM_OF_UNDYING)) {
+                totemCount += curStack.getCount();
+            }
+        }
+        return totemCount;
+    }
+
     private boolean isEmptyShulker(ItemStack shulker) {
         NonNullList<ItemStack> contents = getShulkerContents(shulker);
 
@@ -2042,6 +2481,15 @@ public class HighwayContext {
 
                     case Gapple: {
                         int count = isGappleShulker(stack);
+                        if (count > 0 && count < bestSlotCount) {
+                            bestSlot = i;
+                            bestSlotCount = count;
+                        }
+                        break;
+                    }
+
+                    case Totem: {
+                        int count = isTotemShulker(stack);
                         if (count > 0 && count < bestSlotCount) {
                             bestSlot = i;
                             bestSlotCount = count;
@@ -2104,6 +2552,211 @@ public class HighwayContext {
         return count;
     }
 
+    private int farmObsidianStart = 0;
+    private int farmChestsStart = 0;
+
+    private int obsidianCountAll() {
+        int count = getItemCountInventory(Item.getId(Blocks.OBSIDIAN.asItem()));
+        ItemStack offhand = playerContext.player().getOffhandItem();
+        if (offhand.is(Blocks.OBSIDIAN.asItem())) {
+            count += offhand.getCount();
+        }
+        return count;
+    }
+
+    private int enderChestCountAll() {
+        int count = getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem()));
+        ItemStack offhand = playerContext.player().getOffhandItem();
+        if (offhand.is(Blocks.ENDER_CHEST.asItem())) {
+            count += offhand.getCount();
+        }
+        return count;
+    }
+
+    public void beginFarmAccounting() {
+        farmObsidianStart = obsidianCountAll();
+        farmChestsStart = enderChestCountAll();
+    }
+
+    /**
+     * Obsidian this farm session has produced that is neither in the
+     * inventory nor visible on the ground yet
+     */
+    public int farmObsidianInFlight(int ground) {
+        int picked = obsidianCountAll() - farmObsidianStart;
+        int consumed = farmChestsStart - enderChestCountAll();
+        return Math.max(0, 8 * consumed - picked - ground);
+    }
+
+    /**
+     * Obsidian the inventory can still take once this farm session ends,
+     * minus what is already dropped or in flight, if one more chest gets broken
+     */
+    public int farmRoomAfterOneMore() {
+        int ground = obsidianOnGroundNearby();
+        int remaining = getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) + playerContext.player().getOffhandItem().getCount() - 1;
+        Item origItem = instantMineOriginalOffhandItem();
+        boolean origInInventory = origItem != null && origItem != Items.AIR && getItemSlot(Item.getId(origItem)) != -1
+                && playerContext.player().getOffhandItem().is(Blocks.ENDER_CHEST.asItem());
+        int freed = enderChestSlotsInventory() + (origInInventory ? 1 : 0) - enderChestSlotsAfterFarming(Math.max(0, remaining), 0);
+        return obsidianRoomInventory(freed) - ground - farmObsidianInFlight(ground) - 8;
+    }
+
+    public int obsidianOnGroundNearby() {
+        int count = 0;
+        for (Entity entity : playerContext.entities()) {
+            if (!(entity instanceof ItemEntity)) {
+                continue;
+            }
+            ItemStack stack = ((ItemEntity) entity).getItem();
+            if (!stack.is(Blocks.OBSIDIAN.asItem()) && !stack.is(Blocks.CRYING_OBSIDIAN.asItem())) {
+                continue;
+            }
+            if (VecUtils.distanceToCenter(playerContext.playerFeet(), (int) entity.getX(), (int) entity.getY(), (int) entity.getZ()) <= settings.highwayObsidianMaxSearchDist.value) {
+                count += stack.getCount();
+            }
+        }
+        return count;
+    }
+
+    /** Obsidian the inventory can still take */
+    public int obsidianRoomInventory(int slotsFreedLater) {
+        int room = 0;
+        int slots = slotsFreedLater;
+        for (int i = 0; i < 36; i++) {
+            ItemStack stack = playerContext.player().getInventory().items.get(i);
+            if (stack.isEmpty()) {
+                slots++;
+            } else if (stack.is(Blocks.OBSIDIAN.asItem())) {
+                room += stack.getMaxStackSize() - stack.getCount();
+            } else if (i != 8 && !stack.is(Blocks.CRYING_OBSIDIAN.asItem()) && settings.acceptableThrowawayItems.value.contains(stack.getItem())) {
+                slots++;
+            }
+        }
+        // A negative slot count means the kept chests or the returning box need slots that don't
+        // exist; partial-stack room can't paper over that.
+        return Math.max(0, room + 64 * slots);
+    }
+
+    /** Slot breakdown behind the obsidian room figures, for the farm-entry and stuck-collection logs. */
+    public String obsidianRoomBreakdown() {
+        int empty = 0, throwaway = 0, partial = 0, chestSlots = 0, obsidianSlots = 0;
+        for (int i = 0; i < 36; i++) {
+            ItemStack stack = playerContext.player().getInventory().items.get(i);
+            if (stack.isEmpty()) {
+                empty++;
+            } else if (stack.is(Blocks.OBSIDIAN.asItem())) {
+                obsidianSlots++;
+                partial += stack.getMaxStackSize() - stack.getCount();
+            } else if (stack.is(Blocks.ENDER_CHEST.asItem())) {
+                chestSlots++;
+            } else if (i != 8 && !stack.is(Blocks.CRYING_OBSIDIAN.asItem()) && settings.acceptableThrowawayItems.value.contains(stack.getItem())) {
+                throwaway++;
+            }
+        }
+        return "empty=" + empty + " throwaway=" + throwaway + " obsidianSlots=" + obsidianSlots + " partialRoom=" + partial
+                + " chestSlots=" + chestSlots + " chests=" + getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem()))
+                + " offhand=" + playerContext.player().getOffhandItem().getCount() + "x" + playerContext.player().getOffhandItem().getItem()
+                + " ground=" + obsidianOnGroundNearby() + " slot8=" + playerContext.player().getInventory().items.get(8).getItem();
+    }
+
+    public int enderChestSlotsInventory() {
+        int slots = 0;
+        for (int i = 0; i < 36; i++) {
+            if (playerContext.player().getInventory().items.get(i).is(Blocks.ENDER_CHEST.asItem())) {
+                slots++;
+            }
+        }
+        return slots;
+    }
+
+    /**
+     * Slots the loose chests still hold once a farm has left {@code keep} of them,
+     * from the stacks actually carried
+     */
+    public int enderChestSlotsAfterFarming(int keep, int hypotheticalStack) {
+        List<Integer> stacks = new ArrayList<>();
+        for (int i = 0; i < 36; i++) {
+            ItemStack stack = playerContext.player().getInventory().items.get(i);
+            if (stack.is(Blocks.ENDER_CHEST.asItem())) {
+                stacks.add(stack.getCount());
+            }
+        }
+        if (hypotheticalStack > 0) {
+            stacks.add(hypotheticalStack);
+        }
+        stacks.sort(Collections.reverseOrder());
+        ItemStack offhand = playerContext.player().getOffhandItem();
+        if (offhand.is(Blocks.ENDER_CHEST.asItem())) {
+            stacks.add(0, offhand.getCount());
+        }
+        int total = 0;
+        for (int c : stacks) {
+            total += c;
+        }
+        int toFarm = total - keep;
+        int remainder = 0;
+        int i = 0;
+        while (i < stacks.size() && toFarm > 0) {
+            int c = stacks.get(i++);
+            if (toFarm >= c) {
+                toFarm -= c;
+            } else {
+                remainder = c - toFarm;
+                toFarm = 0;
+            }
+        }
+        int untouched = 0;
+        int roomInUntouched = 0;
+        for (; i < stacks.size(); i++) {
+            untouched++;
+            roomInUntouched += 64 - stacks.get(i);
+        }
+        return untouched + (Math.max(0, remainder - roomInUntouched) + 63) / 64;
+    }
+
+    /**
+     * Ender chests that can be broken before their obsidian (8 each) outgrows the inventory,
+     * with {@code keep} loose chests staying behind.
+     */
+    public int enderChestFarmCapacity(int keep, int extraSlotsFreed, int obsidianOnGround, int hypotheticalStack) {
+        int slots = enderChestSlotsInventory() + (hypotheticalStack > 0 ? 1 : 0);
+        int freed = slots - enderChestSlotsAfterFarming(keep, hypotheticalStack) + extraSlotsFreed;
+        return Math.max(0, obsidianRoomInventory(freed) - obsidianOnGround) / 8;
+    }
+
+    public int enderChestFarmCapacity(int keep, int extraSlotsFreed, int obsidianOnGround) {
+        return enderChestFarmCapacity(keep, extraSlotsFreed, obsidianOnGround, 0);
+    }
+
+    public int enderChestFarmKeep(int total, int extraSlotsFreed, int obsidianOnGround) {
+        return enderChestFarmKeep(total, extraSlotsFreed, obsidianOnGround, 0);
+    }
+
+    public int enderChestFarmKeep(int total, int extraSlotsFreed, int obsidianOnGround, int hypotheticalStack) {
+        int keep = settings.highwayEnderChestsToKeep.value;
+        for (int i = 0; i < 64; i++) {
+            int needed = Math.max(settings.highwayEnderChestsToKeep.value, total - enderChestFarmCapacity(keep, extraSlotsFreed, obsidianOnGround, hypotheticalStack));
+            if (needed <= keep) {
+                break;
+            }
+            keep = needed;
+        }
+        return keep;
+    }
+
+    public boolean enderChestFarmCanProgress() {
+        int ground = obsidianOnGroundNearby();
+        int chests = getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem()));
+        if (chests - enderChestFarmKeep(chests, 0, ground) > 0) {
+            return true; // what we carry already farms
+        }
+        // Otherwise the cycle loots a stack first. It lands in a free slot (or merges into a partial),
+        // so the live slot counts already describe the inventory after that loot; only the total
+        // changes. Fewer loose chests than the keep setting is the common way to get here.
+        return (chests + 64) - enderChestFarmKeep(chests + 64, 0, ground, 64) > 0;
+    }
+
     public int getPickCountInventory() {
         int count = 0;
         for (int i = 0; i < 36; i++) {
@@ -2119,6 +2772,20 @@ public class HighwayContext {
         return count;
     }
 
+    /**
+     * Totems we can actually pop, so the offhand one counts: it's the one that saves us, and it's
+     * invisible to {@link #getItemCountInventory} (which only scans slots 0-35).
+     */
+    public int getTotemCountInventory() {
+        int count = getItemCountInventory(Item.getId(Items.TOTEM_OF_UNDYING));
+        ItemStack offhand = playerContext.player().getOffhandItem();
+        if (offhand.is(Items.TOTEM_OF_UNDYING)) {
+            count += offhand.getCount();
+        }
+
+        return count;
+    }
+
     private int putShulkerHotbar(ShulkerType shulkerType) {
         int shulkerSlot = getShulkerSlot(shulkerType);
         if (shulkerSlot >= 9) {
@@ -2129,9 +2796,9 @@ public class HighwayContext {
         return shulkerSlot;
     }
 
-    public HighwayState placeShulkerBox(Rotation shulkerReachable, Rotation underShulkerReachable, BlockPos shulkerPlaceLoc, HighwayState prevHighwayState, HighwayState currentHighwayState, HighwayState nextHighwayState, ShulkerType shulkerType) {
+    public HighwayState placeShulkerBox(BlockPos shulkerPlaceLoc, HighwayState prevHighwayState, HighwayState currentHighwayState, HighwayState nextHighwayState, ShulkerType shulkerType) {
         // Debug logging to track BlockPos types
-        Helper.HELPER.logDirect("placeShulkerBox called with: " + shulkerPlaceLoc + " (class: " + shulkerPlaceLoc.getClass().getSimpleName() + ")");
+        Helper.HELPER.logDebug("placeShulkerBox called with: " + shulkerPlaceLoc + " (class: " + shulkerPlaceLoc.getClass().getSimpleName() + ")");
 
         BlockState currentState = playerContext.world().getBlockState(shulkerPlaceLoc);
         if (currentState.getBlock() instanceof ShulkerBoxBlock) {
@@ -2161,31 +2828,28 @@ public class HighwayContext {
             return currentHighwayState;
         }
 
-        // Determine placement direction and target position
-        Direction placeSide = getBestPlaceSide(shulkerPlaceLoc);
+        // Determine placement direction and target position. The side matters twice over for a
+        // shulker: it is what the box attaches to, and it decides which way the box faces.
+        Direction placeSide = getBestPlaceSide(shulkerPlaceLoc, true);
         if (placeSide == null) {
-            Helper.HELPER.logDirect("No valid placement side found");
+            Helper.HELPER.logDirect("No side to place the shulker against that would leave it openable");
+            return prevHighwayState;
+        }
+
+        // Last line of defence against placing through a wall: the caller clears the way first,
+        // but a click we can't see the face for puts the box somewhere nothing can reach it again.
+        Optional<Rotation> targetRotation = shulkerPlaceAim(shulkerPlaceLoc, placeSide);
+        if (targetRotation.isEmpty()) {
+            Helper.HELPER.logDirect("No clear line to the shulker spot at " + shulkerPlaceLoc.toShortString() + ", not placing");
             return prevHighwayState;
         }
 
         BlockPos neighbor = shulkerPlaceLoc.relative(placeSide);
-        Vec3 hitPos = Vec3.atCenterOf(shulkerPlaceLoc).add(
-            placeSide.getStepX() * 0.5,
-            placeSide.getStepY() * 0.5,
-            placeSide.getStepZ() * 0.5
-        );
-
+        Vec3 hitPos = placeHitPos(shulkerPlaceLoc, placeSide);
         BlockHitResult blockHitResult = new BlockHitResult(hitPos, placeSide.getOpposite(), neighbor, false);
 
-        // Calculate rotation for placement
-        Rotation targetRotation = RotationUtils.calcRotationFromVec3d(
-            RayTraceUtils.inferSneakingEyePosition(playerContext.player()),
-            hitPos,
-            playerContext.playerRotations()
-        );
-
         // Use look behavior to rotate to target, then place
-        baritone.getLookBehavior().updateTarget(targetRotation, true);
+        baritone.getLookBehavior().updateTarget(targetRotation.get(), true);
 
         // Select the shulker slot
         playerContext.player().getInventory().selected = shulkerSlot;
@@ -2203,8 +2867,7 @@ public class HighwayContext {
             Helper.HELPER.logDirect("Shulker placement attempted at " + shulkerPlaceLoc);
             return currentHighwayState; // Let the calling state handle waiting for confirmation
         } else {
-            Helper.HELPER.logDirect("Failed to place shulker at " + shulkerPlaceLoc);
-            return prevHighwayState;
+            return noteShulkerPlaceRefused(shulkerPlaceLoc, prevHighwayState);
         }
     }
 
@@ -2265,20 +2928,72 @@ public class HighwayContext {
     }
 
     public BlockPos findSafeSideStorageSpot(int minBack, int maxBack) {
+        BlockPos behind = scanSideStorageSpots(minBack, maxBack, -1);
+        if (behind != null) {
+            return behind;
+        }
+        // Nothing usable behind us. At a crossing with another highway the side lane is that
+        // highway's corridor rather than our own rail: open air with nothing to set a box on and no
+        // floor to stand on. Look the same distance ahead along our own highway instead.
+        return scanSideStorageSpots(minBack, maxBack, 1);
+    }
+
+    /**
+     * Walks the side-storage line looking for a usable spot, {@code sign} -1 back along the highway
+     * and +1 ahead of us.
+     */
+    private BlockPos scanSideStorageSpots(int minDist, int maxDist, int sign) {
         Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
         Vec3 origin = new Vec3(eChestEmptyShulkOriginVector.x, eChestEmptyShulkOriginVector.y, eChestEmptyShulkOriginVector.z);
-        for (int back = minBack; back <= maxBack; back++) {
+        for (int dist = minDist; dist <= maxDist; dist++) {
             Vec3 curPos = new Vec3(
-                    playerContext.playerFeet().getX() + (back * -highwayDirection.getX()),
+                    playerContext.playerFeet().getX() + (dist * sign * highwayDirection.getX()),
                     playerContext.playerFeet().getY(),
-                    playerContext.playerFeet().getZ() + (back * -highwayDirection.getZ())
+                    playerContext.playerFeet().getZ() + (dist * sign * highwayDirection.getZ())
             );
             BetterBlockPos candidate = getClosestPoint(origin, direction, curPos, LocationType.SideStorage);
-            if (isSideStorageSpotSafe(candidate)) {
+            if (isSideStorageSpotUsable(candidate)) {
                 return candidate;
             }
         }
         return null;
+    }
+
+    /**
+     * A side-storage spot we can actually work with: lava-free, with something under it to set the
+     * box on, and a floor beside it to stand on while placing and opening it. The lava-only check
+     * this wraps happily handed back spots hanging in the middle of a crossing highway's corridor,
+     * where the support block has nothing to attach to and the standing spot is thin air.
+     */
+    public boolean isSideStorageSpotUsable(BlockPos placeLoc) {
+        if (!isSideStorageSpotSafe(placeLoc)) {
+            return false;
+        }
+
+        if (isShulkerSpotKnownBad(placeLoc) || !shulkerColumnWorkable(placeLoc)) {
+            return false;
+        }
+        // Under the box: either solid already, or a face the support block can be placed against -
+        // and that second half only counts while we still carry a block to build the support out of
+        if (!MovementHelper.canWalkOn(baritone.bsi, placeLoc.getX(), placeLoc.getY() - 1, placeLoc.getZ())
+                && !(canBuildSupportBlock() && hasSturdyNeighbor(placeLoc.below()))) {
+            return false;
+        }
+        // We stand one step along the highway from the box to place it and to open it
+        BlockPos stand = placeLoc.offset(highwayDirection.getX(), 0, highwayDirection.getZ());
+        return MovementHelper.canWalkOn(baritone.bsi, stand.getX(), stand.getY() - 1, stand.getZ());
+    }
+
+    private boolean hasSturdyNeighbor(BlockPos pos) {
+        for (Direction d : Direction.values()) {
+            BlockPos neighbor = pos.relative(d);
+            BlockState state = playerContext.world().getBlockState(neighbor);
+            if (!state.isAir() && state.getFluidState().isEmpty()
+                    && state.isFaceSturdy(playerContext.world(), neighbor, d.getOpposite())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean canPlaceBlockAt(BlockPos pos) {
@@ -2291,7 +3006,27 @@ public class HighwayContext {
         return currentState.canBeReplaced() || currentState.getBlock() instanceof SnowLayerBlock;
     }
 
+    /** Whether a block placed at {@code pos} has something to attach to on {@code side}. */
+    private boolean canPlaceAgainst(BlockPos pos, Direction side) {
+        BlockPos neighbor = pos.relative(side);
+        BlockState neighborState = playerContext.world().getBlockState(neighbor);
+        return !neighborState.isAir()
+                && neighborState.getFluidState().isEmpty()
+                && neighborState.isFaceSturdy(playerContext.world(), neighbor, side.getOpposite());
+    }
+
     private Direction getBestPlaceSide(BlockPos pos) {
+        return getBestPlaceSide(pos, false);
+    }
+
+    private Direction getBestPlaceSide(BlockPos pos, boolean openableFacing) {
+        // Set on the floor, a box faces up into the cell above - the one the place states clear and
+        // the spot scan insists on. Any other support side leaves it facing sideways at whatever the
+        // lane happens to hold, so take the floor whenever there is one.
+        if (openableFacing && canPlaceAgainst(pos, Direction.DOWN) && canShulkerOpenToward(pos, Direction.UP)) {
+            return Direction.DOWN;
+        }
+
         Vec3 eyePos = playerContext.player().getEyePosition();
         Vec3 blockCenter = Vec3.atCenterOf(pos);
         Vec3 lookVec = blockCenter.subtract(eyePos);
@@ -2300,16 +3035,13 @@ public class HighwayContext {
         Direction bestSide = null;
 
         for (Direction side : Direction.values()) {
-            BlockPos neighbor = pos.relative(side);
-            BlockState neighborState = playerContext.world().getBlockState(neighbor);
-
-            // Check if neighbor can be placed against
-            if (neighborState.isAir() || !neighborState.isFaceSturdy(playerContext.world(), neighbor, side.getOpposite())) {
+            // Check if neighbor can be placed against (and isn't a fluid)
+            if (!canPlaceAgainst(pos, side)) {
                 continue;
             }
 
-            // Check if neighbor is a fluid
-            if (!neighborState.getFluidState().isEmpty()) {
+            // The box would face the other way; no room for the lid there means no opening it, ever
+            if (openableFacing && !canShulkerOpenToward(pos, side.getOpposite())) {
                 continue;
             }
 
@@ -2321,6 +3053,262 @@ public class HighwayContext {
         }
 
         return bestSide;
+    }
+
+    public boolean canShulkerOpenToward(BlockPos pos, Direction facing) {
+        AABB lid = Shulker.getProgressDeltaAabb(1.0F, facing, 0.0F, 0.5F, pos.getBottomCenter()).deflate(1.0E-6);
+        return playerContext.world().noBlockCollision(null, lid);
+    }
+
+    /** A cell a box can sit in or open into: already clear, or something the builder can dig out. */
+    private boolean clearOrClearable(BlockPos pos) {
+        BlockState state = playerContext.world().getBlockState(pos);
+        if (state.getFluidState().is(FluidTags.LAVA)) {
+            return false;
+        }
+        return state.canBeReplaced() || state.getDestroySpeed(playerContext.world(), pos) >= 0;
+    }
+
+    private boolean shulkerColumnWorkable(BlockPos placeLoc) {
+        return clearOrClearable(placeLoc) && clearOrClearable(placeLoc.above());
+    }
+
+    public boolean isShulkerSpotKnownBad(BlockPos pos) {
+        return badShulkerSpots.contains(new BlockPos(pos.getX(), pos.getY(), pos.getZ()));
+    }
+
+    private void rememberBadShulkerSpot(BlockPos spot) {
+        if (badShulkerSpots.size() >= SHULKER_SPOT_MEMORY) {
+            badShulkerSpots.clear(); // the lane moves on, so old entries can never come up again
+        }
+        badShulkerSpots.add(spot);
+    }
+
+    private static Vec3 placeHitPos(BlockPos pos, Direction placeSide) {
+        return Vec3.atCenterOf(pos).add(placeSide.getStepX() * 0.5, placeSide.getStepY() * 0.5, placeSide.getStepZ() * 0.5);
+    }
+
+    private Optional<Rotation> shulkerPlaceAim(BlockPos placeLoc, Direction placeSide) {
+        return RotationUtils.reachable(playerContext, placeLoc.relative(placeSide),
+                playerContext.playerController().getBlockReachDistance());
+    }
+
+    public boolean canReachShulkerPlacement(BlockPos placeLoc) {
+        Direction placeSide = getBestPlaceSide(placeLoc, true);
+        return placeSide == null || shulkerPlaceAim(placeLoc, placeSide).isPresent();
+    }
+
+    private BlockPos shulkerPlaceSightBlocker(BlockPos placeLoc) {
+        Direction placeSide = getBestPlaceSide(placeLoc, true);
+        if (placeSide == null) {
+            return null;
+        }
+        BlockPos neighbor = placeLoc.relative(placeSide);
+        Rotation aim = RotationUtils.calcRotationFromVec3d(playerContext.player().getEyePosition(1.0F),
+                VecUtils.calculateBlockCenter(playerContext.world(), neighbor), playerContext.playerRotations());
+        HitResult hit = RayTraceUtils.rayTraceTowards(playerContext.player(),
+                baritone.getLookBehavior().getAimProcessor().peekRotation(aim),
+                playerContext.playerController().getBlockReachDistance(), false);
+        if (hit != null && hit.getType() == HitResult.Type.BLOCK) {
+            BlockPos hitAt = ((BlockHitResult) hit).getBlockPos();
+            if (!hitAt.equals(neighbor)) {
+                return hitAt;
+            }
+        }
+        return null; // the ray ran out rather than stopping on something: too far, not walled off
+    }
+
+    public boolean handleShulkerPlaceOutOfSight(BlockPos placeLoc, HighwayState walkCloserState, HighwayState relocateState) {
+        BlockPos key = new BlockPos(placeLoc.getX(), placeLoc.getY(), placeLoc.getZ());
+        if (canReachShulkerPlacement(key)) {
+            return false;
+        }
+        if (!key.equals(shulkerSightFailSpot)) {
+            shulkerSightFailSpot = key;
+            shulkerSightDigs = 0;
+            shulkerSightWalks = 0;
+        }
+
+        BlockPos blocker = shulkerPlaceSightBlocker(key);
+        if (blocker != null) {
+            // A dispatched clearArea takes a couple of ticks to read as an active builder, and until
+            // it does we land back here with the wall still standing. Re-sending it into that window
+            // would spend the whole dig budget in six ticks without a single block being mined.
+            if (contextTick - shulkerSightLastDigTick < SHULKER_SIGHT_DIG_SPINUP) {
+                resetTimer();
+                return true;
+            }
+            if (shulkerSightDigs++ < SHULKER_SIGHT_DIGS) {
+                Helper.HELPER.logDirect("No line to the shulker spot at " + key.toShortString() + ", digging out the "
+                        + playerContext.world().getBlockState(blocker).getBlock().getName().getString()
+                        + " at " + blocker.toShortString() + ".");
+                baritone.getPathingBehavior().cancelEverything();
+                settings.buildRepeat.value = new Vec3i(0, 0, 0);
+                baritone.getBuilderProcess().clearArea(blocker, blocker);
+                shulkerSightLastDigTick = contextTick;
+                resetTimer();
+                return true;
+            }
+        } else if (shulkerSightWalks++ < SHULKER_SIGHT_WALKS) {
+            transitionTo(walkCloserState); // nothing in the way, we just aren't on the standing spot
+            resetTimer();
+            return true;
+        }
+
+        rememberBadShulkerSpot(key);
+        Helper.HELPER.logDirect("Still can't get a clear line to the shulker spot at " + key.toShortString()
+                + ", picking a different one.");
+        shulkerSightFailSpot = null;
+        baritone.getPathingBehavior().cancelEverything();
+        transitionTo(relocateState != null ? relocateState : HighwayState.Nothing);
+        resetTimer();
+        return true;
+    }
+
+    /** A placement that went through is proof the spot works; drop the line-of-sight failures there. */
+    public void noteShulkerPlaced() {
+        shulkerSightFailSpot = null;
+        shulkerSightDigs = 0;
+        shulkerSightWalks = 0;
+        standClearSpot = null;
+        standClearTries = 0;
+        placeRefusedSpot = null;
+        placeRefusedTries = 0;
+    }
+
+    private HighwayState noteShulkerPlaceRefused(BlockPos spot, HighwayState prevHighwayState) {
+        BlockPos key = new BlockPos(spot.getX(), spot.getY(), spot.getZ());
+        if (!key.equals(placeRefusedSpot)) {
+            placeRefusedSpot = key;
+            placeRefusedTries = 0;
+        }
+        if (placeRefusedTries++ < SHULKER_PLACE_REFUSALS) {
+            if (placeRefusedTries == 1) {
+                Helper.HELPER.logDirect("Failed to place shulker at " + key.toShortString() + ", retrying");
+            }
+            return prevHighwayState;
+        }
+        rememberBadShulkerSpot(key);
+        Helper.HELPER.logDirect("Placing a shulker at " + key.toShortString()
+                + " keeps being refused, picking a different spot.");
+        placeRefusedSpot = null;
+        placeRefusedTries = 0;
+        return HighwayState.Nothing;
+    }
+
+    public boolean playerInWayOfPlacement(BlockPos placeLoc) {
+        AABB cell = new AABB(placeLoc.getX(), placeLoc.getY(), placeLoc.getZ(),
+                placeLoc.getX() + 1.0, placeLoc.getY() + 1.0, placeLoc.getZ() + 1.0);
+        return playerContext.player().getBoundingBox().intersects(cell);
+    }
+
+    private BlockPos clearStandingSpotFor(BlockPos placeLoc) {
+        BetterBlockPos feet = playerContext.playerFeet();
+        // Step back on whichever side of the spot we already stand: the flows differ on that, and
+        // crossing over the box to reach the far side is a walk we don't need to make
+        int side = Integer.signum((feet.x - placeLoc.getX()) * highwayDirection.getX()
+                + (feet.z - placeLoc.getZ()) * highwayDirection.getZ());
+        if (side == 0) {
+            side = 1;
+        }
+        for (int step : new int[]{2 * side, 3 * side, -2 * side, -3 * side}) {
+            BlockPos candidate = placeLoc.offset(step * highwayDirection.getX(), 0, step * highwayDirection.getZ());
+            if (candidate.getX() == feet.x && candidate.getZ() == feet.z) {
+                continue; // where we already are, so pathing there would move us nowhere
+            }
+            if (hasFloorUnder(candidate)
+                    && passableForRecovery(candidate.getX(), candidate.getY(), candidate.getZ())
+                    && passableForRecovery(candidate.getX(), candidate.getY() + 1, candidate.getZ())) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    public boolean handleStandingInPlaceSpot(BlockPos placeLoc, HighwayState relocateState) {
+        BlockPos key = new BlockPos(placeLoc.getX(), placeLoc.getY(), placeLoc.getZ());
+        if (!playerInWayOfPlacement(key)) {
+            standClearSpot = null;
+            standClearTries = 0;
+            return false;
+        }
+        if (baritone.getCustomGoalProcess().isActive()) {
+            resetTimer();
+            return true; // already walking off it
+        }
+        if (!key.equals(standClearSpot)) {
+            standClearSpot = key;
+            standClearTries = 0;
+        }
+
+        BlockPos clear = clearStandingSpotFor(key);
+        if (clear != null && standClearTries++ < SHULKER_STAND_CLEAR_TRIES) {
+            Helper.HELPER.logDirect("Standing in the shulker spot at " + key.toShortString()
+                    + ", stepping back to " + clear.toShortString() + ".");
+            baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(new BetterBlockPos(clear)));
+            resetTimer();
+            return true;
+        }
+
+        // Nowhere to step to, or the walk never took: the spot itself is the thing to give up on
+        rememberBadShulkerSpot(key);
+        Helper.HELPER.logDirect("Can't get out of the shulker spot at " + key.toShortString() + ", picking a different one.");
+        standClearSpot = null;
+        standClearTries = 0;
+        baritone.getPathingBehavior().cancelEverything();
+        transitionTo(relocateState != null ? relocateState : HighwayState.Nothing);
+        resetTimer();
+        return true;
+    }
+
+    /** A box that opened is proof its spot is fine; don't carry earlier failures there forward. */
+    public void noteShulkerOpened() {
+        shulkerOpenFailSpot = null;
+        shulkerOpenFailTries = 0;
+    }
+
+    public boolean handleShulkerWouldNotOpen(BlockPos spot) {
+        BlockPos key = new BlockPos(spot.getX(), spot.getY(), spot.getZ());
+        if (!key.equals(shulkerOpenFailSpot)) {
+            shulkerOpenFailSpot = key;
+            shulkerOpenFailTries = 0;
+        }
+        shulkerOpenFailTries++;
+
+        BlockState state = playerContext.world().getBlockState(key);
+        if (!(state.getBlock() instanceof ShulkerBoxBlock)) {
+            return false; // the box isn't there at all, which is the caller's re-place case
+        }
+        Direction facing = state.getValue(ShulkerBoxBlock.FACING);
+        boolean lidHasRoom = canShulkerOpenToward(key, facing);
+
+        if (lidHasRoom && shulkerOpenFailTries <= SHULKER_OPEN_RETRIES) {
+            return false; // nothing in the way, so something transient ate the open - retry as before
+        }
+
+        // Something is in the lid's way. Digging it out beats a new spot
+        if (!lidHasRoom && facing != Direction.DOWN
+                && shulkerOpenFailTries <= SHULKER_OPEN_RETRIES + SHULKER_OPEN_UNBLOCK_TRIES) {
+            BlockPos blocked = key.relative(facing);
+            Helper.HELPER.logDirect("Shulker at " + key.toShortString() + " is facing " + facing + " into "
+                    + playerContext.world().getBlockState(blocked).getBlock().getName().getString()
+                    + ", digging that out so it can open.");
+            baritone.getPathingBehavior().cancelEverything();
+            settings.buildRepeat.value = new Vec3i(0, 0, 0);
+            baritone.getBuilderProcess().clearArea(blocked, blocked);
+            return false; // the placing state waits the builder out, then hands the box back to us
+        }
+
+        rememberBadShulkerSpot(key);
+        Helper.HELPER.logDirect("Shulker at " + key.toShortString() + " still won't open after "
+                + shulkerOpenFailTries + " tries, mining it back to place it somewhere else.");
+        shulkerOpenFailSpot = null;
+        shulkerOpenFailTries = 0;
+        baritone.getPathingBehavior().cancelEverything();
+        setPlaceLoc(key);
+        transitionTo(HighwayState.MiningMisplacedShulker);
+        resetTimer();
+        return true;
     }
 
     private int getDepletedPickSlot() {
@@ -2352,10 +3340,7 @@ public class HighwayContext {
                         return 1;
                     }
 
-                    swapSlot = getAcceptableThrowawaySlot();
-                    if (swapSlot == 8) {
-                        swapSlot = getAcceptableThrowawaySlotNoHotbar();
-                    }
+                    swapSlot = getThrowawaySlotToToss();
                     if (swapSlot == -1) {
                         // Also didn't find any throwaway items
                         return 0;
@@ -2385,10 +3370,7 @@ public class HighwayContext {
 
                 if (getItemCountInventory(Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) == 0 && getItemSlot(Item.getId(Items.AIR)) == -1) {
                     // For some reason we have no gapples and no air slots so we have to throw out some throwaway items
-                    int throwawaySlot = getAcceptableThrowawaySlot();
-                    if (throwawaySlot == 8) {
-                        throwawaySlot = getAcceptableThrowawaySlotNoHotbar();
-                    }
+                    int throwawaySlot = getThrowawaySlotToToss();
                     if (throwawaySlot == -1) {
                         return 0;
                     }
@@ -2407,20 +3389,20 @@ public class HighwayContext {
         return count;
     }
 
-    public int lootEnderChestSlot() {
-        int count = 0;
+    /**
+     * With an open totem shulker box, pull one slot's worth of totems into the inventory. Totems
+     * don't stack, so every totem needs its own free slot; when there is none, swap a throwaway
+     * stack out for the totems and drop it. Returns the number of totems moved (0 when none left).
+     */
+    public int lootTotemChestSlot() {
         AbstractContainerMenu curContainer = playerContext.player().containerMenu;
         for (int i = 0; i < 27; i++) {
-            if (curContainer.getSlot(i).getItem().getItem() instanceof BlockItem &&
-                    ((BlockItem) curContainer.getSlot(i).getItem().getItem()).getBlock() instanceof EnderChestBlock) {
-                count += curContainer.getSlot(i).getItem().getCount();
+            if (curContainer.getSlot(i).getItem().is(Items.TOTEM_OF_UNDYING)) {
+                int count = curContainer.getSlot(i).getItem().getCount();
 
                 if (getItemSlot(Item.getId(Items.AIR)) == -1) {
-                    // For some reason we have no air slots so we have to throw out some throwaway items
-                    int throwawaySlot = getAcceptableThrowawaySlot();
-                    if (throwawaySlot == 8) {
-                        throwawaySlot = getAcceptableThrowawaySlotNoHotbar();
-                    }
+                    // No free slot for the totems, so throw out some throwaway items to make room
+                    int throwawaySlot = getThrowawaySlotToToss();
                     if (throwawaySlot == -1) {
                         return 0;
                     }
@@ -2431,6 +3413,36 @@ public class HighwayContext {
                     // There's an air slot so we can just do a quick move
                     playerContext.playerController().windowClick(curContainer.containerId, i, 0, ClickType.QUICK_MOVE, playerContext.player());
                 }
+
+                return count;
+            }
+        }
+
+        return 0;
+    }
+
+    public int lootEnderChestSlot() {
+        int count = 0;
+        AbstractContainerMenu curContainer = playerContext.player().containerMenu;
+        for (int i = 0; i < 27; i++) {
+            if (curContainer.getSlot(i).getItem().getItem() instanceof BlockItem &&
+                    ((BlockItem) curContainer.getSlot(i).getItem().getItem()).getBlock() instanceof EnderChestBlock) {
+                count += curContainer.getSlot(i).getItem().getCount();
+
+                if (getItemSlot(Item.getId(Items.AIR)) == -1) {
+                    // No empty slot: toss a throwaway now and quick-move on the next call. Swapping the
+                    // stack straight into the throwaway's slot skips the merge into partial stacks and
+                    // leaves the chests fragmented, which costs a slot when the kept ones are stashed.
+                    int throwawaySlot = getThrowawaySlotToToss();
+                    if (throwawaySlot == -1) {
+                        return 0;
+                    }
+                    playerContext.playerController().windowClick(curContainer.containerId, throwawaySlot < 9 ? throwawaySlot + 54 : throwawaySlot + 18, 0, ClickType.PICKUP, playerContext.player()); // Have to convert slot id to single chest slot id
+                    playerContext.playerController().windowClick(curContainer.containerId, -999, 0, ClickType.PICKUP, playerContext.player());
+                    return -1;
+                }
+                // Quick move merges into partial stacks first, then takes the empty slot
+                playerContext.playerController().windowClick(curContainer.containerId, i, 0, ClickType.QUICK_MOVE, playerContext.player());
 
                 return count;
             }
@@ -2473,6 +3485,12 @@ public class HighwayContext {
                         }
                         break;
 
+                    case Totem:
+                        if (isTotemShulker(stack) > 0) {
+                            doLoot = true;
+                        }
+                        break;
+
                     case AnyPickaxe:
                         if (isPickaxeShulker(stack) > 0) {
                             doLoot = true;
@@ -2486,10 +3504,7 @@ public class HighwayContext {
                         playerContext.playerController().windowClick(curContainer.containerId, i, 0, ClickType.PICKUP, playerContext.player()); // Put depleted shulker in looted slot
                     } else if (getItemSlot(Item.getId(Items.AIR)) == -1) {
                         // For some reason we have no air slots so we have to throw out some throwaway items
-                        int throwawaySlot = getAcceptableThrowawaySlot();
-                        if (throwawaySlot == 8) {
-                            throwawaySlot = getAcceptableThrowawaySlotNoHotbar();
-                        }
+                        int throwawaySlot = getThrowawaySlotToToss();
                         if (throwawaySlot == -1) {
                             return 0;
                         }
@@ -2628,6 +3643,12 @@ public class HighwayContext {
                         }
                         break;
 
+                    case Totem:
+                        if (isTotemShulker(stack) > 0) {
+                            count++;
+                        }
+                        break;
+
                     case Empty:
                         if (isEmptyShulker(stack)) {
                             count++;
@@ -2718,10 +3739,10 @@ public class HighwayContext {
         return 2 * (int) Math.ceil(settings.blockReachDistance.value);
     }
 
-    public int getHighwayLengthFront() {
+    public int getHighwayFrontDistance() {
         // scan far enough that the configured stand-off distance is actually reachable, and past it far
         // enough that the caller can tell "the front is right there" from "the front is a hike away"
-        return scanFrontLength(Math.max(10, settings.highwayEndDistance.value + creepMaxOvershoot()), false);
+        return scanFrontDistance(Math.max(10, settings.highwayEndDistance.value + creepMaxOvershoot()));
     }
 
     /**
@@ -2732,10 +3753,232 @@ public class HighwayContext {
      * break out again.
      */
     public int builtSlicesAhead(int maxScan) {
-        return scanFrontLength(maxScan, true);
+        return scanFrontLength(maxScan);
     }
 
-    private int scanFrontLength(int scanLength, boolean stopAtUnloaded) {
+    // what the last scanFrontDistance was pinned on, for nhwstatus
+    private BlockPos frontBlockerSlice;
+    private int frontBlockerX;
+    private int frontBlockerY;
+    private int frontBlockerZ;
+    private double frontBlockerAlong;
+    private double frontBlockerCross;
+    private int frontBlockerColumn;
+    private int frontBlockerCrossLen;
+    private double frontBlockerPlayerColumn;
+    private int frontBlockerLaneLo;
+    private int frontBlockerLaneHi;
+
+    // why the walk-creep did or didn't hold the key, tallied since the last nhwstatus
+    private final Map<String, Integer> walkGateTally = new LinkedHashMap<>();
+    private int walkGateTicks;
+    private int walkGateHeld;
+
+    /** Records the first condition that stopped the walk-creep holding the key this tick, or null if it held. */
+    public void noteWalkGate(String blocker) {
+        walkGateTicks++;
+        if (blocker == null) {
+            walkGateHeld++;
+        } else {
+            walkGateTally.merge(blocker, 1, Integer::sum);
+        }
+    }
+
+    /** What has been stopping the walk-creep since this was last asked. Reading it resets the tally. */
+    public String walkGateDiagnostic() {
+        if (walkGateTicks == 0) {
+            return "Walk gate: not evaluated (highwayEndDistance is -1, or not in BuildingHighway)";
+        }
+        StringBuilder sb = new StringBuilder(String.format("Walk gate: held %d of %d ticks (%d%%)",
+                walkGateHeld, walkGateTicks, Math.round(100.0 * walkGateHeld / walkGateTicks)));
+        walkGateTally.entrySet().stream()
+                .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
+                .forEach(e -> sb.append(" | ").append(e.getKey()).append(" x").append(e.getValue()));
+        walkGateTally.clear();
+        walkGateTicks = 0;
+        walkGateHeld = 0;
+        return sb.toString();
+    }
+
+    /** Blocks of travel per schematic slice: 1 on a straight highway, sqrt(2) on a diagonal. */
+    private double stepLength() {
+        return Math.sqrt(highwayDirection.getX() * highwayDirection.getX()
+                + highwayDirection.getZ() * highwayDirection.getZ());
+    }
+
+    /**
+     * Distance in blocks along the highway from the player to the nearest cell the schematic still
+     * wants changed, capped at {@code maxBlocks}.
+     * <p>
+     * Blocks rather than slices, because a slice index is not a distance on a diagonal. The schematic
+     * is sliced on a world axis, so a diagonal slice is sqrt(2) blocks long and its own cells are
+     * spread a further (cross section - 1) / sqrt(2) blocks along the travel axis - all of them ahead
+     * of the slice's origin for +X+Z and +X-Z, all behind it for -X-Z and -X+Z, since the schematic is
+     * laid out from its low-cross-axis corner whichever way we're heading. Counting slices therefore
+     * read the front several blocks late in one diagonal sense and several blocks early in the other,
+     * and only the latter ever cleared the walk-creep's stand-off distance: the two +X diagonals never
+     * creeped at all and built the whole road from pathed break goals, stopping at each end of the
+     * 45-degree slice in turn. On a straight highway a slice is exactly one block along travel and
+     * this returns what the slice count returned.
+     */
+    private int scanFrontDistance(int maxBlocks) {
+        Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
+        Vec3 curPosPlayer = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
+        BlockPos startCheckPos = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z), direction, curPosPlayer, LocationType.HighwayBuild);
+
+        int dirX = highwayDirection.getX();
+        int dirZ = highwayDirection.getZ();
+        int lenSq = dirX * dirX + dirZ * dirZ;
+        double stepLen = stepLength();
+
+        boolean crossZ = schematic.lengthZ() >= schematic.widthX();
+        int crossLen = crossZ ? schematic.lengthZ() : schematic.widthX();
+        // One column across the highway shifts a cell crossAlong along the highway and crossPerp across
+        // it, both unnormalised, so both come out in blocks once divided by stepLen. crossAlong is 0 on
+        // a straight, where a slice is perpendicular to travel, and +-1 on a diagonal, where it isn't.
+        int crossAlong = crossZ ? dirZ : dirX;
+        int crossPerp = crossZ ? dirX : -dirZ;
+        // measured from the centre of the block we're standing in, so the reading only moves when we
+        // change block rather than jittering with the walk; the +0.5s cancel between the two centres
+        int relX = startCheckPos.getX() - playerContext.playerFeet().getX();
+        int relZ = startCheckPos.getZ() - playerContext.playerFeet().getZ();
+        double alongBase = relX * dirX + relZ * dirZ;
+        double perpBase = -relX * dirZ + relZ * dirX;
+
+        // The corridor the creep walks down: the column we stand in and one either side, clamped to
+        // the walk lane at cross-axis offsets [1, highwayWidth] so the rails stay out of it. This is
+        // the N-block generalisation of canWalkOnFloorAhead/canWalkThroughAhead, which ask the same
+        // question about the single next step.
+        //
+        // Not the full width, because on a diagonal the road's outer columns lie ahead as well as to
+        // the side: measured in game at width 7, column 7 of 8 sat 2.8 to 3.5 blocks across and 1.4
+        // to 3.5 along, up to 5.3 from the eye against a 4.5 reach, so it could not be dug from the
+        // lane at all - the bot digs it on the way past, when it draws level. "The whole width is
+        // finished N blocks ahead" is therefore never true while a diagonal is being built. It isn't
+        // a sign the printer is behind, and gating the walk on it reduced the walk to an inch.
+        // Work to either side is still dug by the builder, still bounded by creepMaxOvershoot, and
+        // still verified across the full cross-section by the back-check behind us.
+        double playerColumn = -perpBase / crossPerp;
+        playerColumn = Math.max(0, Math.min(crossLen - 1, playerColumn)); // standing off the side still measures a real corridor
+        int bodyColumn = (int) Math.round(playerColumn);
+        int laneLo = Math.max(1, bodyColumn - 1);
+        int laneHi = Math.min(Math.min(crossLen - 1, settings.highwayWidth.value), bodyColumn + 1);
+
+        // A cell of slice i in column j sits (alongBase + i * lenSq + j * crossAlong) / stepLen blocks
+        // along the highway from us. Solve that for the slices that can put a cell in [0, maxBlocks]:
+        // on a diagonal that reaches back past startCheckPos, since a slice trails cells behind its
+        // own origin, and one of those can be the nearest thing left unbuilt.
+        int alongSpanLo = Math.min(0, (crossLen - 1) * crossAlong);
+        int alongSpanHi = Math.max(0, (crossLen - 1) * crossAlong);
+        int iLo = (int) Math.floor((-alongBase - alongSpanHi) / lenSq);
+        int iHi = (int) Math.ceil((maxBlocks * stepLen - alongBase - alongSpanLo) / lenSq);
+
+        frontBlockerSlice = null;
+        frontBlockerCrossLen = crossLen;
+        frontBlockerPlayerColumn = playerColumn;
+        frontBlockerLaneLo = laneLo;
+        frontBlockerLaneHi = laneHi;
+
+        double nearest = maxBlocks; // an all-correct scan means "at least this far built ahead"
+        if (endPos != null) {
+            int stepsToEnd = stepsAlongHighway(startCheckPos, endPos);
+            iHi = Math.min(iHi, stepsToEnd);
+            // past the last slice there is only the end, not more highway
+            nearest = Math.min(nearest, Math.max(0, (alongBase + stepsToEnd * lenSq) / stepLen));
+        }
+
+        for (int i = iLo; i <= iHi; i++) {
+            if ((alongBase + i * lenSq + alongSpanLo) / stepLen >= nearest) {
+                break; // this slice and every one past it is further off than what we already found
+            }
+            BlockPos curPos = startCheckPos.offset(i * dirX, 0, i * dirZ);
+            for (int y = 0; y < schematic.heightY(); y++) {
+                for (int z = 0; z < schematic.lengthZ(); z++) {
+                    for (int x = 0; x < schematic.widthX(); x++) {
+                        int j = crossZ ? z : x;
+                        if (j < laneLo || j > laneHi) {
+                            continue;
+                        }
+                        double along = (alongBase + i * lenSq + j * crossAlong) / stepLen;
+                        if (along < 0 || along >= nearest) {
+                            continue; // behind us, or no closer than what we already found
+                        }
+                        if (cellScan(curPos, x, y, z) == CellScan.MISMATCH) {
+                            nearest = along;
+                            frontBlockerSlice = curPos;
+                            frontBlockerX = x;
+                            frontBlockerY = y;
+                            frontBlockerZ = z;
+                            frontBlockerAlong = along;
+                            frontBlockerCross = (perpBase + j * crossPerp) / stepLen;
+                            frontBlockerColumn = j;
+                        }
+                    }
+                }
+            }
+        }
+        return (int) Math.floor(nearest);
+    }
+
+    /**
+     * What the walk-creep's front distance is currently pinned on. Rescans, so it reports the state
+     * right now rather than whatever the last creep tick happened to see.
+     */
+    public String frontDistanceDiagnostic() {
+        if (schematic == null) {
+            return "Front: no schematic";
+        }
+        int dist = getHighwayFrontDistance();
+        String corridor = String.format("cross-section %d wide, we're in column %.0f, watching columns %d-%d",
+                frontBlockerCrossLen, frontBlockerPlayerColumn, frontBlockerLaneLo, frontBlockerLaneHi);
+        if (frontBlockerSlice == null) {
+            return "Front: " + dist + " blocks, nothing unbuilt in range (" + corridor + ")";
+        }
+        BlockPos pos = frontBlockerSlice.offset(frontBlockerX, frontBlockerY, frontBlockerZ);
+        BlockState current = playerContext.world().getBlockState(pos);
+        BlockState desired = schematic.desiredState(frontBlockerX, frontBlockerY, frontBlockerZ, current, this.approxPlaceable);
+        return String.format("Front: %d blocks, pinned by %d,%d,%d (column %d of %d, %.2f along, %.2f across, y+%d): is %s, wants %s [%s]",
+                dist, pos.getX(), pos.getY(), pos.getZ(),
+                frontBlockerColumn, frontBlockerCrossLen - 1, frontBlockerAlong, frontBlockerCross, frontBlockerY,
+                BlockUtils.blockToString(current.getBlock()), BlockUtils.blockToString(desired.getBlock()), corridor);
+    }
+
+    private enum CellScan {CORRECT, MISMATCH, UNLOADED}
+
+    /**
+     * Whether the cell at schematic coordinates ({@code x}, {@code y}, {@code z}) of the slice starting
+     * at {@code slicePos} already matches the highway. Cells the schematic doesn't cover, and cells held
+     * valid by the block above them, count as correct.
+     */
+    private CellScan cellScan(BlockPos slicePos, int x, int y, int z) {
+        return cellScan(schematic, slicePos, x, y, z);
+    }
+
+    /** {@link #cellScan(BlockPos, int, int, int)} against one slice's own schematic, for angled patterns. */
+    private CellScan cellScan(CompositeSchematic sliceSchem, BlockPos slicePos, int x, int y, int z) {
+        int blockX = x + slicePos.getX();
+        int blockY = y + slicePos.getY();
+        int blockZ = z + slicePos.getZ();
+        BlockState current = playerContext.world().getBlockState(new BlockPos(blockX, blockY, blockZ));
+
+        if (!sliceSchem.inSchematic(x, y, z, current)) {
+            return CellScan.CORRECT;
+        }
+        if (!baritone.bsi.worldContainsLoadedChunk(blockX, blockZ)) {
+            return CellScan.UNLOADED;
+        }
+        // we can directly observe this block, it is in render distance
+
+        ISchematic ourSchem = sliceSchem.getSchematic(x, y, z, current).schematic;
+        if (ourSchem instanceof WhiteBlackSchematic && ((WhiteBlackSchematic) ourSchem).isValidIfUnder() &&
+                MovementHelper.isBlockNormalCube(playerContext.world().getBlockState(new BlockPos(blockX, blockY + 1, blockZ)))) {
+            return CellScan.CORRECT;
+        }
+        return sliceSchem.desiredState(x, y, z, current, this.approxPlaceable).equals(current)
+                ? CellScan.CORRECT : CellScan.MISMATCH;
+    }
+
+    private int scanFrontLength(int scanLength) {
         Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
         Vec3 curPosPlayer = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
         BlockPos startCheckPos = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z), direction, curPosPlayer, LocationType.HighwayBuild);
@@ -2777,29 +4020,8 @@ public class HighwayContext {
                         if (!crossZ && (x < crossLo || x > crossHi)) {
                             continue;
                         }
-                        int blockX = x + curPos.getX();
-                        int blockY = y + curPos.getY();
-                        int blockZ = z + curPos.getZ();
-                        BlockState current = playerContext.world().getBlockState(new BlockPos(blockX, blockY, blockZ));
-
-                        if (!sliceSchem.inSchematic(x, y, z, current)) {
-                            continue;
-                        }
-                        if (!baritone.bsi.worldContainsLoadedChunk(blockX, blockZ)) {
-                            if (stopAtUnloaded) {
-                                return i;
-                            }
-                            continue;
-                        }
-                        // we can directly observe this block, it is in render distance
-
-                        ISchematic ourSchem = sliceSchem.getSchematic(x, y, z, current).schematic;
-                        if (ourSchem instanceof WhiteBlackSchematic && ((WhiteBlackSchematic) ourSchem).isValidIfUnder() &&
-                                MovementHelper.isBlockNormalCube(playerContext.world().getBlockState(new BlockPos(blockX, blockY + 1, blockZ)))) {
-                            continue;
-                        }
-
-                        if (!sliceSchem.desiredState(x, y, z, current, this.approxPlaceable).equals(current)) {
+                        CellScan cell = cellScan(sliceSchem, curPos, x, y, z);
+                        if (cell == CellScan.MISMATCH || cell == CellScan.UNLOADED) {
                             return i;
                         }
                     }
@@ -2807,9 +4029,8 @@ public class HighwayContext {
             }
         }
 
-        // the whole scanned stretch is correct; report its length rather than 0. For the walk-creep
-        // that reads as "the front is further off than creeping is for", and for the travel walk it
-        // is how far up the highway it may head in one hop.
+        // the whole scanned stretch is correct; report its length rather than 0, which is how far up
+        // the highway the travel walk may head in one hop.
         return maxResult;
     }
 
@@ -2848,8 +4069,11 @@ public class HighwayContext {
         Vec3 feetVec = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
         BetterBlockPos feetSlice = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z), direction, feetVec, LocationType.HighwayBuild);
 
+        // builtSlicesAhead counts slices while the stand-off distance is in blocks, and a diagonal
+        // slice is sqrt(2) of them
+        int standOffSlices = (int) Math.ceil(Math.max(0, settings.highwayEndDistance.value) / stepLength());
         int hop = builtSlicesAhead(Math.max(32, playerContext.minecraft().options.renderDistance().get() * 16)) - 1
-                - Math.max(0, settings.highwayEndDistance.value);
+                - standOffSlices;
         hop = Math.min(hop, stepsAlongHighway(feetSlice, endPos));
         if (hop <= 0) {
             return false;
@@ -2887,11 +4111,11 @@ public class HighwayContext {
                 direction, new Vec3(buildLinePos.getX(), buildLinePos.getY(), buildLinePos.getZ()), LocationType.ShulkerEchestInteraction);
         int off = stepsAlongHighway(lane, buildLinePos);
         if (off == 0) {
-            return lane;
+            return liftOntoPavement(lane);
         }
-        return new BetterBlockPos(pattern.isCustom()
+        return liftOntoPavement(new BetterBlockPos(pattern.isCustom()
                 ? lane.offset(sliceDelta(sliceIndexOf(lane, backPathOriginVector), off))
-                : lane.offset(off * highwayDirection.getX(), 0, off * highwayDirection.getZ()));
+                : lane.offset(off * highwayDirection.getX(), 0, off * highwayDirection.getZ())));
     }
 
     public boolean isHighwayEndComplete() {
@@ -2931,12 +4155,15 @@ public class HighwayContext {
         return true;
     }
 
+    private static final int CREEP_FLOOR_LOOKAHEAD = 3;
+
     public boolean canWalkOnFloorAhead() {
         BetterBlockPos feet = playerContext.playerFeet();
         int dirX = highwayDirection.getX();
         int dirZ = highwayDirection.getZ();
         int floorY = feet.y - 1;
 
+        int lookahead = Math.max(1, Math.min(CREEP_FLOOR_LOOKAHEAD, settings.highwayEndDistance.value));
         if (pattern.isCustom()) {
             int t = sliceIndexNear(feet.x, feet.z);
             Vec3i s1 = pattern.worldStep(t);
@@ -2944,22 +4171,39 @@ public class HighwayContext {
             if (!MovementHelper.canWalkOn(baritone.bsi, feet.x + s1.getX(), floorY, feet.z + s1.getZ())) {
                 return false;
             }
-            if (s1.getX() != s2.getX() || s1.getZ() != s2.getZ()) {
+            if ((s1.getX() != s2.getX() || s1.getZ() != s2.getZ())
+                    && !MovementHelper.canWalkOn(baritone.bsi, feet.x + s1.getX() + s2.getX(), floorY, feet.z + s1.getZ() + s2.getZ())) {
                 // approaching a jog: the creep walks the average heading, so the hitbox crosses
                 // the corner cell as well
-                return MovementHelper.canWalkOn(baritone.bsi, feet.x + s1.getX() + s2.getX(), floorY, feet.z + s1.getZ() + s2.getZ());
+                return false;
             }
-            return true;
+        } else {
+            // Blocks we'll be standing on after stepping forward
+            for (int d = 1; d <= lookahead; d++) {
+                if (!MovementHelper.canWalkOn(baritone.bsi, feet.x + d * dirX, floorY, feet.z + d * dirZ)) {
+                    return false;
+                }
+            }
+            // For diagonals also check the two orthogonally-adjacent floor cells
+            if (dirX != 0 && dirZ != 0
+                    && !(MovementHelper.canWalkOn(baritone.bsi, feet.x + dirX, floorY, feet.z)
+                    && MovementHelper.canWalkOn(baritone.bsi, feet.x, floorY, feet.z + dirZ))) {
+                return false;
+            }
         }
-
-        // Block we'll be standing on after stepping forward
-        if (!MovementHelper.canWalkOn(baritone.bsi, feet.x + dirX, floorY, feet.z + dirZ)) {
-            return false;
-        }
-        // For diagonals also check the two orthogonally-adjacent floor cells
-        if (dirX != 0 && dirZ != 0) {
-            return MovementHelper.canWalkOn(baritone.bsi, feet.x + dirX, floorY, feet.z)
-                    && MovementHelper.canWalkOn(baritone.bsi, feet.x, floorY, feet.z + dirZ);
+        // The key walks down the player's yaw, not the axis, and an interact aim can pull it far
+        // enough sideways to drift into the outer lane columns the digging profile never floors,
+        // with the axis scan above still reporting clear floor. So scan the real heading too.
+        Vec3 pos = playerContext.player().position();
+        double yaw = Math.toRadians(playerContext.player().getYRot());
+        double headX = -Math.sin(yaw);
+        double headZ = Math.cos(yaw);
+        for (int d = 1; d <= lookahead; d++) {
+            int x = (int) Math.floor(pos.x + headX * d);
+            int z = (int) Math.floor(pos.z + headZ * d);
+            if (!MovementHelper.canWalkOn(baritone.bsi, x, floorY, z)) {
+                return false;
+            }
         }
         return true;
     }
@@ -3134,6 +4378,26 @@ public class HighwayContext {
             return (pattern.majorIsX() ? (z - oz) : (x - ox)) * pattern.minorSign() - pattern.minorOffset(t);
         }
         return -(x - ox) * highwayDirection.getZ() + (z - oz) * highwayDirection.getX();
+    }
+
+    /**
+     * The cross-section column the given block sits in, counted the way the schematic counts: 0 is
+     * the low-side rail, 1 to {@code highwayWidth} the walk lane, {@code highwayWidth + 1} the
+     * high-side rail. That is {@link #lateralColumn} with the direction's sign taken back out, so
+     * the same column reads the same number whichever of the eight directions we're heading.
+     */
+    public int crossSectionColumn(int x, int z) {
+        // Group A lays the cross-section out along Z and group B along X; the perpendicular grows
+        // one per column in both, up to this sign. Same crossPerp scanFrontDistance measures with.
+        int crossPerp = NetherHighwayBuilderBehavior.isGroupA(highwayDirection)
+                ? highwayDirection.getX() : -highwayDirection.getZ();
+        return crossPerp < 0 ? -lateralColumn(x, z) : lateralColumn(x, z);
+    }
+
+    /** Whether the given block is in the walk lane rather than one of the rail columns beside it. */
+    public boolean inWalkLane(int x, int z) {
+        int column = crossSectionColumn(x, z);
+        return column >= 1 && column <= settings.highwayWidth.value;
     }
 
     /** The yaw that points straight down the highway direction. */
@@ -3705,11 +4969,16 @@ public class HighwayContext {
         } catch (Exception ignored) {}
     }
 
+    public Rotation farmAim(Rotation rotation) {
+        float wobble = (playerContext.player().tickCount & 1) == 0 ? 0.5f : -0.5f;
+        return new Rotation(rotation.getYaw(), rotation.getPitch() + wobble);
+    }
+
     private Direction faceMineTarget(BlockPos pos) {
         double reach = playerContext.playerController().getBlockReachDistance();
         Optional<Rotation> rotation = RotationUtils.reachable(playerContext, pos, reach);
         if (rotation.isPresent()) {
-            baritone.getLookBehavior().updateTarget(rotation.get(), true);
+            baritone.getLookBehavior().updateTarget(farmAim(rotation.get()), true);
             HitResult hit = RayTraceUtils.rayTraceTowards(playerContext.player(), rotation.get(), reach);
             if (hit instanceof BlockHitResult blockHit && blockHit.getBlockPos().equals(pos)) {
                 return blockHit.getDirection();
@@ -3735,7 +5004,24 @@ public class HighwayContext {
         }
         return -1;
     }
-    
+
+    public int getThrowawaySlotToToss() {
+        for (Item throwawayItem : settings.acceptableThrowawayItems.value) {
+            // Paving's product is never a throwaway, whatever the list says; obsidianRoomInventory
+            // assumes as much.
+            if (paving() && (throwawayItem == Blocks.OBSIDIAN.asItem() || throwawayItem == Blocks.CRYING_OBSIDIAN.asItem())) {
+                continue;
+            }
+            int itemId = Item.getId(throwawayItem);
+            for (int i = 0; i < 36; i++) {
+                if (i != 8 && Item.getId(playerContext.player().getInventory().items.get(i).getItem()) == itemId) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
     public int getAcceptableThrowawaySlotNoHotbar() {
         for (Item throwawayItem : settings.acceptableThrowawayItems.value) {
             int slot = getItemSlotNoHotbar(Item.getId(throwawayItem));

@@ -31,16 +31,13 @@ public class LootingLootEnderChestEnderChests extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.timer() < 10) {
-            return;
-        }
         if (!(context.playerContext().minecraft().screen instanceof ContainerScreen)) {
             context.transitionTo(HighwayState.OpeningLootEnderChest);
             return;
         }
 
-        if (context.timer() < 40 && !context.openContainerHasContents()) {
-            return; // Wait for the initial content sync; a truly empty container proceeds at 40
+        if (!context.openContainerReady()) {
+            return;
         }
 
         int wantShulks = context.settings().highwayEnderChestShulksToHave.value;
@@ -48,19 +45,24 @@ public class LootingLootEnderChestEnderChests extends State {
             wantShulks = context.refillingEnderChests() ? 1 : 0;
         }
 
-        if (context.getShulkerCountInventory(ShulkerType.EnderChest) < wantShulks) {
-            int enderShulksLooted = context.lootShulkerChestSlot(ShulkerType.EnderChest);
-            if (enderShulksLooted > 0) {
-                Helper.HELPER.logDirect("Looted " + enderShulksLooted + " ender chest shulker");
-            } else {
-                Helper.HELPER.logDirect("No more ender chest shulkers. Rolling with what we have.");
-                context.transitionTo(HighwayState.LootingLootEnderChestGapples);
-                context.setEnderChestHasEnderShulks(false);
-            }
-
-            context.resetTimer();
-        } else {
+        if (context.getShulkerCountInventory(ShulkerType.EnderChest) >= wantShulks) {
             context.transitionTo(HighwayState.LootingLootEnderChestGapples);
+            return;
         }
+
+        if (!context.containerClickReady()) {
+            return;
+        }
+
+        int enderShulksLooted = context.lootShulkerChestSlot(ShulkerType.EnderChest);
+        context.noteContainerClick();
+        if (enderShulksLooted > 0) {
+            Helper.HELPER.logDirect("Looted " + enderShulksLooted + " ender chest shulker");
+            return;
+        }
+
+        Helper.HELPER.logDirect("No more ender chest shulkers. Rolling with what we have.");
+        context.setEnderChestHasEnderShulks(false);
+        context.transitionTo(HighwayState.LootingLootEnderChestGapples);
     }
 }

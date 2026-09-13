@@ -24,7 +24,7 @@ import baritone.behavior.highway.enums.HighwayState;
 import baritone.behavior.highway.enums.ShulkerType;
 import net.minecraft.world.level.block.AirBlock;
 
-public class MiningPickaxeShulker extends State {
+public class MiningTotemShulker extends State {
 
     private int guardWaitTicks = 0;
 
@@ -33,7 +33,7 @@ public class MiningPickaxeShulker extends State {
 
     private int sinceClearDispatch = BUILDER_SPINUP_TICKS;
 
-    public MiningPickaxeShulker(HighwayState state) {
+    public MiningTotemShulker(HighwayState state) {
         super(state);
     }
 
@@ -75,6 +75,6 @@ public class MiningPickaxeShulker extends State {
             return;
         }
 
-        context.transitionTo(HighwayState.CollectingPickaxeShulker);
+        context.transitionTo(HighwayState.CollectingTotemShulker);
     }
 }

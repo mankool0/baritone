@@ -36,23 +36,31 @@ public class DepositingStashShulker extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.timer() < 10) {
-            return;
-        }
-
         if (!(context.playerContext().minecraft().screen instanceof ContainerScreen)) {
             context.transitionTo(HighwayState.OpeningLootEnderChest); // stashing flag routes the reopen back here
             return;
         }
 
-        if (context.timer() < 40 && !context.openContainerHasContents()) {
-            return; // Wait for the initial content sync; a truly empty container proceeds at 40
+        if (!context.openContainerReady()) {
+            return;
         }
 
-        ShulkerType stashType = context.refillingEnderChests() ? ShulkerType.EnderChest : ShulkerType.Gapple;
+        // Legs run one at a time (each clears its flag before the next starts), so the still-latched
+        // flag in priority order names the shulker this stash is for.
+        ShulkerType stashType = context.refillingEnderChests() ? ShulkerType.EnderChest
+                : context.refillingGapples() ? ShulkerType.Gapple
+                : ShulkerType.Totem;
+        if (!context.containerClickReady()) {
+            return;
+        }
+
         if (context.depositShulkerChestSlot(stashType) > 0) {
-            Helper.HELPER.logDirect("Stashed " + (stashType == ShulkerType.EnderChest ? "ender chest" : "gapple") + " shulker back into storage.");
-            context.resetTimer();
+            context.noteContainerClick();
+            Helper.HELPER.logDirect("Stashed " + switch (stashType) {
+                case EnderChest -> "ender chest";
+                case Gapple -> "gapple";
+                default -> "totem";
+            } + " shulker back into storage.");
             return;
         }
 
@@ -66,15 +74,12 @@ public class DepositingStashShulker extends State {
             context.setStartShulkerCount(shulkerCount);
         }
         context.setStashingShulker(false);
-        if (stashType == ShulkerType.EnderChest) {
-            context.setRefillingEnderChests(false);
-            if (!context.refillingGapples()) {
-                context.setEnderChestAccessLoc(null); // keep the chest loc when a gapple refill is queued behind us
-            }
-        } else {
-            context.setRefillingGapples(false);
-            context.setEnderChestAccessLoc(null);
+        switch (stashType) {
+            case EnderChest -> context.setRefillingEnderChests(false);
+            case Gapple -> context.setRefillingGapples(false);
+            default -> context.setRefillingTotems(false);
         }
+        context.releaseEnderChestAccessLoc(); // kept when another refill is queued behind us
         context.transitionTo(HighwayState.Nothing);
     }
 }

@@ -17,6 +17,7 @@
 
 package baritone.behavior.highway.state;
 
+import baritone.api.utils.Helper;
 import baritone.api.utils.Rotation;
 import baritone.api.utils.VecUtils;
 import baritone.behavior.highway.HighwayContext;
@@ -39,7 +40,7 @@ public class InventoryCleaningObsidian extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.timer() < 10) {
+        if (!context.containerClickReady()) {
             return;
         }
 
@@ -48,16 +49,17 @@ public class InventoryCleaningObsidian extends State {
         int stacksToThrow = slotsNeededForDrops(context) - context.getItemCountInventory(Item.getId(Items.AIR));
         context.baritone().getLookBehavior().updateTarget(new Rotation(45, 0), true);
         for (int i = 0; i < stacksToThrow; i++) {
-            int throwawaySlot = context.getAcceptableThrowawaySlot();
-            if (throwawaySlot == 8) {
-                throwawaySlot = context.getAcceptableThrowawaySlotNoHotbar();
-            }
+            int throwawaySlot = context.getThrowawaySlotToToss();
             if (throwawaySlot == -1) {
+                if (context.obsidianStuckLogDue()) {
+                    Helper.HELPER.logDirect("Obsidian on the ground doesn't fit and nothing is left to throw out: need " + stacksToThrow + " more slot(s) [" + context.obsidianRoomBreakdown() + "]");
+                }
                 break;
             }
             context.playerContext().playerController().windowClick(context.playerContext().player().inventoryMenu.containerId, throwawaySlot < 9 ? throwawaySlot + 36 : throwawaySlot, 0, ClickType.PICKUP, context.playerContext().player());
             context.playerContext().playerController().windowClick(context.playerContext().player().inventoryMenu.containerId, -999, 0, ClickType.PICKUP, context.playerContext().player());
         }
+        context.noteContainerClick();
         context.transitionTo(HighwayState.CollectingObsidian);
         context.resetTimer();
     }

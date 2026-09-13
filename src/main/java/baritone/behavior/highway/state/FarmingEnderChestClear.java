@@ -24,26 +24,39 @@ import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.level.block.AirBlock;
 
 public class FarmingEnderChestClear extends State {
+
+    /** Ticks to let the builder pick up a dispatched clearArea before considering another one. */
+    private static final int BUILDER_SPINUP_TICKS = 5;
+    /** Ticks to wait for the server's reply to the resync click below. This one is a real round trip. */
+    private static final int RESYNC_REPLY_TICKS = 20;
+
+    private int sinceClearDispatch = BUILDER_SPINUP_TICKS;
+    private int sinceResyncRequest = -1;
+
     public FarmingEnderChestClear(HighwayState state) {
         super(state);
     }
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.timer() < 10) {
-            return;
-        }
-
         if (!context.baritone().getBuilderProcess().isPaused() && context.baritone().getBuilderProcess().isActive()) {
+            sinceClearDispatch = BUILDER_SPINUP_TICKS;
             context.resetTimer();
             return; // Wait for build to complete
+        }
+
+        if (sinceClearDispatch < BUILDER_SPINUP_TICKS) {
+            sinceClearDispatch++;
+            return; // a dispatched clearArea takes a couple of ticks to show up as an active builder
         }
 
         context.baritone().getPathingBehavior().cancelEverything();
 
         if (!(context.playerContext().world().getBlockState(context.placeLoc()).getBlock() instanceof AirBlock)) {
             context.setFarmPlaceLocResynced(false); // verify again once this chest is mined
+            sinceResyncRequest = -1;
             context.baritone().getBuilderProcess().clearArea(context.placeLoc(), context.placeLoc());
+            sinceClearDispatch = 0;
             context.resetTimer();
             return;
         }
@@ -59,21 +72,24 @@ public class FarmingEnderChestClear extends State {
                     context.transitionTo(HighwayState.CollectingObsidian);
                     return;
                 }
-                context.playerContext().player().getInventory().selected = pickSlot;
-                context.resetTimer();
-                return; // click next pass, once the held-item change has synced
+                if (pickSlot < 9) {
+                    context.playerContext().player().getInventory().selected = pickSlot;
+                }
+                return;
             }
             context.requestBlockResync(context.placeLoc());
             context.setFarmPlaceLocResynced(true);
-            context.resetTimer();
+            sinceResyncRequest = 0;
             return;
         }
 
-        if (context.timer() < 20) {
+        if (sinceResyncRequest >= 0 && sinceResyncRequest < RESYNC_REPLY_TICKS) {
+            sinceResyncRequest++;
             return; // resync reply still in flight; a restored chest hits the clear branch above
         }
 
         context.setFarmPlaceLocResynced(false);
+        sinceResyncRequest = -1;
         context.resetTimer();
         context.transitionTo(HighwayState.CollectingObsidian);
     }

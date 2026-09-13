@@ -54,6 +54,16 @@ public enum HighwayState {
     CollectingGappleShulker,
     InventoryCleaningGappleShulker,
 
+    TotemShulkerPlaceLocPrep,
+    GoingToPlaceLocTotemShulker,
+    PlacingTotemShulkerSupport,
+    PlacingTotemShulker,
+    OpeningTotemShulker,
+    LootingTotemShulker,
+    MiningTotemShulker,
+    CollectingTotemShulker,
+    InventoryCleaningTotemShulker,
+
     ShulkerCollection,
     InventoryCleaningShulkerCollection,
 
@@ -70,6 +80,7 @@ public enum HighwayState {
     LootingLootEnderChestPicks,
     LootingLootEnderChestEnderChests,
     LootingLootEnderChestGapples,
+    LootingLootEnderChestTotems,
     DepositingLootEnderChestDepletedShulkersFinal,
 
     EchestMiningPlaceLocPrep,

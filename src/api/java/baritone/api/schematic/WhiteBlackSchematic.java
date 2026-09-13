@@ -107,26 +107,49 @@ public class WhiteBlackSchematic extends AbstractSchematic {
     private BlockState getDefaultOrThrowaway() {
         if (UseThrowaway) {
             List<ItemStack> inventory = BaritoneAPI.getProvider().getPrimaryBaritone().getPlayerContext().player().getInventory().items;
-            for (Item item : BaritoneAPI.getSettings().acceptableThrowawayItems.value) {
-                for (int i = 0; i < 9; i++) {
-                    ItemStack stack = inventory.get(i);
-                    if (item instanceof BlockItem && stack.getItem() instanceof BlockItem && ((BlockItem) item).getBlock() == ((BlockItem) stack.getItem()).getBlock()) {
-                        return ((BlockItem) item).getBlock().defaultBlockState();
-                    }
-                }
+            BlockState onHotbar = firstThrowawayIn(inventory, 0, 9);
+            if (onHotbar != null) {
+                return onHotbar;
             }
-            // None in the hotbar; the fallback only kicks in once the whole inventory is out of
-            // throwaway blocks, and stops being used as soon as we pick some up again
-            if (ThrowawayFallback != null && !hasThrowawayInInventory(inventory)) {
+            // Nothing on the hotbar, so the builder will have to pull a stack up from the main
+            // inventory - ask for something we actually carry. The declared default wins whenever we
+            // still have it, otherwise any acceptable throwaway block we're holding: asking for the
+            // default when we own none of it just parks the builder on "missing materials" forever.
+            if (inventoryContains(inventory, DefaultBom.getBlock().asItem())) {
+                return DefaultBom.getAnyBlockState();
+            }
+            BlockState inInventory = firstThrowawayIn(inventory, 9, inventory.size());
+            if (inInventory != null) {
+                return inInventory;
+            }
+            // The fallback only kicks in once the whole inventory is out of throwaway blocks, and
+            // stops being used as soon as we pick some up again
+            if (ThrowawayFallback != null) {
                 return ThrowawayFallback;
             }
         }
         return DefaultBom.getAnyBlockState();
     }
 
-    private static boolean hasThrowawayInInventory(List<ItemStack> inventory) {
+    /** First acceptableThrowawayItems block held in [from, to), in the setting's own priority order. */
+    private static BlockState firstThrowawayIn(List<ItemStack> inventory, int from, int to) {
+        for (Item item : BaritoneAPI.getSettings().acceptableThrowawayItems.value) {
+            if (!(item instanceof BlockItem)) {
+                continue;
+            }
+            for (int i = from; i < to; i++) {
+                ItemStack stack = inventory.get(i);
+                if (stack.getItem() instanceof BlockItem && ((BlockItem) item).getBlock() == ((BlockItem) stack.getItem()).getBlock()) {
+                    return ((BlockItem) item).getBlock().defaultBlockState();
+                }
+            }
+        }
+        return null;
+    }
+
+    private static boolean inventoryContains(List<ItemStack> inventory, Item item) {
         for (ItemStack stack : inventory) {
-            if (BaritoneAPI.getSettings().acceptableThrowawayItems.value.contains(stack.getItem())) {
+            if (stack.getItem() == item) {
                 return true;
             }
         }
