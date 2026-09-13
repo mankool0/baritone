@@ -41,11 +41,22 @@ public class LootingEnderShulker extends State {
             return;
         }
 
-        int target = context.paving()
-                ? context.settings().highwayEnderChestsToLoot.value
-                : Math.min(64, Math.max(context.settings().highwayEnderChestsToHave.value, Math.min(context.settings().highwayEnderChestsThreshold.value, 56)));
+        int target;
+        if (context.paving()) {
+            // Loot no more than the obsidian room can take: a looted stack trades its slot for eight
+            // of obsidian once broken, and the box takes a slot back once mined. Stacks come out
+            // whole, so this can overshoot by part of a stack; the farm stops at the exact count.
+            int keep = context.settings().highwayEnderChestsToKeep.value;
+            int fits = keep + context.enderChestFarmCapacity(keep, -1, context.obsidianOnGroundNearby());
+            target = Math.min(context.settings().highwayEnderChestsToLoot.value, fits);
+        } else {
+            target = Math.min(64, Math.max(context.settings().highwayEnderChestsToHave.value, Math.min(context.settings().highwayEnderChestsThreshold.value, 56)));
+        }
 
         if (context.getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) >= target) {
+            if (context.paving() && target < context.settings().highwayEnderChestsToLoot.value) {
+                Helper.HELPER.logDirect("Looting stopped at " + context.getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) + " ender chests, the inventory only has room for the obsidian of " + Math.max(0, target - context.settings().highwayEnderChestsToKeep.value));
+            }
             context.transitionTo(HighwayState.MiningEnderShulker);
             context.playerContext().player().closeContainer();
             return;

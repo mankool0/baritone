@@ -69,6 +69,7 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 import java.awt.*;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -356,6 +357,17 @@ public class HighwayContext {
         lastContainerClickTick = contextTick;
     }
 
+    private long lastObsidianStuckLogTick = Long.MIN_VALUE / 2;
+
+    /** Rate limit for the "obsidian doesn't fit" log: states are re-created on every transition, so the throttle lives here. */
+    public boolean obsidianStuckLogDue() {
+        if (contextTick - lastObsidianStuckLogTick < 200) {
+            return false;
+        }
+        lastObsidianStuckLogTick = contextTick;
+        return true;
+    }
+
     private void tickContainerSync() {
         contextTick++;
         if (!inventorySynced) {
@@ -516,6 +528,20 @@ public class HighwayContext {
     }
 
     private Item instantMineOriginalOffhandItem;
+
+    /**
+     * Loose ender chest count the running farm session stops at: the configured keep, or more when
+     * the obsidian would not fit (see enderChestFarmKeep). Set on farm entry; never below the setting.
+     */
+    public int farmEnderChestsToKeep() {
+        return Math.max(settings.highwayEnderChestsToKeep.value, farmEnderChestsToKeep);
+    }
+
+    public void setFarmEnderChestsToKeep(int farmEnderChestsToKeep) {
+        this.farmEnderChestsToKeep = farmEnderChestsToKeep;
+    }
+
+    private int farmEnderChestsToKeep = -1;
 
     public void setBoatLocation(BlockPos boatLocation) {
         this.boatLocation = boatLocation;
@@ -2361,6 +2387,211 @@ public class HighwayContext {
         }
 
         return count;
+    }
+
+    private int farmObsidianStart = 0;
+    private int farmChestsStart = 0;
+
+    private int obsidianCountAll() {
+        int count = getItemCountInventory(Item.getId(Blocks.OBSIDIAN.asItem()));
+        ItemStack offhand = playerContext.player().getOffhandItem();
+        if (offhand.is(Blocks.OBSIDIAN.asItem())) {
+            count += offhand.getCount();
+        }
+        return count;
+    }
+
+    private int enderChestCountAll() {
+        int count = getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem()));
+        ItemStack offhand = playerContext.player().getOffhandItem();
+        if (offhand.is(Blocks.ENDER_CHEST.asItem())) {
+            count += offhand.getCount();
+        }
+        return count;
+    }
+
+    public void beginFarmAccounting() {
+        farmObsidianStart = obsidianCountAll();
+        farmChestsStart = enderChestCountAll();
+    }
+
+    /**
+     * Obsidian this farm session has produced that is neither in the
+     * inventory nor visible on the ground yet
+     */
+    public int farmObsidianInFlight(int ground) {
+        int picked = obsidianCountAll() - farmObsidianStart;
+        int consumed = farmChestsStart - enderChestCountAll();
+        return Math.max(0, 8 * consumed - picked - ground);
+    }
+
+    /**
+     * Obsidian the inventory can still take once this farm session ends,
+     * minus what is already dropped or in flight, if one more chest gets broken
+     */
+    public int farmRoomAfterOneMore() {
+        int ground = obsidianOnGroundNearby();
+        int remaining = getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) + playerContext.player().getOffhandItem().getCount() - 1;
+        Item origItem = instantMineOriginalOffhandItem();
+        boolean origInInventory = origItem != null && origItem != Items.AIR && getItemSlot(Item.getId(origItem)) != -1
+                && playerContext.player().getOffhandItem().is(Blocks.ENDER_CHEST.asItem());
+        int freed = enderChestSlotsInventory() + (origInInventory ? 1 : 0) - enderChestSlotsAfterFarming(Math.max(0, remaining), 0);
+        return obsidianRoomInventory(freed) - ground - farmObsidianInFlight(ground) - 8;
+    }
+
+    public int obsidianOnGroundNearby() {
+        int count = 0;
+        for (Entity entity : playerContext.entities()) {
+            if (!(entity instanceof ItemEntity)) {
+                continue;
+            }
+            ItemStack stack = ((ItemEntity) entity).getItem();
+            if (!stack.is(Blocks.OBSIDIAN.asItem()) && !stack.is(Blocks.CRYING_OBSIDIAN.asItem())) {
+                continue;
+            }
+            if (VecUtils.distanceToCenter(playerContext.playerFeet(), (int) entity.getX(), (int) entity.getY(), (int) entity.getZ()) <= settings.highwayObsidianMaxSearchDist.value) {
+                count += stack.getCount();
+            }
+        }
+        return count;
+    }
+
+    /** Obsidian the inventory can still take */
+    public int obsidianRoomInventory(int slotsFreedLater) {
+        int room = 0;
+        int slots = slotsFreedLater;
+        for (int i = 0; i < 36; i++) {
+            ItemStack stack = playerContext.player().getInventory().items.get(i);
+            if (stack.isEmpty()) {
+                slots++;
+            } else if (stack.is(Blocks.OBSIDIAN.asItem())) {
+                room += stack.getMaxStackSize() - stack.getCount();
+            } else if (i != 8 && !stack.is(Blocks.CRYING_OBSIDIAN.asItem()) && settings.acceptableThrowawayItems.value.contains(stack.getItem())) {
+                slots++;
+            }
+        }
+        // A negative slot count means the kept chests or the returning box need slots that don't
+        // exist; partial-stack room can't paper over that.
+        return Math.max(0, room + 64 * slots);
+    }
+
+    /** Slot breakdown behind the obsidian room figures, for the farm-entry and stuck-collection logs. */
+    public String obsidianRoomBreakdown() {
+        int empty = 0, throwaway = 0, partial = 0, chestSlots = 0, obsidianSlots = 0;
+        for (int i = 0; i < 36; i++) {
+            ItemStack stack = playerContext.player().getInventory().items.get(i);
+            if (stack.isEmpty()) {
+                empty++;
+            } else if (stack.is(Blocks.OBSIDIAN.asItem())) {
+                obsidianSlots++;
+                partial += stack.getMaxStackSize() - stack.getCount();
+            } else if (stack.is(Blocks.ENDER_CHEST.asItem())) {
+                chestSlots++;
+            } else if (i != 8 && !stack.is(Blocks.CRYING_OBSIDIAN.asItem()) && settings.acceptableThrowawayItems.value.contains(stack.getItem())) {
+                throwaway++;
+            }
+        }
+        return "empty=" + empty + " throwaway=" + throwaway + " obsidianSlots=" + obsidianSlots + " partialRoom=" + partial
+                + " chestSlots=" + chestSlots + " chests=" + getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem()))
+                + " offhand=" + playerContext.player().getOffhandItem().getCount() + "x" + playerContext.player().getOffhandItem().getItem()
+                + " ground=" + obsidianOnGroundNearby() + " slot8=" + playerContext.player().getInventory().items.get(8).getItem();
+    }
+
+    public int enderChestSlotsInventory() {
+        int slots = 0;
+        for (int i = 0; i < 36; i++) {
+            if (playerContext.player().getInventory().items.get(i).is(Blocks.ENDER_CHEST.asItem())) {
+                slots++;
+            }
+        }
+        return slots;
+    }
+
+    /**
+     * Slots the loose chests still hold once a farm has left {@code keep} of them,
+     * from the stacks actually carried
+     */
+    public int enderChestSlotsAfterFarming(int keep, int hypotheticalStack) {
+        List<Integer> stacks = new ArrayList<>();
+        for (int i = 0; i < 36; i++) {
+            ItemStack stack = playerContext.player().getInventory().items.get(i);
+            if (stack.is(Blocks.ENDER_CHEST.asItem())) {
+                stacks.add(stack.getCount());
+            }
+        }
+        if (hypotheticalStack > 0) {
+            stacks.add(hypotheticalStack);
+        }
+        stacks.sort(Collections.reverseOrder());
+        ItemStack offhand = playerContext.player().getOffhandItem();
+        if (offhand.is(Blocks.ENDER_CHEST.asItem())) {
+            stacks.add(0, offhand.getCount());
+        }
+        int total = 0;
+        for (int c : stacks) {
+            total += c;
+        }
+        int toFarm = total - keep;
+        int remainder = 0;
+        int i = 0;
+        while (i < stacks.size() && toFarm > 0) {
+            int c = stacks.get(i++);
+            if (toFarm >= c) {
+                toFarm -= c;
+            } else {
+                remainder = c - toFarm;
+                toFarm = 0;
+            }
+        }
+        int untouched = 0;
+        int roomInUntouched = 0;
+        for (; i < stacks.size(); i++) {
+            untouched++;
+            roomInUntouched += 64 - stacks.get(i);
+        }
+        return untouched + (Math.max(0, remainder - roomInUntouched) + 63) / 64;
+    }
+
+    /**
+     * Ender chests that can be broken before their obsidian (8 each) outgrows the inventory,
+     * with {@code keep} loose chests staying behind.
+     */
+    public int enderChestFarmCapacity(int keep, int extraSlotsFreed, int obsidianOnGround, int hypotheticalStack) {
+        int slots = enderChestSlotsInventory() + (hypotheticalStack > 0 ? 1 : 0);
+        int freed = slots - enderChestSlotsAfterFarming(keep, hypotheticalStack) + extraSlotsFreed;
+        return Math.max(0, obsidianRoomInventory(freed) - obsidianOnGround) / 8;
+    }
+
+    public int enderChestFarmCapacity(int keep, int extraSlotsFreed, int obsidianOnGround) {
+        return enderChestFarmCapacity(keep, extraSlotsFreed, obsidianOnGround, 0);
+    }
+
+    public int enderChestFarmKeep(int total, int extraSlotsFreed, int obsidianOnGround) {
+        return enderChestFarmKeep(total, extraSlotsFreed, obsidianOnGround, 0);
+    }
+
+    public int enderChestFarmKeep(int total, int extraSlotsFreed, int obsidianOnGround, int hypotheticalStack) {
+        int keep = settings.highwayEnderChestsToKeep.value;
+        for (int i = 0; i < 64; i++) {
+            int needed = Math.max(settings.highwayEnderChestsToKeep.value, total - enderChestFarmCapacity(keep, extraSlotsFreed, obsidianOnGround, hypotheticalStack));
+            if (needed <= keep) {
+                break;
+            }
+            keep = needed;
+        }
+        return keep;
+    }
+
+    public boolean enderChestFarmCanProgress() {
+        int ground = obsidianOnGroundNearby();
+        int chests = getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem()));
+        if (chests - enderChestFarmKeep(chests, 0, ground) > 0) {
+            return true; // what we carry already farms
+        }
+        // Otherwise the cycle loots a stack first. It lands in a free slot (or merges into a partial),
+        // so the live slot counts already describe the inventory after that loot; only the total
+        // changes. Fewer loose chests than the keep setting is the common way to get here.
+        return (chests + 64) - enderChestFarmKeep(chests + 64, 0, ground, 64) > 0;
     }
 
     public int getPickCountInventory() {

@@ -17,6 +17,7 @@
 
 package baritone.behavior.highway.state;
 
+import baritone.api.utils.Helper;
 import baritone.api.utils.Rotation;
 import baritone.api.utils.RotationUtils;
 import baritone.behavior.highway.HighwayContext;
@@ -90,8 +91,17 @@ public class FarmingEnderChest extends State {
 
         // placeLoc is clear (or gets cleared by this tick's break): decide whether to keep farming.
         Item origItem = context.playerContext().player().getOffhandItem().getItem();
-        boolean outOfChests = (context.getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) + context.playerContext().player().getOffhandItem().getCount()) <= context.settings().highwayEnderChestsToKeep.value;
+        boolean outOfChests = (context.getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) + context.playerContext().player().getOffhandItem().getCount()) <= context.farmEnderChestsToKeep();
         boolean needsEchest = !(origItem instanceof BlockItem) || !(((BlockItem) origItem).getBlock().equals(Blocks.ENDER_CHEST));
+        // The keep is a forecast; the measured room is the truth. Stop when one more chest's obsidian
+        // would not fit, whatever the chest count says.
+        if (!outOfChests && !needsEchest) {
+            int roomLeft = context.farmRoomAfterOneMore();
+            if (roomLeft < 0) {
+                Helper.HELPER.logDirect("Stopping the farm: the next chest's obsidian wouldn't fit (short by " + (-roomLeft) + ") [" + context.obsidianRoomBreakdown() + "]");
+                outOfChests = true;
+            }
+        }
 
         if (outOfChests || needsEchest) {
             if (chestVisible) {

@@ -17,6 +17,7 @@
 
 package baritone.behavior.highway.state;
 
+import baritone.api.utils.Helper;
 import baritone.api.utils.Rotation;
 import baritone.api.utils.VecUtils;
 import baritone.behavior.highway.HighwayContext;
@@ -50,6 +51,9 @@ public class InventoryCleaningObsidian extends State {
         for (int i = 0; i < stacksToThrow; i++) {
             int throwawaySlot = context.getThrowawaySlotToToss();
             if (throwawaySlot == -1) {
+                if (context.obsidianStuckLogDue()) {
+                    Helper.HELPER.logDirect("Obsidian on the ground doesn't fit and nothing is left to throw out: need " + stacksToThrow + " more slot(s) [" + context.obsidianRoomBreakdown() + "]");
+                }
                 break;
             }
             context.playerContext().playerController().windowClick(context.playerContext().player().inventoryMenu.containerId, throwawaySlot < 9 ? throwawaySlot + 36 : throwawaySlot, 0, ClickType.PICKUP, context.playerContext().player());

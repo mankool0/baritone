@@ -88,6 +88,12 @@ public class BuildingHighway extends State {
 
         // TODO: Change shulker threshold from 0 to a customizable value
         if (getObsidianCountInventory(context) <= context.settings().highwayObsidianThreshold.value && context.paving()) {
+            // A farm with nowhere to put its drops would cycle the box forever: place, loot nothing, mine, repeat.
+            if (!context.enderChestFarmCanProgress()) {
+                context.baritone().getPathingBehavior().cancelEverything();
+                context.pause("Obsidian is under the threshold but the inventory has no room for more, clear some slots and restart.");
+                return;
+            }
             if (context.getShulkerCountInventory(ShulkerType.EnderChest) == 0) {
                 if (!context.thresholdConfirmed("Ender chest shulker count")) {
                     return;
