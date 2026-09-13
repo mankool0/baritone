@@ -1511,7 +1511,7 @@ public class HighwayContext {
         stateDwell.entrySet().stream()
                 .sorted((a, b) -> Integer.compare(b.getValue()[0], a.getValue()[0]))
                 .limit(limit)
-                .forEach(e -> out.add(String.format("  %-38s %6d ticks (%5.1fs, %4.1f%%) over %d visit(s), avg %.1ft",
+                .forEach(e -> out.add(String.format("  %s - %d ticks (%.1fs, %.1f%%) over %d visit(s), avg %.1ft",
                         e.getKey(), e.getValue()[0], e.getValue()[0] / 20.0,
                         100.0 * e.getValue()[0] / dwellTotalTicks, e.getValue()[1],
                         (double) e.getValue()[0] / e.getValue()[1])));
