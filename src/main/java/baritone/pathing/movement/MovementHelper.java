@@ -603,7 +603,10 @@ public interface MovementHelper extends ActionCosts, Helper {
         // can we look at the center of a side face of this block and likely be able to place?
         // (thats how this check is used)
         // therefore dont include weird things that we technically could place against (like carpet) but practically can't
-        return isBlockNormalCube(state) || state.getBlock() == Blocks.GLASS || state.getBlock() instanceof StainedGlassBlock;
+        // soul sand is only 14/16 tall in its collision shape so isBlockNormalCube says no, but the shape the
+        // crosshair ray traces against is a full cube, so all six of its faces place against normally, and
+        // canWalkOn makes the same exception for it
+        return isBlockNormalCube(state) || state.getBlock() == Blocks.SOUL_SAND || state.getBlock() == Blocks.GLASS || state.getBlock() instanceof StainedGlassBlock;
     }
 
     static double getMiningDurationTicks(CalculationContext context, int x, int y, int z, boolean includeFalling) {
