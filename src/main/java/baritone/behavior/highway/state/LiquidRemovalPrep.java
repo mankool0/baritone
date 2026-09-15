@@ -35,10 +35,12 @@ public class LiquidRemovalPrep extends State {
     @Override
     public void handle(HighwayContext context) {
         Vec3 direction = new Vec3(context.highwayDirection().getX(), context.highwayDirection().getY(), context.highwayDirection().getZ());
-        Vec3 curPos = new Vec3(context.playerContext().playerFeet().getX() + (7 * -context.highwayDirection().getX()), context.playerContext().playerFeet().getY(),  context.playerContext().playerFeet().getZ() + (7 * -context.highwayDirection().getZ())); // Go back a bit to clear up our mess
-        BlockPos startCheckPos = context.getClosestPoint(new Vec3(context.liqOriginVector().x, context.liqOriginVector().y, context.liqOriginVector().z), direction, curPos, LocationType.ShulkerEchestInteraction);
+        Vec3 feetPos = new Vec3(context.playerContext().playerFeet().getX(), context.playerContext().playerFeet().getY(), context.playerContext().playerFeet().getZ());
+        // Start a bit behind us to clear up our own mess, and scan far enough forward to always
+        // re-find whatever the detection scan flagged - both counted in slices
+        BlockPos startCheckPos = context.sliceAlongLine(context.liqOriginVector(), feetPos, -HighwayContext.LIQUID_SCAN_BACK_SLICES, LocationType.ShulkerEchestInteraction);
 
-        BlockPos liquidPos = context.findFirstLiquidGround(startCheckPos, 18, false);
+        BlockPos liquidPos = context.findFirstLiquidGround(startCheckPos, context.liquidScanWindowSlices(), false);
 
         if (liquidPos == null) {
             Helper.HELPER.logDebug("findFirstLiquidGround Failed. Going back to state Nothing");
@@ -69,15 +71,22 @@ public class LiquidRemovalPrep extends State {
         //    return;
         //}
 
-        if (context.firstStartingPos() != null &&
-                ((context.highwayDirection().getZ() == -1 && liquidPos.getZ() > context.playerContext().playerFeet().getZ()) || // NW, N, NE
-                        (context.highwayDirection().getZ() == 1 && liquidPos.getZ() < context.playerContext().playerFeet().getZ()) || // SE, S, SW
-                        (context.highwayDirection().getX() == -1 && context.highwayDirection().getZ() == 0 && liquidPos.getX() > context.playerContext().playerFeet().getX()) || // W
-                        (context.highwayDirection().getX() == 1 && context.highwayDirection().getZ() == 0 && liquidPos.getX() < context.playerContext().playerFeet().getX()))) { // E
-            curPos = new Vec3(context.playerContext().playerFeet().getX() + (7 * context.highwayDirection().getX()), context.playerContext().playerFeet().getY(), context.playerContext().playerFeet().getZ() + (7 * context.highwayDirection().getZ()));
+        // Retreat away from the lava: back down the highway normally, forward when the lava is the
+        // stuff we already walked past. Both positions go onto the liquid line first and the
+        // comparison counts slices: a raw axis compare reads the far side of the cross-section as
+        // behind us on a diagonal, and on an angled pattern - whose minor axis crawls a third of a
+        // block per slice - it does that to lava a dozen slices ahead, sending us into it.
+        int retreatSlices = -HighwayContext.LIQUID_SCAN_BACK_SLICES;
+        if (context.firstStartingPos() != null) {
+            BlockPos feetOnLiqLine = context.getClosestPoint(context.liqOriginVector(), direction, feetPos, LocationType.ShulkerEchestInteraction);
+            BlockPos liquidOnLiqLine = context.getClosestPoint(context.liqOriginVector(), direction,
+                    new Vec3(liquidPos.getX(), liquidPos.getY(), liquidPos.getZ()), LocationType.ShulkerEchestInteraction);
+            if (context.stepsAlongHighway(feetOnLiqLine, liquidOnLiqLine) < 0) {
+                retreatSlices = HighwayContext.LIQUID_SCAN_BACK_SLICES;
+            }
         }
 
-        context.setPlaceLoc(context.liftOntoPavement(context.getClosestPoint(new Vec3(context.backPathOriginVector().x, context.backPathOriginVector().y, context.backPathOriginVector().z), new Vec3(context.highwayDirection().getX(), context.highwayDirection().getY(), context.highwayDirection().getZ()), curPos, LocationType.ShulkerEchestInteraction)));
+        context.setPlaceLoc(context.liftOntoPavement(context.sliceAlongLine(context.backPathOriginVector(), feetPos, retreatSlices, LocationType.ShulkerEchestInteraction)));
         // Get the closest point
         if (!context.sourceBlocks().isEmpty()) {
             context.baritone().getPathingBehavior().cancelEverything();

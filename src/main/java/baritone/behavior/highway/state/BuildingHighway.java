@@ -245,9 +245,10 @@ public class BuildingHighway extends State {
             Vec3 direction = new Vec3(context.highwayDirection().getX(), context.highwayDirection().getY(), context.highwayDirection().getZ());
 
             Vec3 curPosNotOffset = new Vec3(context.playerContext().playerFeet().getX(), context.playerContext().playerFeet().getY(), context.playerContext().playerFeet().getZ());
-            Vec3 curPos = new Vec3(curPosNotOffset.x + (context.highwayCheckBackDistance() * -context.highwayDirection().getX()), curPosNotOffset.y, curPosNotOffset.z + (context.highwayCheckBackDistance() * -context.highwayDirection().getZ()));
-            BlockPos startCheckPos = context.getClosestPoint(new Vec3(context.originVector().x, context.originVector().y, context.originVector().z), direction, curPos, LocationType.HighwayBuild);
-            BlockPos startCheckPosLiq = context.getClosestPoint(new Vec3(context.liqOriginVector().x, context.liqOriginVector().y, context.liqOriginVector().z), direction, curPos, LocationType.ShulkerEchestInteraction);
+            // Back up the scan in slices, not in world blocks: the scan length below is a slice
+            // count, and on an angled pattern a block of the minor axis is several slices
+            BlockPos startCheckPos = context.sliceAlongLine(context.originVector(), curPosNotOffset, -context.highwayCheckBackDistance(), LocationType.HighwayBuild);
+            BlockPos startCheckPosLiq = context.sliceAlongLine(context.liqOriginVector(), curPosNotOffset, -context.highwayCheckBackDistance(), LocationType.ShulkerEchestInteraction);
 
             // Slice count from the scan start to the player's projected position; both points
             // are anchors on the highway path, so this is exact for straight, diagonal and
@@ -257,15 +258,10 @@ public class BuildingHighway extends State {
 
             int tempCheckBackDist = Math.min(context.highwayCheckBackDistance(), distToWantedStart);
 
-            HighwayBlockState curState;
-            if (context.baritone().getBuilderProcess().isPaused()) {
-                curState = context.isHighwayCorrect(startCheckPos, startCheckPosLiq, tempCheckBackDist + 8, context.settings().highwayRenderLiquidScanArea.value); // Also checking a few blocks in front of us
-            } else {
-                // Through-wall filling must detect sealed pockets before their cover comes into
-                // break reach, so scan a few blocks farther ahead
-                int scanAhead = context.liquidThroughWalls() ? 8 : 5;
-                curState = context.isHighwayCorrect(startCheckPos, startCheckPosLiq, tempCheckBackDist + scanAhead, context.settings().highwayRenderLiquidScanArea.value);
-            }
+            // Also check a few blocks in front of us, farther when through-wall filling is on: it
+            // must detect sealed pockets before their cover comes into break reach
+            int scanAhead = context.scanAheadSlices(context.baritone().getBuilderProcess().isPaused());
+            HighwayBlockState curState = context.isHighwayCorrect(startCheckPos, startCheckPosLiq, tempCheckBackDist + scanAhead, context.settings().highwayRenderLiquidScanArea.value);
             if (curState == HighwayBlockState.Liquids) {
                 Helper.HELPER.logDirect("Removing liquids.");
                 context.transitionTo(HighwayState.LiquidRemovalPrep);

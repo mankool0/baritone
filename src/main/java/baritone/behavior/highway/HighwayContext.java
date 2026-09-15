@@ -3814,6 +3814,17 @@ public class HighwayContext {
                 + highwayDirection.getZ() * highwayDirection.getZ());
     }
 
+    /**
+     * Slice count covering at least {@code blocks} blocks of travel along the highway. Never fewer
+     * slices than blocks: a diagonal slice is sqrt(2) blocks long, and converting the scans that
+     * were written as slice counts down to the same distance in blocks would shorten lookahead the
+     * classic builds have always had. An angled pattern's slices are shorter than a block, so there
+     * this hands back more slices than the block count, which is the whole point.
+     */
+    public int slicesForBlocks(double blocks) {
+        return (int) Math.max(Math.ceil(blocks), Math.ceil(blocks / stepLength()));
+    }
+
     /** World offset from the slice at {@code t0} to the one {@code steps} further up the highway. */
     private Vec3i sliceOffset(int t0, int steps) {
         return pattern.isCustom()
@@ -4170,9 +4181,9 @@ public class HighwayContext {
         // feetClosest is clamped to the end: even if we wandered past the end the scan still covers
         // the final checkBackDistance slices instead of degenerating
         BetterBlockPos feetClosest = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z), direction, curPosPlayer, LocationType.HighwayBuild);
-        Vec3 curPosBack = new Vec3(feetClosest.getX() + (highwayCheckBackDistance * -highwayDirection.getX()), feetClosest.getY(), feetClosest.getZ() + (highwayCheckBackDistance * -highwayDirection.getZ()));
-        BlockPos startCheckPos = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z), direction, curPosBack, LocationType.HighwayBuild);
-        BlockPos startCheckPosLiq = getClosestPoint(new Vec3(liqOriginVector.x, liqOriginVector.y, liqOriginVector.z), direction, curPosBack, LocationType.ShulkerEchestInteraction);
+        Vec3 feetClosestVec = new Vec3(feetClosest.getX(), feetClosest.getY(), feetClosest.getZ());
+        BlockPos startCheckPos = sliceAlongLine(originVector, feetClosestVec, -highwayCheckBackDistance, LocationType.HighwayBuild);
+        BlockPos startCheckPosLiq = sliceAlongLine(liqOriginVector, feetClosestVec, -highwayCheckBackDistance, LocationType.ShulkerEchestInteraction);
         int scanDist = stepsAlongHighway(startCheckPos, endPos) + 1;
         if (!isStretchLoaded(startCheckPos, originVector, schematic.widthX(), schematic.lengthZ(), scanDist)
                 || !isStretchLoaded(startCheckPosLiq, liqOriginVector, liqCheckSchem.widthX(), liqCheckSchem.lengthZ(), scanDist)) {
@@ -4506,6 +4517,56 @@ public class HighwayContext {
         }
     }
 
+
+    /** Blocks ahead of the bot the correctness scan looks, so lava is found before we dig into it. */
+    private static final int SCAN_AHEAD_BLOCKS = 5;
+    /** Through-wall filling has to spot a sealed pocket before its cover comes into break reach. */
+    private static final int SCAN_AHEAD_BLOCKS_THROUGH_WALLS = 8;
+    /** Slices behind the bot {@code LiquidRemovalPrep} re-scans from, to catch what flowed in behind us. */
+    public static final int LIQUID_SCAN_BACK_SLICES = 7;
+    /**
+     * Slack on top of the detection scan's reach for the removal's own re-scan. The two scans
+     * project from different points and can land a slice apart at a jog, and the bot keeps moving
+     * between the tick that flags the lava and the tick that goes looking for it again. Too little
+     * and the re-scan comes up empty and bounces straight back to Nothing.
+     */
+    private static final int LIQUID_SCAN_MARGIN_SLICES = 3;
+
+    /** Slices ahead of the scan's own start that {@code BuildingHighway} looks for lava and mistakes. */
+    public int scanAheadSlices(boolean builderPaused) {
+        return slicesForBlocks(builderPaused || liquidThroughWalls()
+                ? SCAN_AHEAD_BLOCKS_THROUGH_WALLS : SCAN_AHEAD_BLOCKS);
+    }
+
+    /**
+     * Window for the removal's re-scan: wide enough to always re-find whatever the detection scan
+     * flagged, from {@value #LIQUID_SCAN_BACK_SLICES} slices further back than the bot stands.
+     */
+    public int liquidScanWindowSlices() {
+        return LIQUID_SCAN_BACK_SLICES + scanAheadSlices(true) + LIQUID_SCAN_MARGIN_SLICES;
+    }
+
+    /**
+     * The anchor {@code slices} slices up the highway - negative walks back down it - from
+     * {@code point} projected onto the parallel line at {@code lineOrigin}.
+     *
+     * <p>Callers used to offset {@code point} by the direction vector in world blocks and let
+     * {@link #getClosestPoint} re-project it. A straight or 45-degree highway travels one block on
+     * every axis it uses per slice, so that landed exactly {@code slices} slices away; an angled
+     * pattern advances its minor axis a fraction of a block per slice, so subtracting the same
+     * count from both axes overshoots by the period-to-major ratio - 32 blocks back is 46 slices
+     * back on XXZXXZXXXZ. Scan lengths are counted in slices, so that overshoot came straight off
+     * the far end: the correctness and liquid scans finished several slices behind the bot instead
+     * of looking ahead of it, and lava in front was never seen at all.
+     */
+    public BetterBlockPos sliceAlongLine(Vec3 lineOrigin, Vec3 point, int slices, LocationType locType) {
+        Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
+        BetterBlockPos on = getClosestPoint(lineOrigin, direction, point, locType);
+        Vec3i step = sliceOffset(pattern.isCustom() ? sliceIndexOf(on, lineOrigin) : 0, slices);
+        // back through the projection for the start and end clamps
+        return getClosestPoint(lineOrigin, direction,
+                new Vec3(on.getX() + step.getX(), on.getY(), on.getZ() + step.getZ()), locType);
+    }
 
     public HighwayBlockState isHighwayCorrect(BlockPos startPos, BlockPos startPosLiq, int distanceToCheck, boolean renderLiquidScan) {
         // startPos needs to be in center of highway
