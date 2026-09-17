@@ -38,6 +38,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 public class LiquidRemovalPathing extends State {
@@ -47,7 +48,13 @@ public class LiquidRemovalPathing extends State {
     private static final int FILL_NONE = -1;
     private static final int FILL_PENDING = -2;
 
+    /** Ticks of neither moving, placing nor starting on a new block before we call the approach stuck. */
+    private static final int STALL_TICKS = 300;
+
     private int aimWaitTicks = 0;
+    private BetterBlockPos stallAnchor = null;
+    private BlockPos breakTarget = null;
+    private int stallTicks = 0;
 
     public LiquidRemovalPathing(HighwayState state) {
         super(state);
@@ -112,20 +119,57 @@ public class LiquidRemovalPathing extends State {
             return;
         }
 
+        // Nothing else in this state times out: an approach that cannot make progress - pinned by a
+        // block we refuse to mine, or a fill the server keeps refusing - used to hold W against it
+        // until the fire resistance ran out minutes later. Standing in the same block without
+        // placing anything is the signature of that, so treat it as stuck and re-plan.
+        BetterBlockPos feet = context.playerContext().playerFeet();
+        if (!feet.equals(stallAnchor)) {
+            stallAnchor = feet;
+            stallTicks = 0;
+        } else if (++stallTicks > STALL_TICKS) {
+            stallTicks = 0;
+            logStallDiagnostics(context, throughWalls);
+            context.baritone().getInputOverrideHandler().clearAllKeys();
+            if (throughWalls) {
+                // Through-wall filling is what forbids mining the cover in front of us, so drop it
+                // for the rest of this removal and dig in with line of sight like the classic flow
+                Helper.HELPER.logDirect("Stuck approaching the liquid. Finishing this removal with line-of-sight placing.");
+                context.suppressThroughWalls();
+                context.transitionTo(HighwayState.LiquidRemovalPrep);
+                context.resetTimer();
+            } else {
+                Helper.HELPER.logDirect("Stuck approaching the liquid. Restarting liquid clearing.");
+                context.baritone().getPathingBehavior().cancelEverything();
+                context.transitionTo(HighwayState.Nothing);
+            }
+            return;
+        }
+
+        // Everything directional - the support-block test, the source we walk at, which source we
+        // fill first - runs off the nearest one we haven't filled yet. The list comes out of a DFS
+        // flood fill, so its head can sit on the far side of the lake; walking at that marched us
+        // past lava within arm's reach and, now that the approach can dig, would tunnel us there.
+        BlockPos approachTarget = nearestUnfilled(context);
+        if (approachTarget == null) {
+            context.transitionTo(HighwayState.LiquidRemovalPrep); // all filled, let Prep re-scan
+            context.resetTimer();
+            return;
+        }
+
         boolean supportNeeded = false;
-        BlockPos firstSourceBlock = context.sourceBlocks().getFirst();
-        if (context.getIssueType(firstSourceBlock.north()) != HighwayBlockState.Blocks &&
-                context.getIssueType(firstSourceBlock.east()) != HighwayBlockState.Blocks &&
-                context.getIssueType(firstSourceBlock.south()) != HighwayBlockState.Blocks &&
-                context.getIssueType(firstSourceBlock.west()) != HighwayBlockState.Blocks &&
-                context.getIssueType(firstSourceBlock.below()) != HighwayBlockState.Blocks &&
-                context.getIssueType(firstSourceBlock.above()) != HighwayBlockState.Blocks) {
+        if (context.getIssueType(approachTarget.north()) != HighwayBlockState.Blocks &&
+                context.getIssueType(approachTarget.east()) != HighwayBlockState.Blocks &&
+                context.getIssueType(approachTarget.south()) != HighwayBlockState.Blocks &&
+                context.getIssueType(approachTarget.west()) != HighwayBlockState.Blocks &&
+                context.getIssueType(approachTarget.below()) != HighwayBlockState.Blocks &&
+                context.getIssueType(approachTarget.above()) != HighwayBlockState.Blocks) {
             BlockPos playerPos = context.playerContext().playerFeet();
 
             // Calculate direction from player to lava for non-blocking checks
-            int dx = firstSourceBlock.getX() - playerPos.getX();
-            int dz = firstSourceBlock.getZ() - playerPos.getZ();
-            BlockPos supportPos = findSupportBlockRecursive(context, firstSourceBlock, playerPos, dx, dz, 0, 5);
+            int dx = approachTarget.getX() - playerPos.getX();
+            int dz = approachTarget.getZ() - playerPos.getZ();
+            BlockPos supportPos = findSupportBlockRecursive(context, approachTarget, playerPos, dx, dz, 0, 5);
             
             if (supportPos != null) {
                 // Clear source blocks and add the support position to place
@@ -150,25 +194,23 @@ public class LiquidRemovalPathing extends State {
         }
         boolean aimPaused = aimWaitTicks > AIM_WAIT_MAX;
 
-        BlockPos fillTarget = context.sourceBlocks().getFirst();
-        boolean fillReachable;
+        BlockPos fillTarget;
         if (throughWalls) {
-            // No line of sight needed, so fill whichever source is already within reach while
-            // the movement below keeps closing in on the rest
-            fillReachable = false;
-            for (BlockPos source : context.sourceBlocks()) {
-                if (context.getIssueType(source) == HighwayBlockState.Blocks) {
-                    continue; // already filled
-                }
-                if (context.placeThroughWallsAimable(source, (float) context.playerContext().playerController().getBlockReachDistance())) {
-                    fillTarget = source;
-                    fillReachable = true;
-                    break;
-                }
+            // No line of sight needed, so fill whichever target is already within reach while the
+            // movement below keeps closing in on the rest. Sources first - filling one removes lava
+            // for good - then the liquid that is in the way of the approach itself, which is how a
+            // dig toward the lava gets to happen without ever opening a lava block.
+            fillTarget = nearestReachableFill(context, context.sourceBlocks());
+            if (fillTarget == null) {
+                fillTarget = nearestReachableFill(context, sealTargets(context));
             }
         } else {
-            fillReachable = context.placeAimable(fillTarget, (float) context.playerContext().playerController().getBlockReachDistance());
+            fillTarget = context.sourceBlocks().getFirst();
+            if (!context.placeAimable(fillTarget, (float) context.playerContext().playerController().getBlockReachDistance())) {
+                fillTarget = null;
+            }
         }
+        boolean fillReachable = fillTarget != null;
         if (fillReachable && supportNeeded) {
             context.setLiquidPathingCanMine(false);
         }
@@ -193,6 +235,7 @@ public class LiquidRemovalPathing extends State {
                     context.noteThroughWallPlace(fillTarget);
                 }
                 aimWaitTicks = 0;
+                stallTicks = 0;
                 context.resetTimer();
             } else {
                 aimWaitTicks++;
@@ -209,7 +252,7 @@ public class LiquidRemovalPathing extends State {
                 context.playerContext().player().getInventory().selected = pickSlot;
             }
 
-            Rotation lavaRot = RotationUtils.calcRotationFromVec3d(context.playerContext().playerHead(), new Vec3(context.sourceBlocks().getFirst().getX(), context.sourceBlocks().getFirst().getY(), context.sourceBlocks().getFirst().getZ()), context.playerContext().playerRotations());
+            Rotation lavaRot = RotationUtils.calcRotationFromVec3d(context.playerContext().playerHead(), new Vec3(approachTarget.getX(), approachTarget.getY(), approachTarget.getZ()), context.playerContext().playerRotations());
             //RayTraceResult res = RayTraceUtils.rayTraceTowards(ctx.player(), lavaRot, ctx.playerController().getBlockReachDistance(), false);
 
             ArrayList<BlockPos> possibleIssuePosList = new ArrayList<>();
@@ -220,7 +263,7 @@ public class LiquidRemovalPathing extends State {
                         // Never open unfilled lava when filling through walls: the block stays
                         // as cover until the lava behind it is placed over, which frees it up
                         // for mining on a later pass
-                        if (throughWalls && hasLiquidNeighbor(context, tempLoc.above(i))) {
+                        if (throughWalls && mustStayAsCover(context, tempLoc.above(i))) {
                             continue;
                         }
                         possibleIssuePosList.add(tempLoc.above(i));
@@ -281,6 +324,7 @@ public class LiquidRemovalPathing extends State {
                             context.noteThroughWallPlace(placeAt);
                         }
                         aimWaitTicks = 0;
+                        stallTicks = 0;
                         context.resetTimer();
                         return;
                     }
@@ -293,15 +337,20 @@ public class LiquidRemovalPathing extends State {
             }
 
             ArrayList<Rotation> possibleIssueReachableList = new ArrayList<>();
+            BlockPos firstIssuePos = null;
             for (BlockPos curIssuePos : possibleIssuePosList) {
                 Optional<Rotation> curIssuePosReachable = RotationUtils.reachable(context.playerContext(), curIssuePos, context.playerContext().playerController().getBlockReachDistance());
                 BlockState state = context.playerContext().world().getBlockState(curIssuePos);
                 Block block = state.getBlock();
                 if (block != Blocks.BEDROCK && !(block instanceof LiquidBlock) && !(block instanceof AirBlock) && curIssuePosReachable.isPresent() && curIssuePos.getY() >= context.settings().highwayMainY.value) {
+                    if (possibleIssueReachableList.isEmpty()) {
+                        firstIssuePos = curIssuePos;
+                    }
                     possibleIssueReachableList.add(curIssuePosReachable.get());
                 }
             }
             if (!possibleIssueReachableList.isEmpty()) {
+                noteBreaking(firstIssuePos);
                 context.baritone().getLookBehavior().updateTarget(possibleIssueReachableList.get(0), true);
                 context.baritone().getInputOverrideHandler().clearAllKeys();
                 context.baritone().getInputOverrideHandler().setInputForceState(Input.CLICK_LEFT, true);
@@ -349,7 +398,7 @@ public class LiquidRemovalPathing extends State {
             // Find the first obstructing block we can break
             for (BlockPos checkPos : checkPositions) {
                 if (context.getIssueType(checkPos) == HighwayBlockState.Blocks) {
-                    if (throughWalls && hasLiquidNeighbor(context, checkPos)) {
+                    if (throughWalls && mustStayAsCover(context, checkPos)) {
                         continue; // still cover for unfilled lava, fill through it instead
                     }
                     Optional<Rotation> breakRotation = RotationUtils.reachable(context.playerContext(), checkPos, context.playerContext().playerController().getBlockReachDistance());
@@ -373,6 +422,7 @@ public class LiquidRemovalPathing extends State {
                         }
                         
                         // Look at the block and break it
+                        noteBreaking(blockToBreak);
                         context.baritone().getLookBehavior().updateTarget(breakRotation.get(), true);
                         context.baritone().getInputOverrideHandler().setInputForceState(Input.CLICK_LEFT, true);
                         Helper.HELPER.logDirect("Breaking obstructing block at " + blockToBreak);
@@ -426,13 +476,158 @@ public class LiquidRemovalPathing extends State {
         return slot;
     }
 
-    private static boolean hasLiquidNeighbor(HighwayContext context, BlockPos pos) {
+    /**
+     * Whether pos still has to stay where it is as cover over liquid instead of being mined out of
+     * the way. Mining it would open lava we are not protected from, so we place into that lava
+     * first ({@link #sealTargets}) and the block frees itself a tick or two later.
+     */
+    private static boolean mustStayAsCover(HighwayContext context, BlockPos pos) {
         for (Direction dir : Direction.values()) {
             if (context.getIssueType(pos.relative(dir)) == HighwayBlockState.Liquids) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * Liquid that is in the way of the approach: the neighbors of every block the mining scan wants
+     * to break - they are what holds it back as cover - plus the cells our own body could walk into.
+     * <p>
+     * Filling these is what lets a through-wall removal dig toward the lava without ever standing
+     * next to an open lava block: seal, break the block that was covering it, seal again from one
+     * step further in. Every fill is permanent and every step consumes at least one lava block, so
+     * the tunnel always terminates. Reach is never the problem either - the block being held back
+     * is itself solid and adjacent to us, so the face that points into its liquid neighbor is about
+     * two blocks from our eyes, and the same is true of the seal we just placed on the next step.
+     * <p>
+     * Sources are handled ahead of these: filling a source removes lava for good, while filling
+     * flowing lava only dams it (it dries up on its own once the supply is gone).
+     */
+    private static ArrayList<BlockPos> sealTargets(HighwayContext context) {
+        BetterBlockPos feet = context.playerContext().playerFeet();
+        int mainY = context.settings().highwayMainY.value;
+        ArrayList<BlockPos> targets = new ArrayList<>();
+        for (int x = -1; x <= 1; x++) {
+            for (int z = -1; z <= 1; z++) {
+                for (int i = 0; i < context.settings().highwayHeight.value; i++) {
+                    BlockPos pos = new BlockPos(feet.getX() + x, feet.getY() + i, feet.getZ() + z);
+                    if (pos.getY() < mainY) {
+                        continue;
+                    }
+                    HighwayBlockState issue = context.getIssueType(pos);
+                    if (issue == HighwayBlockState.Liquids) {
+                        // Lava our body could walk into. The pocket we stand and move in has to be
+                        // solid or air, never lava - that is the other half of not needing a gapple.
+                        if (i < 2 && !(x == 0 && z == 0) && !targets.contains(pos)) {
+                            targets.add(pos);
+                        }
+                        continue;
+                    }
+                    // Cover only holds us back if we were going to dig at all
+                    if (!context.liquidPathingCanMine()
+                            || issue != HighwayBlockState.Blocks
+                            || context.playerContext().world().getBlockState(pos).getBlock() == Blocks.BEDROCK
+                            || !mustStayAsCover(context, pos)) {
+                        continue;
+                    }
+                    for (Direction dir : Direction.values()) {
+                        BlockPos neighbor = pos.relative(dir);
+                        if (context.getIssueType(neighbor) == HighwayBlockState.Liquids && !targets.contains(neighbor)) {
+                            targets.add(neighbor);
+                        }
+                    }
+                }
+            }
+        }
+        return targets;
+    }
+
+    /** The closest of candidates we can still place into and can reach through walls, or null. */
+    private static BlockPos nearestReachableFill(HighwayContext context, List<BlockPos> candidates) {
+        float reach = (float) context.playerContext().playerController().getBlockReachDistance();
+        Vec3 head = context.playerContext().playerHead();
+        BlockPos best = null;
+        double bestDist = Double.MAX_VALUE;
+        for (BlockPos candidate : candidates) {
+            if (context.getIssueType(candidate) == HighwayBlockState.Blocks) {
+                continue; // already filled
+            }
+            double dist = head.distanceToSqr(Vec3.atCenterOf(candidate));
+            // reach is measured to a face of a neighbor, so anything a block past it is hopeless;
+            // this keeps the neighbor scan off the far side of a big lake every tick
+            if (dist >= bestDist || dist > (reach + 1) * (reach + 1)) {
+                continue;
+            }
+            if (context.placeThroughWallsAimable(candidate, reach)) {
+                best = candidate;
+                bestDist = dist;
+            }
+        }
+        return best;
+    }
+
+    /** The closest entry of {@link HighwayContext#sourceBlocks()} that isn't solid yet. */
+    private static BlockPos nearestUnfilled(HighwayContext context) {
+        Vec3 head = context.playerContext().playerHead();
+        BlockPos best = null;
+        double bestDist = Double.MAX_VALUE;
+        for (BlockPos source : context.sourceBlocks()) {
+            if (context.getIssueType(source) == HighwayBlockState.Blocks) {
+                continue;
+            }
+            double dist = head.distanceToSqr(Vec3.atCenterOf(source));
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = source;
+            }
+        }
+        return best;
+    }
+
+    /**
+     * Breaking a block is progress even though we stand still for it, and a bare netherite pick
+     * spends 167 ticks on one obsidian - but only while the target keeps changing. Hammering the
+     * same block forever is the stall we are looking for, so that one still counts up.
+     */
+    private void noteBreaking(BlockPos pos) {
+        if (!pos.equals(breakTarget)) {
+            breakTarget = pos;
+            stallTicks = 0;
+        }
+    }
+
+    private static void logStallDiagnostics(HighwayContext context, boolean throughWalls) {
+        BetterBlockPos feet = context.playerContext().playerFeet();
+        BlockPos nearest = null;
+        double nearestDist = Double.MAX_VALUE;
+        int unfilled = 0;
+        for (BlockPos source : context.sourceBlocks()) {
+            if (context.getIssueType(source) == HighwayBlockState.Blocks) {
+                continue;
+            }
+            unfilled++;
+            double dist = context.playerContext().playerHead().distanceTo(Vec3.atCenterOf(source));
+            if (dist < nearestDist) {
+                nearestDist = dist;
+                nearest = source;
+            }
+        }
+
+        StringBuilder sides = new StringBuilder();
+        for (Direction dir : Direction.Plane.HORIZONTAL) {
+            BlockPos side = feet.relative(dir);
+            sides.append(dir.getName()).append('=').append(context.getIssueType(side));
+            if (context.getIssueType(side) == HighwayBlockState.Blocks && mustStayAsCover(context, side)) {
+                sides.append("(cover)");
+            }
+            sides.append(' ');
+        }
+
+        Helper.HELPER.logDirect("Liquid approach made no progress at " + feet + ": " + unfilled + " unfilled source(s), nearest "
+                + nearest + " at " + String.format("%.1f", nearestDist) + " blocks, " + sealTargets(context).size()
+                + " seal target(s), throughWalls=" + throughWalls + ", canMine=" + context.liquidPathingCanMine()
+                + ", sides: " + sides.toString().trim());
     }
 
     private BlockPos findSupportBlockRecursive(HighwayContext context, BlockPos targetPos,

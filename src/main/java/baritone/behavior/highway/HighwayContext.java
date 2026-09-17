@@ -4893,31 +4893,6 @@ public class HighwayContext {
         }
     }
 
-    // A pool is enclosed when no block of it (source or flowing) touches air: digging hasn't
-    // opened it up yet and nothing can flow out
-    public boolean isPoolEnclosed(ArrayList<BlockPos> sourceBlocks, ArrayList<BlockPos> flowingBlocks) {
-        for (BlockPos pos : sourceBlocks) {
-            if (touchesAir(pos)) {
-                return false;
-            }
-        }
-        for (BlockPos pos : flowingBlocks) {
-            if (touchesAir(pos)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private boolean touchesAir(BlockPos pos) {
-        for (Direction dir : Direction.values()) {
-            if (getIssueType(pos.relative(dir)) == HighwayBlockState.Air) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     public int checkBackTimer() {
         return checkBackTimer;
     }

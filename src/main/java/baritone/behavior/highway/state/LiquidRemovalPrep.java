@@ -90,10 +90,13 @@ public class LiquidRemovalPrep extends State {
         // Get the closest point
         if (!context.sourceBlocks().isEmpty()) {
             context.baritone().getPathingBehavior().cancelEverything();
-            if (context.liquidThroughWalls()
-                    && context.isPoolEnclosed(context.sourceBlocks(), flowingBlocks)) {
-                // Sealed pool: fill it through the cover from here, no retreat or gapple needed
-                Helper.HELPER.logDebug("Sealed lava pool, filling through cover");
+            if (context.liquidThroughWalls()) {
+                // Fill it from here through the cover, no retreat and no gapple. This used to be
+                // limited to pools that were still sealed; the approach now places into the lava
+                // it has to dig past and into any cell it could step into, so an open pool is no
+                // more exposure than a sealed one. If something does breach anyway, Pathing's
+                // caught-fire bail goes and eats a gapple, then comes back here.
+                Helper.HELPER.logDebug("Filling liquids through cover");
                 context.transitionTo(HighwayState.LiquidRemovalPathing);
             } else {
                 context.transitionTo(HighwayState.LiquidRemovalPathingBack);
