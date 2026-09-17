@@ -102,6 +102,104 @@ public class AngledHighwayPatternTest {
         }
     }
 
+    /**
+     * The stand-off offsets the placing flows use leave the gap they leave on a straight highway:
+     * a cell an entity overlaps cannot be built into, and a slice step lands diagonally touching
+     * the spot wherever the pattern jogs, which is a placement nothing can ever get through.
+     */
+    @Test
+    public void standOffOffsetsLeaveTheSameGapAsAStraightHighway() {
+        for (String pattern : PATTERNS) {
+            for (int[] dir : QUADRANTS) {
+                HighwayPattern hp = HighwayPattern.parse(pattern, new Vec3i(dir[0], 0, dir[1]));
+                assertTrue(pattern + ": expected a custom pattern", hp.isCustom());
+                for (boolean lowSide : new boolean[]{false, true}) {
+                    for (int t = FIRST_SLICE; t <= LAST_SLICE; t++) {
+                        for (int want : new int[]{-3, -2, -1, 1, 2, 3}) {
+                            String what = pattern + " " + dir[0] + "/" + dir[1] + (lowSide ? " side lane" : " lane")
+                                    + " slice " + t + " off " + want;
+                            int got = hp.standOffSlices(t, want, lowSide);
+                            assertEquals(what + ": kept its direction", Integer.signum(want), Integer.signum(got));
+                            assertTrue(what + ": never steps shorter, got " + got, Math.abs(got) >= Math.abs(want));
+                            assertTrue(what + ": bounded, got " + got,
+                                    Math.abs(got) <= Math.abs(want) * hp.periodSlices());
+                            assertTrue(what + ": lands " + cellsApart(hp, t, got, lowSide) + " cells clear, wanted " + Math.abs(want),
+                                    cellsApart(hp, t, got, lowSide) >= Math.abs(want));
+                            // and it is the nearest such spot: everything it stepped over was too close
+                            for (int step = Math.abs(want); step < Math.abs(got); step++) {
+                                assertTrue(what + ": " + step + " slices would already have done",
+                                        cellsApart(hp, t, Integer.signum(want) * step, lowSide) < Math.abs(want));
+                            }
+                        }
+                        assertEquals(pattern + ": standing on the spot is not a step", 0, hp.standOffSlices(t, 0, lowSide));
+                    }
+                }
+                for (int t = FIRST_SLICE; t <= LAST_SLICE; t++) {
+                    assertEquals(pattern + ": a one-slice step is a cell along whatever the phase",
+                            1, hp.standOffSlices(t, 1, false));
+                    assertEquals(pattern + ": a one-slice step back is a cell along whatever the phase",
+                            -1, hp.standOffSlices(t, -1, false));
+                }
+            }
+        }
+    }
+
+    /**
+     * The side-storage lane - one column outside the low rail, where the ender chests and empty
+     * shulkers are set down - stays outside the road at every slice. At a jogged column the road is
+     * the union of the slices sharing it, so a lane that followed each slice's own cross-section
+     * would put the box on the rail of its neighbour for every jog in the pattern.
+     */
+    @Test
+    public void theSideStorageLaneStaysOutsideTheRoad() {
+        for (int width : new int[]{2, 4, 7}) {
+            for (String pattern : PATTERNS) {
+                for (int[] dir : QUADRANTS) {
+                    HighwayPattern hp = HighwayPattern.parse(pattern, new Vec3i(dir[0], 0, dir[1]));
+                    for (int t = FIRST_SLICE + hp.periodSlices(); t <= LAST_SLICE - hp.periodSlices(); t++) {
+                        String what = pattern + " " + dir[0] + "/" + dir[1] + " width " + width + " slice " + t;
+                        // build() anchors the lane one column below the slice anchor, on the cross axis
+                        int lane = laneCross(hp, t) - 1;
+                        for (int s = t - hp.periodSlices(); s <= t + hp.periodSlices(); s++) {
+                            if (majorCoord(hp, s) != majorCoord(hp, t)) {
+                                continue; // a different cross-section of the road, further along
+                            }
+                            // the slice's own profile: road plus a rail column on either side of it
+                            int profile = crossCoord(hp, s);
+                            assertTrue(what + ": lane column " + lane + " is inside slice " + s
+                                            + "'s profile " + profile + ".." + (profile + width + 1),
+                                    lane < profile || lane > profile + width + 1);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static final String[] PATTERNS = {"XXZXXZXXXZ", "XXZ", "XZZ", "XXXXZ", "ZZZXZ", "ZXX", "XXXZZ"};
+    private static final int[][] QUADRANTS = {{1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
+
+    /** Cells between slice {@code t}'s lane anchor and the one {@code slices} along, on the wider axis. */
+    private static int cellsApart(HighwayPattern hp, int t, int slices, boolean lowSide) {
+        Vec3i delta = hp.laneDelta(t, slices, lowSide);
+        return Math.max(Math.abs(delta.getX()), Math.abs(delta.getZ()));
+    }
+
+    /** Cross-axis (jog axis) coordinate of slice {@code t}'s own anchor. */
+    private static int crossCoord(HighwayPattern hp, int t) {
+        return hp.majorIsX() ? hp.worldOffsetZ(t) : hp.worldOffsetX(t);
+    }
+
+    /** Cross-axis coordinate of the low-side lane at slice {@code t}. */
+    private static int laneCross(HighwayPattern hp, int t) {
+        return hp.majorIsX() ? hp.laneOffsetZ(t, true) : hp.laneOffsetX(t, true);
+    }
+
+    /** Driving-axis coordinate, which is what "the same cross-section of the road" means. */
+    private static int majorCoord(HighwayPattern hp, int t) {
+        return hp.majorIsX() ? hp.worldOffsetX(t) : hp.worldOffsetZ(t);
+    }
+
     private void check(String pattern, int dirX, int dirZ, boolean pave, boolean rails, boolean railLow, boolean railHigh) {
         String what = pattern + " " + dirX + "/" + dirZ + (pave ? " pave" : " dig")
                 + " rails=" + (rails ? (railLow ? "low" : "") + (railHigh ? "high" : "") + (!railLow && !railHigh ? "clear" : "") : "off");

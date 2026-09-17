@@ -21,6 +21,7 @@ import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
+import baritone.behavior.highway.enums.LocationType;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.world.level.block.AirBlock;
@@ -49,7 +50,7 @@ public class EnderChestStashPlaceLocPrep extends State {
             BlockState atLoc = context.playerContext().world().getBlockState(reuse);
             BlockState above = context.playerContext().world().getBlockState(reuse.above());
             if (atLoc.getBlock() instanceof EnderChestBlock && above.getBlock() instanceof AirBlock) {
-                context.setPlaceLoc(reuse);
+                context.setPlaceLoc(reuse, LocationType.SideStorage);
                 context.transitionTo(HighwayState.GoingToLootEnderChestPlaceLoc);
                 return;
             }
@@ -68,7 +69,7 @@ public class EnderChestStashPlaceLocPrep extends State {
         }
 
         context.setEnderChestAccessLoc(null);
-        context.setPlaceLoc(safeLoc);
+        context.setPlaceLoc(safeLoc, LocationType.SideStorage);
         context.transitionTo(HighwayState.GoingToLootEnderChestPlaceLoc);
     }
 }

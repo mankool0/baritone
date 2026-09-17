@@ -40,7 +40,7 @@ public class GoingToPlaceLocEnderChest extends State {
             return; // Wait for us to reach the goal
         }
 
-        BlockPos stand = context.placeLoc().offset(context.highwayDirection().getX() * -2, 0, context.highwayDirection().getZ() * -2);
+        BlockPos stand = context.placeLocStand(-2);
 
         if (context.playerContext().playerFeet().equals(stand)) {
             // We have arrived

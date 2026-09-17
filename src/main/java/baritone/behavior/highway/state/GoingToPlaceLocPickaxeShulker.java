@@ -40,13 +40,13 @@ public class GoingToPlaceLocPickaxeShulker extends State {
         }
 
         //if (ctx.playerFeet().getX() == placeLoc.getX() && ctx.playerFeet().getY() == placeLoc.getY() && ctx.playerFeet().getZ() == (placeLoc.getZ() - 1)) {
-        if (context.playerContext().playerFeet().equals(context.placeLoc().offset(context.highwayDirection().getX(), 0, context.highwayDirection().getZ()))) {
+        if (context.playerContext().playerFeet().equals(context.placeLocStand(1))) {
             // We have arrived
             context.transitionTo(HighwayState.PlacingPickaxeShulkerSupport);
             context.resetTimer();
         } else {
             // Keep trying to get there
-            context.baritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(context.placeLoc().offset(context.highwayDirection().getX(), 0, context.highwayDirection().getZ())));
+            context.baritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(context.placeLocStand(1)));
         }
     }
 }

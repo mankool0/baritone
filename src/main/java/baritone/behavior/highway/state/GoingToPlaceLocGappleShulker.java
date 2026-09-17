@@ -42,13 +42,13 @@ public class GoingToPlaceLocGappleShulker extends State {
             return;
         }
 
-        if (context.playerContext().playerFeet().equals(context.placeLoc().offset(context.highwayDirection().getX(), 0, context.highwayDirection().getZ()))) {
+        if (context.playerContext().playerFeet().equals(context.placeLocStand(1))) {
             // We have arrived
             context.transitionTo(HighwayState.PlacingGappleShulkerSupport);
             context.resetTimer();
         } else {
             // Keep trying to get there
-            context.baritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(context.placeLoc().offset(context.highwayDirection().getX(), 0, context.highwayDirection().getZ())));
+            context.baritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(context.placeLocStand(1)));
         }
     }
 }

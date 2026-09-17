@@ -240,6 +240,80 @@ public final class HighwayPattern {
     }
 
     /**
+     * The slice of {@code t}'s major column whose cross-section sits furthest toward -cross: the one
+     * {@link #ownsLowRail} hands the low rail to.
+     *
+     * <p>Slices sharing a major coordinate overlap, offset by one on the cross axis apiece, so the
+     * road actually built at that coordinate is their union and only this slice's own profile
+     * reaches its outer edge. A lane that has to stay outside the road on that side - the
+     * side-storage lane the ender chests and empty shulkers go on - therefore belongs beside this
+     * slice and no other: one column outside any later slice of the run is the low rail itself, or
+     * for a run of three or more, the road.
+     */
+    public int lowSideSlice(int t) {
+        int s = t;
+        if (minorSign > 0) {
+            while (!startsMajorColumn(s)) {
+                s--; // the run's first slice is its lowest cross
+            }
+        } else {
+            while (!endsMajorColumn(s)) {
+                s++; // jogging toward -cross, so the run's last slice is its lowest
+            }
+        }
+        return s;
+    }
+
+    /** Signed world-X offset of slice {@code t}'s anchor on a lane, {@code lowSide} following {@link #lowSideSlice}. */
+    public int laneOffsetX(int t, boolean lowSide) {
+        return worldOffsetX(lowSide ? lowSideSlice(t) : t);
+    }
+
+    /** Signed world-Z offset of slice {@code t}'s anchor on a lane, {@code lowSide} following {@link #lowSideSlice}. */
+    public int laneOffsetZ(int t, boolean lowSide) {
+        return worldOffsetZ(lowSide ? lowSideSlice(t) : t);
+    }
+
+    /**
+     * The signed world vector from slice {@code t}'s lane anchor to slice {@code (t + slices)}'s
+     * (y = 0). Zero wherever both slices share a major column on the low-side lane, which has one
+     * anchor per column rather than one per slice.
+     */
+    public Vec3i laneDelta(int t, int slices, boolean lowSide) {
+        return new Vec3i(laneOffsetX(t + slices, lowSide) - laneOffsetX(t, lowSide), 0,
+                laneOffsetZ(t + slices, lowSide) - laneOffsetZ(t, lowSide));
+    }
+
+    /**
+     * The offset to use in place of {@code slices} for a spot to stand on while working on slice
+     * {@code t}: the first offset of that sign, no shorter than {@code slices}, whose lane anchor is
+     * {@code |slices|} cells clear of slice {@code t}'s on one world axis.
+     *
+     * <p>A slice steps a single world axis, so two slices taken across a jog advance one block on
+     * each axis: Chebyshev distance one, a cell diagonally touching the one being worked on rather
+     * than a cell clear of it. That is the gap a straight highway's {@code 2 * direction} always
+     * leaves and the placing flows rely on - a body in a touching cell overlaps the worked cell,
+     * and nothing can be placed into a cell an entity overlaps. On the low-side lane a slice step
+     * can even stand still, since a jogged column has a single anchor. Walking the offset on
+     * restores the gap either way: a period advances the major axis by at least two.
+     */
+    public int standOffSlices(int t, int slices, boolean lowSide) {
+        if (!custom || slices == 0) {
+            return slices;
+        }
+        int want = Math.abs(slices);
+        int sign = Integer.signum(slices);
+        int limit = want * period;
+        for (int step = want; step < limit; step++) {
+            Vec3i delta = laneDelta(t, sign * step, lowSide);
+            if (Math.max(Math.abs(delta.getX()), Math.abs(delta.getZ())) >= want) {
+                return sign * step;
+            }
+        }
+        return sign * limit;
+    }
+
+    /**
      * Slice index from a major-axis coordinate alone (given in pattern-local units: world delta
      * from the line origin times {@link #majorSign()}). Several consecutive slices share a major
      * coordinate wherever the pattern jogs; this returns the <b>last</b> of them, i.e. the slice

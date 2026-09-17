@@ -21,6 +21,7 @@ import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
+import baritone.behavior.highway.enums.LocationType;
 import baritone.behavior.highway.enums.ShulkerType;
 import net.minecraft.core.BlockPos;
 
@@ -44,7 +45,7 @@ public class EmptyShulkerPlaceLocPrep extends State {
             return;
         }
 
-        context.setPlaceLoc(safeLoc);
+        context.setPlaceLoc(safeLoc, LocationType.SideStorage);
         context.transitionTo(HighwayState.GoingToEmptyShulkerPlaceLoc);
     }
 }

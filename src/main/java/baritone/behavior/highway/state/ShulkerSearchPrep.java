@@ -31,11 +31,13 @@ public class ShulkerSearchPrep extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        Vec3 curPos = new Vec3(context.playerContext().playerFeet().getX() + (context.settings().highwayMaxLostShulkerSearchDist.value * -context.highwayDirection().getX()), context.playerContext().playerFeet().getY(), context.playerContext().playerFeet().getZ() + (context.settings().highwayMaxLostShulkerSearchDist.value * -context.highwayDirection().getZ()));
-        Vec3 direction = new Vec3(context.highwayDirection().getX(), context.highwayDirection().getY(), context.highwayDirection().getZ());
+        // Back along the highway, counted in slices so an angled pattern's path is followed
+        // rather than the 45 degree diagonal its direction vector only supplies the signs of
+        Vec3 feetPos = new Vec3(context.playerContext().playerFeet().getX(), context.playerContext().playerFeet().getY(), context.playerContext().playerFeet().getZ());
+        int backSlices = context.slicesForBlocks(context.settings().highwayMaxLostShulkerSearchDist.value);
 
-        context.setPlaceLoc(context.liftOntoPavement(context.getClosestPoint(new Vec3(context.backPathOriginVector().x, context.backPathOriginVector().y, context.backPathOriginVector().z), direction, curPos, LocationType.ShulkerEchestInteraction)));
         // Get the closest point and shift it so it's in the middle of the highway
+        context.setPlaceLoc(context.liftOntoPavement(context.sliceAlongLine(context.backPathOriginVector(), feetPos, -backSlices, LocationType.ShulkerEchestInteraction)));
 
         context.settings().buildRepeat.value = new Vec3i(0, 0, 0);
         context.transitionTo(HighwayState.ShulkerSearchPathing);

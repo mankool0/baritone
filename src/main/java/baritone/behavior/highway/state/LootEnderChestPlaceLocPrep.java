@@ -20,6 +20,7 @@ package baritone.behavior.highway.state;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
+import baritone.behavior.highway.enums.LocationType;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Blocks;
@@ -48,7 +49,7 @@ public class LootEnderChestPlaceLocPrep extends State {
             return;
         }
 
-        context.setPlaceLoc(safeLoc);
+        context.setPlaceLoc(safeLoc, LocationType.SideStorage);
         context.transitionTo(HighwayState.GoingToLootEnderChestPlaceLoc);
     }
 }

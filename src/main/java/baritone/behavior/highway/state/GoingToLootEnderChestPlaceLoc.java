@@ -33,13 +33,13 @@ public class GoingToLootEnderChestPlaceLoc extends State {
             return; // Wait to get there
         }
 
-        if (context.playerContext().playerFeet().equals(context.placeLoc().offset(context.highwayDirection().getX(), 0, context.highwayDirection().getZ()))) {
+        if (context.playerContext().playerFeet().equals(context.placeLocStand(1))) {
             // We have arrived
             context.baritone().getPathingBehavior().cancelEverything();
             context.transitionTo(HighwayState.PlacingLootEnderChestSupport);
         } else {
             // Keep trying to get there
-            context.baritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(context.placeLoc().offset(context.highwayDirection().getX(), 0, context.highwayDirection().getZ())));
+            context.baritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(context.placeLocStand(1)));
         }
     }
 }

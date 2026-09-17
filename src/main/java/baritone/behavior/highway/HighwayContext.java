@@ -217,10 +217,29 @@ public class HighwayContext {
     }
 
     public void setPlaceLoc(BlockPos placeLoc) {
+        setPlaceLoc(placeLoc, LocationType.ShulkerEchestInteraction);
+    }
+
+    /**
+     * Remember a placing spot along with the parallel line it was picked on, so the stand-off spots
+     * around it can be stepped along that same line. Under a custom pattern {@link #highwayDirection}
+     * is only a sign carrier, so "one along the highway" is a slice step, not a multiple of it.
+     */
+    public void setPlaceLoc(BlockPos placeLoc, LocationType line) {
         this.placeLoc = new BlockPos(placeLoc.getX(), placeLoc.getY(), placeLoc.getZ());
+        this.placeLocLine = line;
+    }
+
+    /**
+     * Where to stand to work on {@link #placeLoc}: {@code slices} along the highway from it, on the
+     * line it was picked on, and never closer than {@link #standOffSlices} allows.
+     */
+    public BetterBlockPos placeLocStand(int slices) {
+        return standOffAlongLine(placeLoc, placeLocLine, slices);
     }
 
     private BlockPos placeLoc;
+    private LocationType placeLocLine = LocationType.ShulkerEchestInteraction;
     private int picksToHave = 5;
     private boolean enderChestHasPickShulks = true;
     private boolean enderChestHasEnderShulks = true;
@@ -724,6 +743,70 @@ public class HighwayContext {
     /** World-space offset from slice t's anchor to slice (t + slices)'s anchor. */
     private Vec3i sliceDelta(int t, int slices) {
         return pattern.worldDelta(t, slices);
+    }
+
+    /** The parallel line that anchors of a given kind sit on. */
+    private Vec3 lineOriginFor(LocationType locType) {
+        return switch (locType) {
+            case HighwayBuild -> originVector;
+            case ShulkerEchestInteraction -> backPathOriginVector;
+            case SideStorage -> eChestEmptyShulkOriginVector;
+        };
+    }
+
+    /**
+     * The anchor {@code slices} along the highway from {@code from}, which has to lie on the line
+     * {@code locType} names. On a classic highway that is a plain multiple of {@link #highwayDirection};
+     * under a custom pattern the direction vector only carries the signs - stepping by it walks a 45
+     * degree diagonal away from the path - so the offset comes from the pattern's slice arithmetic.
+     *
+     * <p>Deliberately not re-projected, unlike {@link #sliceAlongLine}: the placing scans walk back
+     * onto pavement laid before this build started, and the build-start clamp in
+     * {@link #getClosestPoint} would snap that away.
+     */
+    public BetterBlockPos alongLine(BlockPos from, LocationType locType, int slices) {
+        if (!pattern.isCustom()) {
+            return new BetterBlockPos(from.offset(slices * highwayDirection.getX(), 0, slices * highwayDirection.getZ()));
+        }
+        int t = sliceIndexOf(from, lineOriginFor(locType));
+        return new BetterBlockPos(from.offset(pattern.laneDelta(t, slices, lowSideLane(locType))));
+    }
+
+    /**
+     * Whether a line has to stay outside the road on the low-cross side, which is the side-storage
+     * lane only: at a jogged column the road is the union of the slices sharing it, so that lane
+     * tracks the outermost of them rather than each slice's own cross-section. See
+     * {@link HighwayPattern#lowSideSlice}.
+     */
+    private static boolean lowSideLane(LocationType locType) {
+        return locType == LocationType.SideStorage;
+    }
+
+    /**
+     * Like {@link #alongLine}, but for a spot to stand on while working on {@code from}: the offset
+     * is walked on until the cell it lands in is the {@code |slices|} cells clear of {@code from}
+     * that the same offset leaves on a straight highway.
+     *
+     * <p>An angled pattern's slice steps one world axis, so two slices taken across a jog advance
+     * one block on each axis and land diagonally touching the spot instead of a cell clear of it.
+     * A body standing anywhere in a touching cell reaches 0.3 over the shared corner, and a cell an
+     * entity overlaps is one {@code BlockItem.place} refuses to build into - which is the "no gap
+     * left, placement blocked forever" the two-back flows exist to avoid. Cells two apart on either
+     * axis can never be reached over, so that is the gap to insist on.
+     *
+     * <p>On the side-storage lane a slice step can also stand still, since a jogged column has one
+     * lane anchor for all the slices sharing it; the same walk-on covers that.
+     */
+    public BetterBlockPos standOffAlongLine(BlockPos from, LocationType locType, int slices) {
+        return alongLine(from, locType, standOffSlices(from, locType, slices));
+    }
+
+    /** The slice offset {@link #standOffAlongLine} settles on; scans that walk the lane need the count itself. */
+    public int standOffSlices(BlockPos from, LocationType locType, int slices) {
+        if (!pattern.isCustom()) {
+            return slices; // a cardinal step is one cell along, a diagonal one a diagonal cell: both already clear
+        }
+        return pattern.standOffSlices(sliceIndexOf(from, lineOriginFor(locType)), slices, lowSideLane(locType));
     }
 
     public void setPatternSchematics(CompositeSchematic[] patternSchematics) {
@@ -1308,13 +1391,15 @@ public class HighwayContext {
         if (schematic == null) {
             return null;
         }
-        Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
-        Vec3 backPos = new Vec3(playerContext.playerFeet().getX() + (distBack * -highwayDirection.getX()),
-                playerContext.playerFeet().getY(),
-                playerContext.playerFeet().getZ() + (distBack * -highwayDirection.getZ()));
-        BlockPos startPos = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z), direction, backPos, LocationType.HighwayBuild);
+        // The scan steps the pattern's path a slice at a time, so its start and its length have to
+        // be counted the same way: shifting our feet by the direction vector first would anchor the
+        // box off the path, and a block count would stop the sweep short of distAhead.
+        int backSlices = slicesForBlocks(distBack);
+        int aheadSlices = slicesForBlocks(distAhead);
+        Vec3 feetPos = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
+        BlockPos startPos = sliceAlongLine(originVector, feetPos, -backSlices, LocationType.HighwayBuild);
         int scanT0 = pattern.isCustom() ? sliceIndexOf(startPos, originVector) : 0;
-        for (int i = 0; i < distBack + distAhead; i++) {
+        for (int i = 0; i < backSlices + aheadSlices; i++) {
             BlockPos curPos = pattern.isCustom()
                     ? startPos.offset(sliceDelta(scanT0, i))
                     : startPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
@@ -1394,13 +1479,15 @@ public class HighwayContext {
      * taken at our own position and stepped from there, because {@link #getClosestPoint} clamps
      * every point to the build start: projecting an already shifted position would snap the whole
      * scan onto the first slice and never reach the pavement laid before this build began.
+     *
+     * <p>{@code back} counts slices, not blocks - see {@link #alongLine}.
      */
     private BetterBlockPos shulkerPlaceLocAt(int back) {
         Vec3 origin = new Vec3(backPathOriginVector.x, backPathOriginVector.y, backPathOriginVector.z);
         Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
         Vec3 feet = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
         BetterBlockPos lane = getClosestPoint(origin, direction, feet, LocationType.ShulkerEchestInteraction);
-        return liftOntoPavement(new BetterBlockPos(lane.offset(back * -highwayDirection.getX(), 0, back * -highwayDirection.getZ())));
+        return liftOntoPavement(alongLine(lane, LocationType.ShulkerEchestInteraction, -back));
     }
 
     /**
@@ -1413,11 +1500,12 @@ public class HighwayContext {
      */
     public BetterBlockPos shulkerPlaceLocClearOfThieves() {
         double radius = settings.highwayShulkerTheftGuardRadius.value;
-        BetterBlockPos anchor = shulkerPlaceLocAt(SHULKER_PLACE_ANCHOR_BACK);
+        int anchorBack = slicesForBlocks(SHULKER_PLACE_ANCHOR_BACK);
+        BetterBlockPos anchor = shulkerPlaceLocAt(anchorBack);
         boolean anchorUsable = isShulkerPlaceSpotUsable(anchor);
         BetterBlockPos thiefDirty = null;
         for (int back : shulkerPlaceScanOffsets()) {
-            BetterBlockPos candidate = back == SHULKER_PLACE_ANCHOR_BACK ? anchor : shulkerPlaceLocAt(back);
+            BetterBlockPos candidate = back == anchorBack ? anchor : shulkerPlaceLocAt(back);
             if (!isShulkerPlaceSpotUsable(candidate)) {
                 continue;
             }
@@ -1427,8 +1515,10 @@ public class HighwayContext {
                 }
                 continue;
             }
-            if (back != SHULKER_PLACE_ANCHOR_BACK) {
-                String where = back >= 0 ? (back - SHULKER_PLACE_ANCHOR_BACK) + " blocks further back" : -back + " blocks ahead";
+            if (back != anchorBack) {
+                String where = back >= 0
+                        ? Math.round((back - anchorBack) * stepLength()) + " blocks further back"
+                        : Math.round(-back * stepLength()) + " blocks ahead";
                 Helper.HELPER.logDirect(anchorUsable
                         ? "Piglins that could steal the shulker are near the placing location, placing it " + where + "."
                         : "Nothing to set the shulker on at the placing location, placing it " + where + ".");
@@ -1439,14 +1529,21 @@ public class HighwayContext {
         return thiefDirty != null ? thiefDirty : anchor;
     }
 
-    /** Lane offsets to try, in order: back onto what's already paved, then closer in, then ahead of us. */
+    /**
+     * Lane offsets to try, in order: back onto what's already paved, then closer in, then ahead of
+     * us. In slices, so the distances the constants name stay the same length of road whatever the
+     * heading - an angled pattern's slice is shorter than a block.
+     */
     private int[] shulkerPlaceScanOffsets() {
-        int[] offsets = new int[SHULKER_PLACE_MAX_BACK + SHULKER_PLACE_MAX_AHEAD + 1];
+        int anchorBack = slicesForBlocks(SHULKER_PLACE_ANCHOR_BACK);
+        int maxBack = slicesForBlocks(SHULKER_PLACE_MAX_BACK);
+        int maxAhead = slicesForBlocks(SHULKER_PLACE_MAX_AHEAD);
+        int[] offsets = new int[maxBack + maxAhead + 1];
         int i = 0;
-        for (int back = SHULKER_PLACE_ANCHOR_BACK; back <= SHULKER_PLACE_MAX_BACK; back++) {
+        for (int back = anchorBack; back <= maxBack; back++) {
             offsets[i++] = back;
         }
-        for (int back = SHULKER_PLACE_ANCHOR_BACK - 1; back >= -SHULKER_PLACE_MAX_AHEAD; back--) {
+        for (int back = anchorBack - 1; back >= -maxAhead; back--) {
             offsets[i++] = back;
         }
         return offsets;
@@ -1455,8 +1552,9 @@ public class HighwayContext {
     /**
      * A lane spot we can actually place into and reach: lava-free, with something solid under the
      * box - or, while we still carry a block to build one with, a face a support block can go on -
-     * and a floor under the spots the go-to states stand on (two back for the ender chest flow, one
-     * ahead for the shulker ones). A spot hanging over the end of the pavement has none of that.
+     * and a floor under the spots the go-to states stand on (two back - or one further, past an
+     * angled pattern's jog - for the ender chest flow, one ahead for the shulker ones). A spot
+     * hanging over the end of the pavement has none of that.
      */
     public boolean isShulkerPlaceSpotUsable(BlockPos placeLoc) {
         if (!isSideStorageSpotSafe(placeLoc)) {
@@ -1469,11 +1567,14 @@ public class HighwayContext {
         if (!hasFloorUnder(placeLoc) && !(canBuildSupportBlock() && hasSturdyNeighbor(placeLoc.below()))) {
             return false;
         }
-        for (int step = -2; step <= 1; step++) {
+        // Every cell from the ender chest flow's stand spot up to the shulker flows' - which is one
+        // slice further back than -2 wherever an angled pattern jogs there, see standOffSlices
+        int backStand = standOffSlices(placeLoc, LocationType.ShulkerEchestInteraction, -2);
+        for (int step = backStand; step <= 1; step++) {
             if (step == 0) {
                 continue;
             }
-            if (!hasFloorUnder(placeLoc.offset(step * highwayDirection.getX(), 0, step * highwayDirection.getZ()))) {
+            if (!hasFloorUnder(alongLine(placeLoc, LocationType.ShulkerEchestInteraction, step))) {
                 return false;
             }
         }
@@ -1829,7 +1930,8 @@ public class HighwayContext {
             if (endPos != null) {
                 t = Math.min(t, sliceIndexOf(endPos, originVector));
             }
-            return new BetterBlockPos((int) (ox + pattern.worldOffsetX(t)), yLevel, (int) (oz + pattern.worldOffsetZ(t)));
+            boolean lowSide = lowSideLane(locType);
+            return new BetterBlockPos((int) (ox + pattern.laneOffsetX(t, lowSide)), yLevel, (int) (oz + pattern.laneOffsetZ(t, lowSide)));
         }
 
         // Project onto the highway line, but round the along-line step count once and derive both
@@ -2945,6 +3047,20 @@ public class HighwayContext {
     private BlockPos scanSideStorageSpots(int minDist, int maxDist, int sign) {
         Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
         Vec3 origin = new Vec3(eChestEmptyShulkOriginVector.x, eChestEmptyShulkOriginVector.y, eChestEmptyShulkOriginVector.z);
+        if (pattern.isCustom()) {
+            // Walk the line in slices: shifting our feet by the direction vector first, as the
+            // straight case does, would step a 45 degree diagonal away from the pattern's path.
+            BetterBlockPos feetOnLine = getClosestPoint(origin, direction,
+                    new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ()),
+                    LocationType.SideStorage);
+            for (int slices = slicesForBlocks(minDist); slices <= slicesForBlocks(maxDist); slices++) {
+                BetterBlockPos candidate = alongLine(feetOnLine, LocationType.SideStorage, slices * sign);
+                if (isSideStorageSpotUsable(candidate)) {
+                    return candidate;
+                }
+            }
+            return null;
+        }
         for (int dist = minDist; dist <= maxDist; dist++) {
             Vec3 curPos = new Vec3(
                     playerContext.playerFeet().getX() + (dist * sign * highwayDirection.getX()),
@@ -2979,9 +3095,15 @@ public class HighwayContext {
                 && !(canBuildSupportBlock() && hasSturdyNeighbor(placeLoc.below()))) {
             return false;
         }
-        // We stand one step along the highway from the box to place it and to open it
-        BlockPos stand = placeLoc.offset(highwayDirection.getX(), 0, highwayDirection.getZ());
-        return MovementHelper.canWalkOn(baritone.bsi, stand.getX(), stand.getY() - 1, stand.getZ());
+        // We stand one step along the highway from the box to place it and to open it, and one
+        // step further back when our own body turns out to be in the way of the placement
+        for (int step : new int[]{1, 2}) {
+            BlockPos stand = standOffAlongLine(placeLoc, LocationType.SideStorage, step);
+            if (!MovementHelper.canWalkOn(baritone.bsi, stand.getX(), stand.getY() - 1, stand.getZ())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private boolean hasSturdyNeighbor(BlockPos pos) {
@@ -3206,13 +3328,15 @@ public class HighwayContext {
         BetterBlockPos feet = playerContext.playerFeet();
         // Step back on whichever side of the spot we already stand: the flows differ on that, and
         // crossing over the box to reach the far side is a walk we don't need to make
-        int side = Integer.signum((feet.x - placeLoc.getX()) * highwayDirection.getX()
+        int side = Integer.signum(pattern.isCustom()
+                ? stepsAlongHighway(placeLoc, feet)
+                : (feet.x - placeLoc.getX()) * highwayDirection.getX()
                 + (feet.z - placeLoc.getZ()) * highwayDirection.getZ());
         if (side == 0) {
             side = 1;
         }
         for (int step : new int[]{2 * side, 3 * side, -2 * side, -3 * side}) {
-            BlockPos candidate = placeLoc.offset(step * highwayDirection.getX(), 0, step * highwayDirection.getZ());
+            BlockPos candidate = standOffAlongLine(placeLoc, placeLocLine, step);
             if (candidate.getX() == feet.x && candidate.getZ() == feet.z) {
                 continue; // where we already are, so pathing there would move us nowhere
             }
