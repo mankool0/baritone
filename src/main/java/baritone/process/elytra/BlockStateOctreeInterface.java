@@ -17,8 +17,8 @@
 
 package baritone.process.elytra;
 
-import dev.babbaj.pathfinder.NetherPathfinder;
-import dev.babbaj.pathfinder.Octree;
+import baritone.process.elytra.pathfinder.Chunk;
+import baritone.process.elytra.pathfinder.NetherPathfinder;
 
 /**
  * @author Brady
@@ -26,8 +26,11 @@ import dev.babbaj.pathfinder.Octree;
 public final class BlockStateOctreeInterface {
 
     private final NetherPathfinderContext context;
-    private final long contextPtr;
-    transient long chunkPtr;
+    private final NetherPathfinder pathfinder;
+    private final int minY;
+    // The chunk the last lookup fell in, so that a run of lookups inside one chunk costs one table
+    // lookup. Cleared under the write lock by whatever replaces or culls chunks.
+    Chunk chunk;
 
     // Guarantee that the first lookup will fetch the context by setting MAX_VALUE
     private int prevChunkX = Integer.MAX_VALUE;
@@ -35,20 +38,22 @@ public final class BlockStateOctreeInterface {
 
     public BlockStateOctreeInterface(final NetherPathfinderContext context) {
         this.context = context;
-        this.contextPtr = context.context;
+        this.pathfinder = context.context;
+        this.minY = context.minY;
     }
 
     public boolean get0(final int x, final int y, final int z) {
-        if ((y | (127 - y)) < 0) {
+        final int adjustedY = y - this.minY;
+        if (adjustedY < 0 || adjustedY > 383) {
             return false;
         }
         final int chunkX = x >> 4;
         final int chunkZ = z >> 4;
-        if (this.chunkPtr == 0 | ((chunkX ^ this.prevChunkX) | (chunkZ ^ this.prevChunkZ)) != 0) {
+        if (this.chunk == null | ((chunkX ^ this.prevChunkX) | (chunkZ ^ this.prevChunkZ)) != 0) {
             this.prevChunkX = chunkX;
             this.prevChunkZ = chunkZ;
-            this.chunkPtr = NetherPathfinder.getOrCreateChunk(this.contextPtr, chunkX, chunkZ);
+            this.chunk = this.pathfinder.getChunkOrDefault(chunkX, chunkZ, true);
         }
-        return Octree.getBlock(this.chunkPtr, x & 0xF, y & 0x7F, z & 0xF);
+        return this.chunk.isSolid(x & 0xF, adjustedY, z & 0xF);
     }
 }

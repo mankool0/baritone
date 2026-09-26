@@ -130,7 +130,7 @@ public final class Settings {
     /**
      * Keep the best sword, pickaxe, shovel, and axe from the inventory on fixed hotbar slots
      * (sword 0, pickaxe 1, shovel 2, axe 3), so every tool type is at hand for autotool and
-     * combat. When disabled, only the best pickaxe is kept, on slot 0.
+     * combat. When disabled, only the best pickaxe is kept, on slot 0, and only while pathing.
      * <p>
      * Requires {@link #allowInventory}.
      */
@@ -406,6 +406,13 @@ public final class Settings {
      * Sprint and jump a block early on ascends wherever possible
      */
     public final Setting<Boolean> sprintAscends = new Setting<>(true);
+
+    /**
+     * Sprint jump in 1x2 corridors and whenever walking under a low ceiling, bonking our head on it.
+     * <p>
+     * The sprint jump speed boost applies before we hit the ceiling, making this faster than just sprinting.
+     */
+    public final Setting<Boolean> headHitters = new Setting<>(false);
 
     /**
      * If we overshoot a traverse and end up one block beyond the destination, mark it as successful anyway.
@@ -866,6 +873,19 @@ public final class Settings {
     public final Setting<Boolean> sprintInWater = new Setting<>(true);
 
     /**
+     * Actually swim through water instead of bobbing along the bottom of it
+     * <p>
+     * Swimming works the same way it does for a player: hold sprint (ctrl) while in water to enter the swim
+     * state, then steer with yaw and pitch towards the goal. Since sprinting is what keeps the swim state
+     * alive, this requires {@link #allowSprint} and enough hunger to sprint; without it, baritone falls back
+     * to the normal walk-on-the-bottom behavior.
+     * <p>
+     * Water traversal is also costed at swim speed when this is on, unless depth strider makes walking the
+     * bottom the faster option.
+     */
+    public final Setting<Boolean> allowSwimming = new Setting<>(false);
+
+    /**
      * When GetToBlockProcess or MineProcess fails to calculate a path, instead of just giving up, mark the closest instance
      * of that block as "unreachable" and go towards the next closest. GetToBlock expands this search to the whole "vein"; MineProcess does not.
      * This is because MineProcess finds individual impossible blocks (like one block in a vein that has gravel on top then lava, so it can't break)
@@ -1047,6 +1067,12 @@ public final class Settings {
      * Farming will scan for at most this many blocks.
      */
     public final Setting<Integer> farmMaxScanSize = new Setting<>(256);
+
+    /**
+     * Keep the farm process active when crops are present but none are mature
+     * enough to harvest yet. Disabled by default to preserve legacy behavior.
+     */
+    public final Setting<Boolean> farmWaitForGrowth = new Setting<>(false);
 
     /**
      * When the cache scan gives less blocks than the maximum threshold (but still above zero), scan the main world too.
@@ -1609,6 +1635,32 @@ public final class Settings {
      * Verbose chat logging in elytra mode
      */
     public final Setting<Boolean> elytraChatSpam = new Setting<>(false);
+
+
+    /**
+     * Allow the pathfinder to attempt flight in tighter spaces, useful in caves but can be dangerous.
+     */
+    public final Setting<Boolean> elytraAllowTightSpaces = new Setting<>(false);
+
+    /**
+     * Allow the pathfinder to fly above y 128 in the nether.
+     */
+    public final Setting<Boolean> elytraAllowAboveRoof = new Setting<>(false);
+
+    /**
+     * Allow the pathfinder to access the baritone cache to improve pathing
+     */
+    public final Setting<Boolean> elytraUseCache = new Setting<>(true);
+
+    /**
+     * Allow the pathfinder to fly above the build limit in the overworld and end.
+     */
+    public final Setting<Boolean> elytraAllowAboveBuildLimit = new Setting<>(true);
+
+    /**
+     * Minimum distance in blocks of an elytra trip before the pathfinder will try to fly above build limit. (Minimum: 32). Requires {@link #elytraAllowAboveBuildLimit} to be enabled.
+     */
+    public final Setting<Integer> elytraLongDistanceThreshold = new Setting<>(500);
 
     /**
      * Sneak when magma blocks are under feet

@@ -94,7 +94,7 @@ public class MovementDescend extends Movement {
         }
 
         Block fromDown = context.get(x, y - 1, z).getBlock();
-        if (fromDown == Blocks.LADDER || fromDown == Blocks.VINE) {
+        if (MovementHelper.isClimbable(fromDown)) {
             return;
         }
 
@@ -148,7 +148,7 @@ public class MovementDescend extends Movement {
         int effectiveStartHeight = y;
         for (int fallHeight = 3; true; fallHeight++) {
             int newY = y - fallHeight;
-            if (newY < context.world.getMinY()) {
+            if (newY < context.minY) {
                 // when pathing in the end, where you could plausibly fall into the void
                 // this check prevents it from getting the block at y=(below whatever the minimum height is) and crashing
                 return false;
@@ -186,7 +186,7 @@ public class MovementDescend extends Movement {
                 res.cost = tentativeCost;
                 return false;
             }
-            if (unprotectedFallHeight <= 11 && (ontoBlock.getBlock() == Blocks.VINE || ontoBlock.getBlock() == Blocks.LADDER)) {
+            if (unprotectedFallHeight <= 11 && MovementHelper.isClimbable(ontoBlock.getBlock())) {
                 // if fall height is greater than or equal to 11, we don't actually grab on to vines or ladders. the more you know
                 // this effectively "resets" our falling speed
                 costSoFar += FALL_N_BLOCKS_COST[unprotectedFallHeight - 1];// we fall until the top of this block (not including this block)
@@ -239,6 +239,11 @@ public class MovementDescend extends Movement {
                 // System.out.println(player().position().y + " " + playerFeet.getY() + " " + (player().position().y - playerFeet.getY()));
             }*/
         }
+
+        if (!MovementHelper.openDoors(ctx, state, src, dest.above())) {
+            return state;
+        }
+
         if (safeMode()) {
             double destX = (src.getX() + 0.5) * 0.17 + (dest.getX() + 0.5) * 0.83;
             double destZ = (src.getZ() + 0.5) * 0.17 + (dest.getZ() + 0.5) * 0.83;

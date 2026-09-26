@@ -20,7 +20,9 @@ allprojects {
     apply plugin: "xyz.wagyourtail.unimined"
     apply plugin: "maven-publish"
 
-    archivesBaseName = rootProject.archives_base_name
+    base {
+        archivesName = rootProject.archives_base_name
+    }
 
     def vers = ""
     try {
@@ -37,9 +39,8 @@ allprojects {
     }
     group = rootProject.maven_group
 
-    sourceCompatibility = targetCompatibility = JavaVersion.toVersion(project.java_version)
-    
     java {
+        sourceCompatibility = JavaVersion.toVersion(project.java_version)
         toolchain {
             languageVersion.set(JavaLanguageVersion.of(sourceCompatibility.majorVersion.toInteger()))
         }
@@ -71,17 +72,11 @@ allprojects {
             }
         }
         mavenCentral()
-        maven {
-            name = 'babbaj-repo'
-            url = 'https://babbaj.github.io/maven/'
-        }
     }
 
     dependencies {
         compileOnly "org.spongepowered:mixin:${project.mixin_version}"
         compileOnly "org.ow2.asm:asm:${project.asm_version}"
-
-        implementation "dev.babbaj:nether-pathfinder:${project.nether_pathfinder_version}"
 
         implementation 'com.google.code.findbugs:jsr305:3.0.2'
     }
@@ -113,7 +108,9 @@ unimined.minecraft {
     defaultRemapJar = false
 }
 
-archivesBaseName = archivesBaseName + "-common"
+base {
+    archivesName = archivesName.get() + "-common"
+}
 
 sourceSets {
     api {

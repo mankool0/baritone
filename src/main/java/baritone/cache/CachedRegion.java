@@ -44,7 +44,7 @@ public final class CachedRegion implements ICachedRegion {
     /**
      * Magic value to detect invalid cache files, or incompatible cache files saved in an old version of Baritone
      */
-    private static final int CACHED_REGION_MAGIC = 456022911;
+    public static final int CACHED_REGION_MAGIC = 456022911;
 
     /**
      * All of the chunks in this region: A 32x32 array of them.
@@ -125,11 +125,9 @@ public final class CachedRegion implements ICachedRegion {
             }
             System.out.println("Saving region " + x + "," + z + " to disk " + path);
             Path regionFile = getRegionFile(path, this.x, this.z);
-            if (!Files.exists(regionFile)) {
-                Files.createFile(regionFile);
-            }
+            Path tempFile = regionFile.resolveSibling(regionFile.getFileName() + ".tmp");
             try (
-                    FileOutputStream fileOut = new FileOutputStream(regionFile.toFile());
+                    FileOutputStream fileOut = new FileOutputStream(tempFile.toFile());
                     GZIPOutputStream gzipOut = new GZIPOutputStream(fileOut, 16384);
                     DataOutputStream out = new DataOutputStream(gzipOut)
             ) {
@@ -181,6 +179,7 @@ public final class CachedRegion implements ICachedRegion {
                     }
                 }
             }
+            CacheFiles.moveIntoPlace(tempFile, regionFile);
             hasUnsavedChanges = false;
             System.out.println("Saved region successfully");
         } catch (Exception ex) {

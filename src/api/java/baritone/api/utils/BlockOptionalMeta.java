@@ -237,7 +237,7 @@ public final class BlockOptionalMeta {
                         .withParameter(LootContextParams.BLOCK_STATE, b.defaultBlockState())
                         .withParameter(LootContextParams.TOOL, new ItemStack(Items.NETHERITE_PICKAXE, 1));
                     getDrops(block, lv5).stream().map(ItemStack::getItem).forEach(items::add);
-                } catch (Exception e) {
+                } catch (Throwable e) {
                     e.printStackTrace();
                 }
                 return items;
@@ -282,6 +282,10 @@ public final class BlockOptionalMeta {
 
         @Override
         public RegistryAccess registryAccess() {
+            // Loot tables are populated only by the reloaded server registries built
+            // in load(). A client RegistryAccess never receives them, so sourcing the
+            // holder from client.level made every block resolve to zero drops, which
+            // silently broke #mine item pickup (regression from PR #5058).
             return registryAccess.join();
         }
 

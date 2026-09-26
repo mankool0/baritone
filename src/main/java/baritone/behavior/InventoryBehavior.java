@@ -88,15 +88,17 @@ public final class InventoryBehavior extends Behavior implements Helper {
             return;
         }
         ticksSinceLastInventoryMove++;
-        if (firstValidThrowaway() >= 9) { // aka there are none on the hotbar, but there are some in main inventory
+        boolean pathing = baritone.getPathingBehavior().isPathing();
+        if (pathing && firstValidThrowaway() >= 9) { // aka there are none on the hotbar, but there are some in main inventory
             requestSwapWithHotBar(firstValidThrowaway(), 8);
         }
         if (Baritone.settings().keepToolsOnHotbar.value) {
+            // not gated on pathing: walk-creep and the printer don't path, and switchToBestToolFor only looks at the hotbar
             keepToolAt(bestSwordSlot(), SWORD_SLOT);
             keepToolAt(bestToolAgainst(Blocks.STONE, PickaxeItem.class), PICKAXE_SLOT);
             keepToolAt(bestToolAgainst(Blocks.DIRT, ShovelItem.class), SHOVEL_SLOT);
             keepToolAt(bestToolAgainst(Blocks.OAK_LOG, AxeItem.class), AXE_SLOT);
-        } else {
+        } else if (pathing) {
             int pick = bestToolAgainst(Blocks.STONE, PickaxeItem.class);
             if (pick >= 9) {
                 requestSwapWithHotBar(pick, 0);

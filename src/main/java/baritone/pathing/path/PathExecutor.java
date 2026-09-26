@@ -30,6 +30,7 @@ import baritone.pathing.calc.AbstractNodeCostSearch;
 import baritone.pathing.movement.CalculationContext;
 import baritone.pathing.movement.Movement;
 import baritone.pathing.movement.MovementHelper;
+import baritone.pathing.movement.MovementState;
 import baritone.pathing.movement.movements.*;
 import baritone.utils.BlockStateInterface;
 import it.unimi.dsi.fastutil.longs.LongIterator;
@@ -411,6 +412,9 @@ public class PathExecutor implements IPathExecutor, Helper {
 
         // if the movement requested sprinting, then we're done
         if (requested) {
+            if (Baritone.settings().headHitters.value) {
+                headHitJump(current);
+            }
             return true;
         }
 
@@ -505,12 +509,87 @@ public class PathExecutor implements IPathExecutor, Helper {
                     return true;
                 }
                 clearKeys();
+                // we are not ticking the movement, so we gotta do this ourselves
+                BetterBlockPos src = current.getSrc();
+                BetterBlockPos dest = current.getDest();
+                MovementState fakeState = new MovementState();
+                if (!MovementHelper.openDoors(ctx, fakeState, src, new BetterBlockPos(dest.x, src.y, dest.z))) {
+                    boolean forceRotations = fakeState.getTarget().hasToForceRotations();
+                    fakeState.getTarget().getRotation().ifPresent(rotation ->
+                            behavior.baritone.getLookBehavior().updateTarget(rotation, forceRotations));
+                    fakeState.getInputStates().forEach(behavior.baritone.getInputOverrideHandler()::setInputForceState);
+                    fakeState.getInputStates().clear();
+                    return true;
+                }
                 behavior.baritone.getLookBehavior().updateTarget(RotationUtils.calcRotationFromVec3d(ctx.playerHead(), data.getA(), ctx.playerRotations()), false);
                 behavior.baritone.getInputOverrideHandler().setInputForceState(Input.MOVE_FORWARD, true);
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * Sprint jump into a low ceiling (1x2 corridors, overhangs, etc.) for a bit of extra speed.
+     * The sprint jump boost applies on the first ticks of the jump, before we bonk our head on the ceiling.
+     * This runs after movement.update() has cleared and reasserted the forced inputs,
+     * so a jump forced here lasts exactly one tick.
+     */
+    private void headHitJump(IMovement current) {
+        if (!canStartHeadHitting(current) || !underHeadBonkCeiling(current.getDirection(), ctx.playerFeet()) || !clearOfLedgesAhead(current.getDirection())) {
+            return;
+        }
+        behavior.baritone.getInputOverrideHandler().setInputForceState(Input.JUMP, true);
+    }
+
+    private boolean canStartHeadHitting(IMovement current) {
+        if (!(current instanceof MovementTraverse) || current.getDirection().getY() != 0) {
+            return false; // head hitting only applies to flat walking movements
+        }
+        if (!ctx.player().onGround() || MovementHelper.isLiquid(ctx, ctx.playerFeet())) {
+            return false;
+        }
+        if (!ctx.player().onGround() || MovementHelper.isLiquid(ctx, ctx.playerFeet()) || ctx.player().isInWater()) {
+            return false; // hopping in water or on a vine just sticks us to it instead
+        }
+        if (((Movement) current).toBreakCached == null || !((Movement) current).toBreakCached.isEmpty()) {
+            return false; // breaking is like 5x slower when you're jumping
+        }
+        // not while sneaking either, e.g. walking on magma, a jump would break the sneak and the edge safety with it
+        return !behavior.baritone.getInputOverrideHandler().isInputForcedDown(Input.SNEAK);
+    }
+
+    private boolean underHeadBonkCeiling(BlockPos dir, BetterBlockPos feet) {
+        BlockPos ceiling = feet.above(2);
+        if (MovementHelper.fullyPassable(ctx, ceiling) || !MovementHelper.isBlockNormalCube(ctx.world().getBlockState(ceiling))) {
+            return false; // not under a ceiling yet, or the thing overhead is something like a trapdoor that we can't reliably bonk against
+        }
+        // make sure we're fully inside the corridor before we start jumping, same idea as skipNow
+        BlockPos behind = feet.subtract(dir).above(2);
+        if (MovementHelper.fullyPassable(ctx, behind)) {
+            double flatDist = Math.abs(dir.getX() * (behind.getX() + 0.5D - ctx.player().position().x)) + Math.abs(dir.getZ() * (behind.getZ() + 0.5D - ctx.player().position().z));
+            return flatDist >= 0.8; // just entered, wait until we're clear of the entrance face
+        }
+        return true;
+    }
+
+    private boolean clearOfLedgesAhead(BlockPos dir) {
+        // momentum from the head bonk can carry us an extra block or two, so don't headhit unless the next two blocks
+        // in this direction are also part of the path, that way momentum can never send us off it
+        for (int i = 1; i <= 2; i++) {
+            if (pathPosition + i > path.length() - 2 || !path.movements().get(pathPosition + i).getDirection().equals(dir)) {
+                return false; // the path turns or ends within two blocks, don't add any momentum
+            }
+            Movement next = (Movement) path.movements().get(pathPosition + i);
+            if (next.toPlaceCached != null && !next.toPlaceCached.isEmpty()) {
+                return false; // the movement is going to place its own support, and momentum can arrive before those blocks do
+            }
+            BlockPos floor = next.getDest().below();
+            if (MovementHelper.isLiquid(ctx, floor) || !MovementHelper.canWalkOn(ctx, floor)) {
+                return false; // no real support under the destination yet: liquid (frostwalker ice hasn't frozen yet) or passable (ladders/vines have no floor at all), and momentum can't wait for it to appear
+            }
+        }
+        return true;
     }
 
     private Tuple<Vec3, BlockPos> overrideFall(MovementFall movement) {
