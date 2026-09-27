@@ -40,7 +40,6 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 import static baritone.api.pathing.movement.ActionCosts.COST_INF;
@@ -92,16 +91,8 @@ public class CalculationContext {
 
     public final PrecomputedData precomputedData;
 
-    // memo for getMiningDurationTicks by position
-    // the block under you gets its break cost worked out by four descends, a downward, and then all your neighbours' descends
-    // and every one of those reads five more blocks for avoidBreaking. the answer doesn't change mid search so just remember it
-    // only the pathing thread gets one, the per tick contexts ask like three questions and die
-    // two of everything because includeFalling is part of the question
-    public static final int MINING_CACHE_BITS = 16;
-    public final long[] miningKeys;
-    public final long[] miningKeysFalling;
-    public final double[] miningVals;
-    public final double[] miningValsFalling;
+    // set by AbstractNodeCostSearch while a search runs on this context, see MiningDurationCache
+    public MiningDurationCache miningCache;
 
     public CalculationContext(IBaritone baritone) {
         this(baritone, false);
@@ -138,20 +129,6 @@ public class CalculationContext {
         this.canSprint = canSprint;
         this.minY = bsi.minY;
         this.maxY = bsi.maxY;
-        if (forUseOnAnotherThread) {
-            this.miningKeys = new long[1 << MINING_CACHE_BITS];
-            this.miningKeysFalling = new long[1 << MINING_CACHE_BITS];
-            // -1 is the "nothing here" key, see getMiningDurationTicks for why that's safe
-            Arrays.fill(this.miningKeys, -1L);
-            Arrays.fill(this.miningKeysFalling, -1L);
-            this.miningVals = new double[1 << MINING_CACHE_BITS];
-            this.miningValsFalling = new double[1 << MINING_CACHE_BITS];
-        } else {
-            this.miningKeys = null;
-            this.miningKeysFalling = null;
-            this.miningVals = null;
-            this.miningValsFalling = null;
-        }
         this.placeBlockCost = Baritone.settings().blockPlacementPenalty.value;
         this.allowBreak = Baritone.settings().allowBreak.value;
         this.allowBreakAnyway = new ArrayList<>(Baritone.settings().allowBreakAnyway.value);

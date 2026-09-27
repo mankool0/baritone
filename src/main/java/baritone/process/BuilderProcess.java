@@ -1086,10 +1086,10 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
 
     @Override
     public PathingCommand onTick(boolean calcFailed, boolean isSafeToCancel) {
-        return onTick(calcFailed, isSafeToCancel, 0);
+        return onTick(calcFailed, isSafeToCancel, 0, null);
     }
 
-    private PathingCommand onTick(boolean calcFailed, boolean isSafeToCancel, int recursions) {
+    private PathingCommand onTick(boolean calcFailed, boolean isSafeToCancel, int recursions, BuilderCalculationContext reuse) {
         if (recursions > 100) { // onTick calls itself, don't crash
             return new PathingCommand(null, PathingCommandType.SET_GOAL_AND_PATH);
         }
@@ -1154,12 +1154,14 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                 }
             };
         }
-        BuilderCalculationContext bcc = new BuilderCalculationContext();
+        // one context per tick, not per recursion: with no end set this recurses to the cap every tick
+        // the builder has nothing loaded to do, and a threaded context isn't cheap to build
+        BuilderCalculationContext bcc = reuse == null ? new BuilderCalculationContext() : reuse.retarget();
         if (!recalc(bcc)) {
             if (Baritone.settings().buildInLayers.value && layer * Baritone.settings().layerHeight.value < stopAtHeight) {
                 logDirect("Starting layer " + layer);
                 layer++;
-                return onTick(calcFailed, isSafeToCancel, recursions + 1);
+                return onTick(calcFailed, isSafeToCancel, recursions + 1, bcc);
             }
             Vec3i repeat = Baritone.settings().buildRepeat.value;
             int max = Baritone.settings().buildRepeatCount.value;
@@ -1202,7 +1204,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             if (Baritone.settings().buildRepeatLog.value) {
                 logDirect("Repeating build in vector " + step + ", new origin is " + origin);
             }
-            return onTick(calcFailed, isSafeToCancel, recursions + 1);
+            return onTick(calcFailed, isSafeToCancel, recursions + 1, bcc);
         }
         if (Baritone.settings().distanceTrim.value) {
             trim();
@@ -1365,7 +1367,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             if (Baritone.settings().skipFailedLayers.value && Baritone.settings().buildInLayers.value && layer * Baritone.settings().layerHeight.value < realSchematic.heightY()) {
                 logDirect("Skipping layer that I cannot construct! Layer #" + layer);
                 layer++;
-                return onTick(calcFailed, isSafeToCancel, recursions + 1);
+                return onTick(calcFailed, isSafeToCancel, recursions + 1, bcc);
             }
             logDirect("Unable to do it. Pausing. resume to resume, cancel to cancel");
             paused = true;
@@ -1965,23 +1967,33 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
 
     public class BuilderCalculationContext extends CalculationContext {
 
-        private final List<BlockState> placeable;
-        private final ISchematic schematic;
-        private final int originX;
-        private final int originY;
-        private final int originZ;
+        private List<BlockState> placeable;
+        private ISchematic schematic;
+        private int originX;
+        private int originY;
+        private int originZ;
 
         public BuilderCalculationContext() {
             super(BuilderProcess.this.baritone, true); // wew lad
+            retarget();
+
+            this.jumpPenalty += 10;
+            this.backtrackCostFavoringCoefficient = 1;
+            this.avoidNetherPortals = true;
+        }
+
+        /**
+         * Picks up the builder's current schematic and origin, for onTick re-running itself within the same tick
+         * (next layer, next repeat, skipped layer). Everything underneath (the world snapshot, tools, settings) is
+         * the same for the whole tick, and building it is the expensive part.
+         */
+        private BuilderCalculationContext retarget() {
             this.placeable = approxPlaceable(9);
             this.schematic = BuilderProcess.this.schematic;
             this.originX = origin.getX();
             this.originY = origin.getY();
             this.originZ = origin.getZ();
-
-            this.jumpPenalty += 10;
-            this.backtrackCostFavoringCoefficient = 1;
-            this.avoidNetherPortals = true;
+            return this;
         }
 
         private BlockState getSchematic(int x, int y, int z, BlockState current) {

@@ -621,14 +621,16 @@ public interface MovementHelper extends ActionCosts, Helper {
     }
 
     static double getMiningDurationTicks(CalculationContext context, int x, int y, int z, BlockState state, boolean includeFalling) {
-        long[] keys = includeFalling ? context.miningKeysFalling : context.miningKeys;
-        if (keys == null) {
+        MiningDurationCache cache = context.miningCache;
+        if (cache == null || cache.owner != Thread.currentThread()) {
+            // not inside a search on this thread
             return getMiningDurationTicks0(context, x, y, z, state, includeFalling);
         }
+        long[] keys = includeFalling ? cache.keysFalling : cache.keys;
         // y is shifted so it's never negative, which means the all ones key would need y=4095. no
         long key = ((long) (x & 0x3FFFFFF) << 38) | ((long) (z & 0x3FFFFFF) << 12) | ((y - context.minY) & 0xFFF);
-        int slot = (int) ((key * 0x9E3779B97F4A7C15L) >>> (64 - CalculationContext.MINING_CACHE_BITS));
-        double[] vals = includeFalling ? context.miningValsFalling : context.miningVals;
+        int slot = (int) ((key * 0x9E3779B97F4A7C15L) >>> (64 - MiningDurationCache.BITS));
+        double[] vals = includeFalling ? cache.valsFalling : cache.vals;
         if (keys[slot] == key) {
             return vals[slot];
         }

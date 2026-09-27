@@ -34,8 +34,6 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 
-import java.util.Arrays;
-
 /**
  * Wraps get for chuck caching capability
  *
@@ -60,12 +58,8 @@ public class BlockStateInterface {
     public final int maxY;
     private final int height;
 
-    // position -> state cache, only for the pathing thread's copy (null keys = no cache)
-    // the per tick ones on the main thread look up like four blocks and get garbage collected, not worth it
-    // 64k entries hits ~80% of the time, 16k only managed 73%, so 64k it is
-    private static final int CACHE_BITS = 16;
-    private final long[] cacheKeys;
-    private final BlockState[] cacheVals;
+    // set by AbstractNodeCostSearch while a search runs on this, see BlockStateCache
+    public BlockStateCache searchCache;
 
     private static final BlockState AIR = Blocks.AIR.defaultBlockState();
 
@@ -89,22 +83,8 @@ public class BlockStateInterface {
         this.minY = world.dimensionType().minY();
         this.height = world.dimensionType().height();
         this.maxY = minY + height - 1;
-        if (copyLoadedChunks) {
-            this.cacheKeys = newCacheKeys();
-            this.cacheVals = new BlockState[1 << CACHE_BITS];
-        } else {
-            this.cacheKeys = null;
-            this.cacheVals = null;
-        }
         this.isPassableBlockPos = new BlockPos.MutableBlockPos();
         this.access = new BlockStateInterfaceAccessWrapper(this);
-    }
-
-    private static long[] newCacheKeys() {
-        long[] keys = new long[1 << CACHE_BITS];
-        // -1 would be a block at shifted y=4095. good luck
-        Arrays.fill(keys, -1L);
-        return keys;
     }
 
     // for subclasses that get their blocks from somewhere that isn't a client world (benchmarks, tests)
@@ -118,8 +98,6 @@ public class BlockStateInterface {
         this.minY = minY;
         this.height = height;
         this.maxY = minY + height - 1;
-        this.cacheKeys = newCacheKeys();
-        this.cacheVals = new BlockState[1 << CACHE_BITS];
         this.isPassableBlockPos = new BlockPos.MutableBlockPos();
         this.access = new BlockStateInterfaceAccessWrapper(this);
     }
@@ -148,20 +126,20 @@ public class BlockStateInterface {
         if (y < 0 || y >= height) {
             return AIR;
         }
-        long[] keys = cacheKeys;
-        if (keys == null) {
+        BlockStateCache cache = searchCache;
+        if (cache == null || cache.owner != Thread.currentThread()) {
+            // not inside a search on this thread
             return getUncached(x, y, z);
         }
-        // the 22 movements out of one node read the same 50 blocks about 110 times between them
-        // and then the next node reads most of them again. so, cache
         long key = ((long) (x & 0x3FFFFFF) << 38) | ((long) (z & 0x3FFFFFF) << 12) | y;
-        int slot = (int) ((key * 0x9E3779B97F4A7C15L) >>> (64 - CACHE_BITS));
+        int slot = (int) ((key * 0x9E3779B97F4A7C15L) >>> (64 - BlockStateCache.BITS));
+        long[] keys = cache.keys;
         if (keys[slot] == key) {
-            return cacheVals[slot];
+            return cache.vals[slot];
         }
         BlockState state = getUncached(x, y, z);
         keys[slot] = key;
-        cacheVals[slot] = state;
+        cache.vals[slot] = state;
         return state;
     }
 

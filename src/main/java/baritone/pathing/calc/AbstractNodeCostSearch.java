@@ -25,6 +25,8 @@ import baritone.api.utils.BetterBlockPos;
 import baritone.api.utils.Helper;
 import baritone.api.utils.PathCalculationResult;
 import baritone.pathing.movement.CalculationContext;
+import baritone.pathing.movement.MiningDurationCache;
+import baritone.utils.BlockStateCache;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 
 import java.util.Optional;
@@ -123,6 +125,10 @@ public abstract class AbstractNodeCostSearch implements IPathFinder, Helper {
             throw new IllegalStateException("Path finder cannot be reused!");
         }
         cancelRequested = false;
+        MiningDurationCache miningCache = MiningDurationCache.emptyForCurrentThread();
+        BlockStateCache blockCache = BlockStateCache.emptyForCurrentThread();
+        context.miningCache = miningCache;
+        context.bsi.searchCache = blockCache;
         try {
             IPath path = calculate0(primaryTimeout, failureTimeout).map(IPath::postProcess).orElse(null);
             if (cancelRequested) {
@@ -155,6 +161,13 @@ public abstract class AbstractNodeCostSearch implements IPathFinder, Helper {
             return new PathCalculationResult(PathCalculationResult.Type.EXCEPTION);
         } finally {
             // this is run regardless of what exception may or may not be raised by calculate0
+            // unless another search on this context replaced them
+            if (context.miningCache == miningCache) {
+                context.miningCache = null;
+            }
+            if (context.bsi.searchCache == blockCache) {
+                context.bsi.searchCache = null;
+            }
             isFinished = true;
         }
     }
