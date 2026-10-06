@@ -315,7 +315,7 @@ public final class Settings {
      * <p>
      * If a schematic asks for a block on this mapping, all blocks on the mapped list will be accepted at that location as well
      * <p>
-     * Syntax same as <a href="https://baritone.leijurv.com/baritone/api/Settings.html#buildSubstitutes">buildSubstitutes</a>
+     * Syntax same as {@link #buildSubstitutes}
      */
     public final Setting<Map<Block, List<Block>>> buildValidSubstitutes = new Setting<>(new HashMap<>());
 
@@ -413,6 +413,23 @@ public final class Settings {
      * The sprint jump speed boost applies before we hit the ceiling, making this faster than just sprinting.
      */
     public final Setting<Boolean> headHitters = new Setting<>(false);
+
+    /**
+     * Also sprint jump under low ceilings on flat diagonal movements when {@link #headHitters} is enabled.
+     * Enabled by default. Disable this to limit head hitters to straight movements.
+     */
+    public final Setting<Boolean> headHittersDiagonal = new Setting<>(true);
+
+    /**
+     * Sprint jump along straight stretches of path, up single block steps and down small hills. Every jump is simulated
+     * first and only happens if it lands back on the path without fall damage.
+     */
+    public final Setting<Boolean> sprintJumping = new Setting<>(false);
+
+    /**
+     * Also sprint jump along flat diagonal stretches of path when {@link #sprintJumping} is enabled.
+     */
+    public final Setting<Boolean> sprintJumpingDiagonals = new Setting<>(true);
 
     /**
      * If we overshoot a traverse and end up one block beyond the destination, mark it as successful anyway.
