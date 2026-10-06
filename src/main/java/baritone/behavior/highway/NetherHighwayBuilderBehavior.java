@@ -568,7 +568,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 if (!wrongDimension) {
                     wrongDimension = true;
                     portalReturn.reset();
-                    Helper.HELPER.logDirect("Now in " + ctx.world().dimension().location() + " instead of " + startDimension.location()
+                    Helper.HELPER.logDirect("Now in " + ctx.world().dimension().identifier() + " instead of " + startDimension.identifier()
                             + " (portal teleport?). Stepping out of the exit portal and back in to get sent home.");
                     baritone.getInputOverrideHandler().clearAllKeys();
                     baritone.getPathingBehavior().cancelEverything();
@@ -579,7 +579,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             }
             if (wrongDimension) {
                 wrongDimension = false;
-                Helper.HELPER.logDirect("Back in " + startDimension.location() + ", restarting the builder.");
+                Helper.HELPER.logDirect("Back in " + startDimension.identifier() + ", restarting the builder.");
                 baritone.getInputOverrideHandler().clearAllKeys();
                 baritone.getPathingBehavior().cancelEverything();
                 highwayContext.resetTimer();
@@ -747,10 +747,10 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             highwayContext.renderLockLiquid().unlock();
 
             if (liquidArea != null) {
-                BufferBuilder bufferBuilder = IRenderer.startLines(Color.BLUE, 2, settings.renderSelectionBoxesIgnoreDepth.value);
+                BufferBuilder bufferBuilder = IRenderer.startLines(Color.BLUE);
                 // Inflate a bit more than the building-area boxes: when paving, the scan area hugs
                 // the building area, so equal-size boxes would z-fight
-                IRenderer.emitAABB(bufferBuilder, event.getModelViewStack(), liquidArea, .05D);
+                IRenderer.emitAABB(bufferBuilder, event.getModelViewStack(), liquidArea, .05D, 2);
                 IRenderer.endLines(bufferBuilder, settings.renderSelectionBoxesIgnoreDepth.value);
             }
         }
@@ -759,7 +759,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             highwayContext.renderLockBuilding().lock();
             BlockStateInterface bsi = new BlockStateInterface(BaritoneAPI.getProvider().getPrimaryBaritone().getPlayerContext());
             highwayContext.renderBlocksBuilding().forEach((pos, color) -> {
-                BufferBuilder bufferBuilder = IRenderer.startLines(color, 2, settings.renderSelectionBoxesIgnoreDepth.value);
+                BufferBuilder bufferBuilder = IRenderer.startLines(color);
 
                 BlockState state = bsi.get0(pos);
                 VoxelShape shape;
@@ -773,7 +773,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 if (!shape.isEmpty()) {
                     AABB bounds = shape.bounds();
                     toDraw = new AABB(pos.getX(), pos.getY(), pos.getZ(), pos.getX() + bounds.getXsize(), pos.getY() + bounds.getYsize(), pos.getZ() + bounds.getZsize());
-                    IRenderer.emitAABB(bufferBuilder, event.getModelViewStack(), toDraw, .002D);
+                    IRenderer.emitAABB(bufferBuilder, event.getModelViewStack(), toDraw, .002D, 2);
 
                     IRenderer.endLines(bufferBuilder, settings.renderSelectionBoxesIgnoreDepth.value);
                 }
@@ -787,7 +787,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         if (event.getState() == EventState.POST) {
             // Runs on the netty thread, so only flags are written here.
             if (event.getPacket() instanceof ClientboundContainerSetContentPacket contents) {
-                highwayContext.noteContainerSync(contents.getContainerId());
+                highwayContext.noteContainerSync(contents.containerId());
             } else if (event.getPacket() instanceof ClientboundLoginPacket
                     || event.getPacket() instanceof ClientboundRespawnPacket) {
                 highwayContext.noteInventoryDesynced();

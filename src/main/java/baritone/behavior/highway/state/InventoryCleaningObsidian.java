@@ -97,7 +97,7 @@ public class InventoryCleaningObsidian extends State {
         int obsidianRoom = 0;
         int cryingRoom = 0;
         for (int i = 0; i < 36; i++) {
-            ItemStack stack = context.playerContext().player().getInventory().items.get(i);
+            ItemStack stack = context.playerContext().player().getInventory().getNonEquipmentItems().get(i);
             if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem)) {
                 continue;
             }

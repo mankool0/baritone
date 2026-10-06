@@ -35,31 +35,35 @@ import baritone.pathing.movement.MovementHelper;
 import baritone.process.BuilderProcess;
 import net.minecraft.core.*;
 import net.minecraft.core.component.DataComponents;
-import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
-import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
+import net.minecraft.network.protocol.game.ServerboundPlayerInputPacket;
 import net.minecraft.network.protocol.game.ServerboundSwingPacket;
 import net.minecraft.tags.FluidTags;
+import net.minecraft.tags.ItemTags;
+import net.minecraft.util.ProblemReporter;
 import net.minecraft.world.ContainerHelper;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.monster.Shulker;
-import net.minecraft.world.entity.vehicle.Boat;
+import net.minecraft.world.entity.vehicle.boat.Boat;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.*;
-import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.item.component.ItemContainerContents;
+import net.minecraft.world.item.component.TypedEntityData;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.item.enchantment.ItemEnchantments;
 import net.minecraft.world.level.ItemLike;
 import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.TagValueInput;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
@@ -1260,7 +1264,7 @@ public class HighwayContext {
     }
 
     private boolean isPlayerWearingGoldArmor(net.minecraft.world.entity.player.Player player) {
-        return player.getInventory().armor.stream().anyMatch(stack ->
+        return java.util.stream.Stream.of(EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET).map(player::getItemBySlot).anyMatch(stack ->
                 stack.is(net.minecraft.world.item.Items.GOLDEN_HELMET)
                 || stack.is(net.minecraft.world.item.Items.GOLDEN_CHESTPLATE)
                 || stack.is(net.minecraft.world.item.Items.GOLDEN_LEGGINGS)
@@ -1287,9 +1291,9 @@ public class HighwayContext {
 
         // Collect ghasts that own a nearby fireball
         java.util.Set<Entity> ghastsThreatening = playerContext.entitiesStream()
-                .filter(e -> e instanceof net.minecraft.world.entity.projectile.LargeFireball && e.isAlive())
+                .filter(e -> e instanceof net.minecraft.world.entity.projectile.hurtingprojectile.LargeFireball && e.isAlive())
                 .filter(e -> e.distanceToSqr(player) <= 8.0 * 8.0)
-                .map(e -> ((net.minecraft.world.entity.projectile.LargeFireball) e).getOwner())
+                .map(e -> ((net.minecraft.world.entity.projectile.hurtingprojectile.LargeFireball) e).getOwner())
                 .filter(owner -> owner instanceof net.minecraft.world.entity.monster.Ghast)
                 .collect(java.util.stream.Collectors.toSet());
 
@@ -1606,8 +1610,8 @@ public class HighwayContext {
 
         if (inCombat) {
             int swordSlot = putBestSwordHotbar();
-            if (swordSlot != -1) {
-                playerContext.player().getInventory().selected = swordSlot;
+            if (swordSlot != -1 && swordSlot < 9) {
+                playerContext.player().getInventory().setSelectedSlot(swordSlot);
             }
         }
 
@@ -1984,7 +1988,7 @@ public class HighwayContext {
         int largestSlot = -1;
         int largestCount = 0;
         for (int i = 0; i < 36; i++) {
-            ItemStack stack = playerContext.player().getInventory().items.get(i);
+            ItemStack stack = playerContext.player().getInventory().getNonEquipmentItems().get(i);
             if (Item.getId(stack.getItem()) == itemId && stack.getCount() > largestCount) {
                 largestSlot = i;
                 largestCount = stack.getCount();
@@ -1996,7 +2000,7 @@ public class HighwayContext {
 
     public int getItemSlot(int itemId) {
         for (int i = 0; i < 36; i++) {
-            ItemStack stack = playerContext.player().getInventory().items.get(i);
+            ItemStack stack = playerContext.player().getInventory().getNonEquipmentItems().get(i);
             if (Item.getId(stack.getItem()) == itemId) {
                 return i;
             }
@@ -2007,7 +2011,7 @@ public class HighwayContext {
 
     public int getItemSlotHotbar(int itemId) {
         for (int i = 0; i < 9; i++) {
-            ItemStack stack = playerContext.player().getInventory().items.get(i);
+            ItemStack stack = playerContext.player().getInventory().getNonEquipmentItems().get(i);
             if (Item.getId(stack.getItem()) == itemId) {
                 return i;
             }
@@ -2018,7 +2022,7 @@ public class HighwayContext {
 
     public int getItemSlotNoHotbar(int itemId) {
         for (int i = 9; i < 36; i++) {
-            ItemStack stack = playerContext.player().getInventory().items.get(i);
+            ItemStack stack = playerContext.player().getInventory().getNonEquipmentItems().get(i);
             if (Item.getId(stack.getItem()) == itemId) {
                 return i;
             }
@@ -2053,8 +2057,8 @@ public class HighwayContext {
 
     private int getPickaxeSlot(boolean avoidSilkTouch) {
         for (int i = 0; i < 36; i++) {
-            ItemStack stack = playerContext.player().getInventory().items.get(i);
-            if (stack.getItem() instanceof PickaxeItem) {
+            ItemStack stack = playerContext.player().getInventory().getNonEquipmentItems().get(i);
+            if (stack.is(ItemTags.PICKAXES)) {
                 if (settings.itemSaver.value && (stack.getDamageValue() + settings.itemSaverThreshold.value) >= stack.getMaxDamage() && stack.getMaxDamage() > 1) {
                     continue;
                 }
@@ -2409,12 +2413,9 @@ public class HighwayContext {
             container.copyInto(contents);
         }
         else if (shulker.has(DataComponents.BLOCK_ENTITY_DATA)) {
-            CustomData data = shulker.get(DataComponents.BLOCK_ENTITY_DATA);
+            TypedEntityData<BlockEntityType<?>> data = shulker.get(DataComponents.BLOCK_ENTITY_DATA);
             if (data != null && data.contains("Items")) {
-                CompoundTag compoundTag = data.copyTag();
-                if (compoundTag.contains("Items")) {
-                    ContainerHelper.loadAllItems(compoundTag, contents, playerContext.player().registryAccess());
-                }
+                ContainerHelper.loadAllItems(TagValueInput.create(ProblemReporter.DISCARDING, playerContext.player().registryAccess(), data.copyTagWithoutId()), contents);
             }
         }
 
@@ -2426,7 +2427,7 @@ public class HighwayContext {
 
         int pickaxeCount = 0;
         for (ItemStack curStack : contents) {
-            if (curStack.getItem() instanceof PickaxeItem) {
+            if (curStack.is(ItemTags.PICKAXES)) {
                 if (settings.itemSaver.value && (curStack.getDamageValue() + settings.itemSaverThreshold.value) >= curStack.getMaxDamage() && curStack.getMaxDamage() > 1) {
                     continue;
                 }
@@ -2456,7 +2457,7 @@ public class HighwayContext {
 
         int pickaxeCount = 0;
         for (ItemStack curStack : contents) {
-            if (curStack.getItem() instanceof PickaxeItem) {
+            if (curStack.is(ItemTags.PICKAXES)) {
                 if (settings.itemSaver.value && (curStack.getDamageValue() + settings.itemSaverThreshold.value) >= curStack.getMaxDamage() && curStack.getMaxDamage() > 1) {
                     continue;
                 }
@@ -2488,7 +2489,7 @@ public class HighwayContext {
             if (curStack.getItem() instanceof AirItem) {
                 continue;
             }
-            if (curStack.getItem() instanceof PickaxeItem && (curStack.getDamageValue() + settings.itemSaverThreshold.value) >= curStack.getMaxDamage() && curStack.getMaxDamage() > 1) {
+            if (curStack.is(ItemTags.PICKAXES) && (curStack.getDamageValue() + settings.itemSaverThreshold.value) >= curStack.getMaxDamage() && curStack.getMaxDamage() > 1) {
                 depletedCount++;
             } else {
                 return false; // Found a usable pick or some other item
@@ -2504,7 +2505,7 @@ public class HighwayContext {
         int enderChestCount = 0;
         for (ItemStack curStack : contents) {
             if (Item.getId(curStack.getItem()) != Item.getId(Items.AIR) && Item.getId(curStack.getItem()) != Item.getId(Blocks.ENDER_CHEST.asItem())) {
-                if (!settings.highwayAllowMixedShulks.value || !(curStack.getItem() instanceof PickaxeItem)) {
+                if (!settings.highwayAllowMixedShulks.value || !curStack.is(ItemTags.PICKAXES)) {
                     return 0;
                 }
             }
@@ -2566,7 +2567,7 @@ public class HighwayContext {
         int bestSlot = -1;
         int bestSlotCount = Integer.MAX_VALUE;
         for (int i = 0; i < 36; i++) {
-            ItemStack stack = playerContext.player().getInventory().items.get(i);
+            ItemStack stack = playerContext.player().getInventory().getNonEquipmentItems().get(i);
             if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem)) {
                 continue;
             }
@@ -2640,7 +2641,7 @@ public class HighwayContext {
     public int getItemCountInventory(int itemId) {
         int count = 0;
         for (int i = 0; i < 36; i++) {
-            ItemStack stack = playerContext.player().getInventory().items.get(i);
+            ItemStack stack = playerContext.player().getInventory().getNonEquipmentItems().get(i);
             if (Item.getId(stack.getItem()) == itemId) {
                 if (itemId == 0) {
                     // We're counting air slots
@@ -2726,7 +2727,7 @@ public class HighwayContext {
         int room = 0;
         int slots = slotsFreedLater;
         for (int i = 0; i < 36; i++) {
-            ItemStack stack = playerContext.player().getInventory().items.get(i);
+            ItemStack stack = playerContext.player().getInventory().getNonEquipmentItems().get(i);
             if (stack.isEmpty()) {
                 slots++;
             } else if (stack.is(Blocks.OBSIDIAN.asItem())) {
@@ -2744,7 +2745,7 @@ public class HighwayContext {
     public String obsidianRoomBreakdown() {
         int empty = 0, throwaway = 0, partial = 0, chestSlots = 0, obsidianSlots = 0;
         for (int i = 0; i < 36; i++) {
-            ItemStack stack = playerContext.player().getInventory().items.get(i);
+            ItemStack stack = playerContext.player().getInventory().getNonEquipmentItems().get(i);
             if (stack.isEmpty()) {
                 empty++;
             } else if (stack.is(Blocks.OBSIDIAN.asItem())) {
@@ -2759,13 +2760,13 @@ public class HighwayContext {
         return "empty=" + empty + " throwaway=" + throwaway + " obsidianSlots=" + obsidianSlots + " partialRoom=" + partial
                 + " chestSlots=" + chestSlots + " chests=" + getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem()))
                 + " offhand=" + playerContext.player().getOffhandItem().getCount() + "x" + playerContext.player().getOffhandItem().getItem()
-                + " ground=" + obsidianOnGroundNearby() + " slot8=" + playerContext.player().getInventory().items.get(8).getItem();
+                + " ground=" + obsidianOnGroundNearby() + " slot8=" + playerContext.player().getInventory().getNonEquipmentItems().get(8).getItem();
     }
 
     public int enderChestSlotsInventory() {
         int slots = 0;
         for (int i = 0; i < 36; i++) {
-            if (playerContext.player().getInventory().items.get(i).is(Blocks.ENDER_CHEST.asItem())) {
+            if (playerContext.player().getInventory().getNonEquipmentItems().get(i).is(Blocks.ENDER_CHEST.asItem())) {
                 slots++;
             }
         }
@@ -2779,7 +2780,7 @@ public class HighwayContext {
     public int enderChestSlotsAfterFarming(int keep, int hypotheticalStack) {
         List<Integer> stacks = new ArrayList<>();
         for (int i = 0; i < 36; i++) {
-            ItemStack stack = playerContext.player().getInventory().items.get(i);
+            ItemStack stack = playerContext.player().getInventory().getNonEquipmentItems().get(i);
             if (stack.is(Blocks.ENDER_CHEST.asItem())) {
                 stacks.add(stack.getCount());
             }
@@ -2862,8 +2863,8 @@ public class HighwayContext {
     public int getPickCountInventory() {
         int count = 0;
         for (int i = 0; i < 36; i++) {
-            ItemStack stack = playerContext.player().getInventory().items.get(i);
-            if (stack.getItem() instanceof PickaxeItem) {
+            ItemStack stack = playerContext.player().getInventory().getNonEquipmentItems().get(i);
+            if (stack.is(ItemTags.PICKAXES)) {
                 if (settings.itemSaver.value && (stack.getDamageValue() + settings.itemSaverThreshold.value) >= stack.getMaxDamage() && stack.getMaxDamage() > 1) {
                     continue;
                 }
@@ -2924,7 +2925,7 @@ public class HighwayContext {
         }
 
         // Validate we have the right item
-        ItemStack stack = playerContext.player().getInventory().items.get(shulkerSlot);
+        ItemStack stack = playerContext.player().getInventory().getNonEquipmentItems().get(shulkerSlot);
         if (!shulkerItemList.contains(stack.getItem())) {
             Helper.HELPER.logDirect("Invalid shulker item in slot");
             return currentHighwayState;
@@ -2954,7 +2955,7 @@ public class HighwayContext {
         baritone.getLookBehavior().updateTarget(targetRotation.get(), true);
 
         // Select the shulker slot
-        playerContext.player().getInventory().selected = shulkerSlot;
+        playerContext.player().getInventory().setSelectedSlot(shulkerSlot);
 
         // Perform the placement using proper interaction
         InteractionResult result = playerContext.playerController().processRightClickBlock(
@@ -2997,7 +2998,7 @@ public class HighwayContext {
                 playerContext.playerRotations()
         );
         baritone.getLookBehavior().updateTarget(targetRotation, true);
-        playerContext.player().getInventory().selected = itemSlot;
+        playerContext.player().getInventory().setSelectedSlot(itemSlot);
 
         InteractionResult result = playerContext.playerController().processRightClickBlock(
                 playerContext.player(),
@@ -3437,8 +3438,8 @@ public class HighwayContext {
 
     private int getDepletedPickSlot() {
         for (int i = 0; i < 36; i++) {
-            ItemStack stack = playerContext.player().getInventory().items.get(i);
-            if (stack.getItem() instanceof PickaxeItem && (stack.getDamageValue() + settings.itemSaverThreshold.value) >= stack.getMaxDamage() && stack.getMaxDamage() > 1) {
+            ItemStack stack = playerContext.player().getInventory().getNonEquipmentItems().get(i);
+            if (stack.is(ItemTags.PICKAXES) && (stack.getDamageValue() + settings.itemSaverThreshold.value) >= stack.getMaxDamage() && stack.getMaxDamage() > 1) {
                 return i;
             }
         }
@@ -3449,7 +3450,7 @@ public class HighwayContext {
     public int lootPickaxeChestSlot() {
         AbstractContainerMenu curContainer = playerContext.player().containerMenu;
         for (int i = 0; i < 27; i++) {
-            if (curContainer.getSlot(i).getItem().getItem() instanceof PickaxeItem) {
+            if (curContainer.getSlot(i).getItem().is(ItemTags.PICKAXES)) {
                 // Don't loot depleted picks if we're using item saver mode
                 if (settings.itemSaver.value && (curContainer.getSlot(i).getItem().getDamageValue() + settings.itemSaverThreshold.value) >= curContainer.getSlot(i).getItem().getMaxDamage() && curContainer.getSlot(i).getItem().getMaxDamage() > 1) {
                     continue;
@@ -3672,7 +3673,7 @@ public class HighwayContext {
         int best = -1;
         int bestCount = 64;
         for (int i = 0; i < 36; i++) {
-            ItemStack stack = playerContext.player().getInventory().items.get(i);
+            ItemStack stack = playerContext.player().getInventory().getNonEquipmentItems().get(i);
             if (stack.getItem() instanceof BlockItem && ((BlockItem) stack.getItem()).getBlock() instanceof EnderChestBlock && stack.getCount() < 64) {
                 if (stack.getCount() < bestCount) {
                     best = i;
@@ -3713,7 +3714,7 @@ public class HighwayContext {
                 playerContext.playerController().windowClick(curContainer.containerId, i, 0, ClickType.QUICK_MOVE, playerContext.player());
                 return boxCount;
             }
-            int looseCount = playerContext.player().getInventory().items.get(looseSlot).getCount();
+            int looseCount = playerContext.player().getInventory().getNonEquipmentItems().get(looseSlot).getCount();
             int containerLooseSlot = invSlotToMenuSlot(looseSlot);
             // Pick up the box stack, deposit into our loose slot (fills to at most 64), put any remainder back
             playerContext.playerController().windowClick(curContainer.containerId, i, 0, ClickType.PICKUP, playerContext.player());
@@ -3749,7 +3750,7 @@ public class HighwayContext {
     public int getShulkerCountInventory(ShulkerType shulkerType) {
         int count = 0;
         for (int i = 0; i < 36; i++) {
-            ItemStack stack = playerContext.player().getInventory().items.get(i);
+            ItemStack stack = playerContext.player().getInventory().getNonEquipmentItems().get(i);
             if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem)) {
                 continue;
             }
@@ -5051,6 +5052,16 @@ public class HighwayContext {
         playerContext.playerController().processRightClickBlock(playerContext.player(), playerContext.world(), InteractionHand.MAIN_HAND, new BlockHitResult(hitVec, Direction.UP, support, false));
     }
 
+    /**
+     * The sneak state rides on the input packet since 1.21.6. LocalPlayer only resends that when
+     * its own keys change, so releasing means restoring what it last sent.
+     */
+    private void sendShiftKey(boolean down) {
+        net.minecraft.world.entity.player.Input last = playerContext.player().getLastSentInput();
+        net.minecraft.world.entity.player.Input input = down ? new net.minecraft.world.entity.player.Input(last.forward(), last.backward(), last.left(), last.right(), last.jump(), true, last.sprint()) : last;
+        playerContext.player().connection.send(new ServerboundPlayerInputPacket(input));
+    }
+
     private PlaceResult clickFace(BlockHitResult blockHitResult, boolean packetSwing, InteractionHand hand) {
         final BlockPos neighbor = blockHitResult.getBlockPos();
         final Block neighborBlock = playerContext.world().getBlockState(neighbor).getBlock();
@@ -5058,7 +5069,7 @@ public class HighwayContext {
 
         if (blackList.contains(neighborBlock) || shulkerBlockList.contains(neighborBlock) || activated)
         {
-            playerContext.player().connection.send(new ServerboundPlayerCommandPacket(playerContext.player(), ServerboundPlayerCommandPacket.Action.PRESS_SHIFT_KEY));
+            sendShiftKey(true);
         }
         InteractionResult l_Result2 = playerContext.playerController().processRightClickBlock(playerContext.player(), playerContext.world(), hand, blockHitResult);
 
@@ -5070,7 +5081,7 @@ public class HighwayContext {
                 playerContext.player().swing(hand);
             if (activated)
             {
-                playerContext.player().connection.send(new ServerboundPlayerCommandPacket(playerContext.player(), ServerboundPlayerCommandPacket.Action.RELEASE_SHIFT_KEY));
+                sendShiftKey(false);
             }
             return PlaceResult.Placed;
         }
@@ -5217,7 +5228,7 @@ public class HighwayContext {
             }
             int itemId = Item.getId(throwawayItem);
             for (int i = 0; i < 36; i++) {
-                if (i != 8 && Item.getId(playerContext.player().getInventory().items.get(i).getItem()) == itemId) {
+                if (i != 8 && Item.getId(playerContext.player().getInventory().getNonEquipmentItems().get(i).getItem()) == itemId) {
                     return i;
                 }
             }

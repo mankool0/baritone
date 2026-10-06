@@ -19,6 +19,7 @@ package baritone.utils;
 
 import baritone.api.utils.input.Input;
 import net.minecraft.client.player.ClientInput;
+import net.minecraft.world.phys.Vec2;
 
 public class PlayerMovementInput extends ClientInput {
 
@@ -30,31 +31,34 @@ public class PlayerMovementInput extends ClientInput {
 
     @Override
     public void tick() {
-        this.leftImpulse = 0.0F;
-        this.forwardImpulse = 0.0F;
+        float leftImpulse = 0.0F;
+        float forwardImpulse = 0.0F;
         boolean jumping = handler.isInputForcedDown(Input.JUMP); // oppa gangnam style
 
         boolean up = handler.isInputForcedDown(Input.MOVE_FORWARD);
         if (up) {
-            this.forwardImpulse++;
+            forwardImpulse++;
         }
 
         boolean down = handler.isInputForcedDown(Input.MOVE_BACK);
         if (down) {
-            this.forwardImpulse--;
+            forwardImpulse--;
         }
 
         boolean left = handler.isInputForcedDown(Input.MOVE_LEFT);
         if (left) {
-            this.leftImpulse++;
+            leftImpulse++;
         }
 
         boolean right = handler.isInputForcedDown(Input.MOVE_RIGHT);
         if (right) {
-            this.leftImpulse--;
+            leftImpulse--;
         }
 
         boolean sneaking = handler.isInputForcedDown(Input.SNEAK);
+        // normalized like KeyboardInput's, LocalPlayer.modifyInput applies the sneak slowdown
+        this.moveVector = new Vec2(leftImpulse, forwardImpulse).normalized();
+
         boolean sprinting = handler.isInputForcedDown(Input.SPRINT);
 
         this.keyPresses = new net.minecraft.world.entity.player.Input(up, down, left, right, jumping, sneaking, sprinting);

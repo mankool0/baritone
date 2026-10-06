@@ -43,8 +43,10 @@ import baritone.utils.BaritoneProcessHelper;
 import baritone.utils.PathingCommandContext;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.ChatFormatting;
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.NonNullList;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -205,7 +207,9 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
                 if (Baritone.settings().disconnectOnArrival.value && !reachedGoal) {
                     // don't be active when the user logs back in
                     this.onLostControl();
-                    ctx.world().disconnect();
+                    if (ctx.world() instanceof ClientLevel clientLevel) {
+                        clientLevel.disconnect(Component.literal("[Baritone] Arrived at goal!"));
+                    }
                     return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
                 }
                 reachedGoal = true;
@@ -476,7 +480,7 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
             return true;
         }
 
-        NonNullList<ItemStack> inv = ctx.player().getInventory().items;
+        NonNullList<ItemStack> inv = ctx.player().getInventory().getNonEquipmentItems();
         int qty = 0;
         for (int i = 0; i < 36; i++) {
             if (ElytraBehavior.isFireworks(inv.get(i))) {

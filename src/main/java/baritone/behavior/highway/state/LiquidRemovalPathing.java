@@ -247,9 +247,9 @@ public class LiquidRemovalPathing extends State {
                 context.transitionTo(HighwayState.Nothing);
                 return;
             }
-            ItemStack stack = context.playerContext().player().getInventory().items.get(pickSlot);
-            if (HighwayContext.validPicksList.contains(stack.getItem())) {
-                context.playerContext().player().getInventory().selected = pickSlot;
+            ItemStack stack = context.playerContext().player().getInventory().getNonEquipmentItems().get(pickSlot);
+            if (pickSlot < 9 && HighwayContext.validPicksList.contains(stack.getItem())) {
+                context.playerContext().player().getInventory().setSelectedSlot(pickSlot);
             }
 
             Rotation lavaRot = RotationUtils.calcRotationFromVec3d(context.playerContext().playerHead(), new Vec3(approachTarget.getX(), approachTarget.getY(), approachTarget.getZ()), context.playerContext().playerRotations());
@@ -416,9 +416,9 @@ public class LiquidRemovalPathing extends State {
                     // Make sure we have a pickaxe selected
                     int breakPickSlot = context.putPickaxeHotbar();
                     if (breakPickSlot != -1) {
-                        ItemStack breakStack = context.playerContext().player().getInventory().items.get(breakPickSlot);
-                        if (HighwayContext.validPicksList.contains(breakStack.getItem())) {
-                            context.playerContext().player().getInventory().selected = breakPickSlot;
+                        ItemStack breakStack = context.playerContext().player().getInventory().getNonEquipmentItems().get(breakPickSlot);
+                        if (breakPickSlot < 9 && HighwayContext.validPicksList.contains(breakStack.getItem())) {
+                            context.playerContext().player().getInventory().setSelectedSlot(breakPickSlot);
                         }
                         
                         // Look at the block and break it
@@ -472,7 +472,7 @@ public class LiquidRemovalPathing extends State {
         if (slot >= 9) {
             return FILL_PENDING;
         }
-        context.playerContext().player().getInventory().selected = slot;
+        context.playerContext().player().getInventory().setSelectedSlot(slot);
         return slot;
     }
 

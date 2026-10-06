@@ -15,28 +15,11 @@
  * along with Baritone.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package baritone.launch.mixins;
+package baritone.utils.accessor;
 
-import baritone.utils.accessor.IEntityRenderManager;
-import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
-import org.spongepowered.asm.mixin.Mixin;
+import net.minecraft.client.renderer.rendertype.RenderSetup;
+import net.minecraft.client.renderer.rendertype.RenderType;
 
-@Mixin(EntityRenderDispatcher.class)
-public class MixinEntityRenderManager implements IEntityRenderManager {
-
-
-    @Override
-    public double renderPosX() {
-        return ((EntityRenderDispatcher) (Object) this).camera.position().x;
-    }
-
-    @Override
-    public double renderPosY() {
-        return ((EntityRenderDispatcher) (Object) this).camera.position().y;
-    }
-
-    @Override
-    public double renderPosZ() {
-        return ((EntityRenderDispatcher) (Object) this).camera.position().z;
-    }
+public interface IRenderType {
+    RenderType createRenderType(String name, RenderSetup renderSetup);
 }

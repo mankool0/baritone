@@ -15,28 +15,13 @@
  * along with Baritone.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package baritone.launch.mixins;
+package baritone.utils.accessor;
 
-import baritone.utils.accessor.IEntityRenderManager;
-import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
-import org.spongepowered.asm.mixin.Mixin;
+import com.mojang.blaze3d.pipeline.RenderPipeline;
 
-@Mixin(EntityRenderDispatcher.class)
-public class MixinEntityRenderManager implements IEntityRenderManager {
+public interface IRenderPipelines {
+    RenderPipeline.Snippet getLinesSnippet();
+    RenderPipeline.Snippet getMatricesFogSnippet();
 
-
-    @Override
-    public double renderPosX() {
-        return ((EntityRenderDispatcher) (Object) this).camera.position().x;
-    }
-
-    @Override
-    public double renderPosY() {
-        return ((EntityRenderDispatcher) (Object) this).camera.position().y;
-    }
-
-    @Override
-    public double renderPosZ() {
-        return ((EntityRenderDispatcher) (Object) this).camera.position().z;
-    }
+    RenderPipeline baritone$registerPipeline(RenderPipeline pipeline);
 }

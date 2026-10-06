@@ -24,10 +24,9 @@ import baritone.api.event.events.SprintStateEvent;
 import baritone.api.event.events.type.EventState;
 import baritone.api.utils.accessor.IClientPlayerEntity;
 import baritone.behavior.LookBehavior;
-import net.minecraft.client.KeyMapping;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.entity.player.Abilities;
-import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.entity.player.Input;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.gen.Accessor;
@@ -113,13 +112,13 @@ public abstract class MixinClientPlayerEntity implements IClientPlayerEntity {
             method = "aiStep",
             at = @At(
                     value = "INVOKE",
-                    target = "net/minecraft/client/KeyMapping.isDown()Z"
+                    target = "Lnet/minecraft/world/entity/player/Input;sprint()Z"
             )
     )
-    private boolean isKeyDown(KeyMapping keyBinding) {
+    private boolean redirectSprintInput(final Input instance) {
         IBaritone baritone = BaritoneAPI.getProvider().getBaritoneForPlayer((LocalPlayer) (Object) this);
         if (baritone == null) {
-            return keyBinding.isDown();
+            return instance.sprint();
         }
         SprintStateEvent event = new SprintStateEvent();
         baritone.getGameEventHandler().onPlayerSprintState(event);
@@ -130,7 +129,7 @@ public abstract class MixinClientPlayerEntity implements IClientPlayerEntity {
             // hitting control shouldn't make all bots sprint
             return false;
         }
-        return keyBinding.isDown();
+        return instance.sprint();
     }
 
     @Inject(

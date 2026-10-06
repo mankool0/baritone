@@ -73,7 +73,7 @@ public class FarmingEnderChestClear extends State {
                     return;
                 }
                 if (pickSlot < 9) {
-                    context.playerContext().player().getInventory().selected = pickSlot;
+                    context.playerContext().player().getInventory().setSelectedSlot(pickSlot);
                 }
                 return;
             }

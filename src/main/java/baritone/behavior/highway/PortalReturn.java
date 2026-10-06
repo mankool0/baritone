@@ -98,7 +98,7 @@ public final class PortalReturn {
                 if (returnPortalPos == null || !(ctx.world().getBlockState(returnPortalPos).getBlock() instanceof NetherPortalBlock)) {
                     baritone.getInputOverrideHandler().clearAllKeys();
                     if (context.timer() % 1200 == 0) {
-                        Helper.HELPER.logDirect("The exit portal is gone; stand us in a portal back to " + startDimension.location() + " or stop the builder.");
+                        Helper.HELPER.logDirect("The exit portal is gone; stand us in a portal back to " + startDimension.identifier() + " or stop the builder.");
                     }
                     return;
                 }
@@ -203,7 +203,7 @@ public final class PortalReturn {
             return;
         }
         if (slot < 9) {
-            ctx.player().getInventory().selected = slot;
+            ctx.player().getInventory().setSelectedSlot(slot);
             float reach = (float) ctx.playerController().getBlockReachDistance();
             HighwayContext.PlaceResult result = context.place(floorPos, reach, true, false, InteractionHand.MAIN_HAND);
             if (result == HighwayContext.PlaceResult.CantPlace) {

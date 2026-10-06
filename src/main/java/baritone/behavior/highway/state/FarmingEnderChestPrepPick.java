@@ -48,9 +48,9 @@ public class FarmingEnderChestPrepPick extends State {
             }
             return;
         }
-        ItemStack stack = context.playerContext().player().getInventory().items.get(pickSlot);
+        ItemStack stack = context.playerContext().player().getInventory().getNonEquipmentItems().get(pickSlot);
         if (HighwayContext.validPicksList.contains(stack.getItem())) {
-            context.playerContext().player().getInventory().selected = pickSlot;
+            context.playerContext().player().getInventory().setSelectedSlot(pickSlot);
         }
 
         context.transitionTo(HighwayState.FarmingEnderChest);

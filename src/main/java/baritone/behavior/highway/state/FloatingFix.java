@@ -40,9 +40,9 @@ public class FloatingFix extends State {
             context.transitionTo(HighwayState.Nothing);
             return;
         }
-        ItemStack stack = context.playerContext().player().getInventory().items.get(pickSlot);
-        if (HighwayContext.validPicksList.contains(stack.getItem())) {
-            context.playerContext().player().getInventory().selected = pickSlot;
+        ItemStack stack = context.playerContext().player().getInventory().getNonEquipmentItems().get(pickSlot);
+        if (pickSlot < 9 && HighwayContext.validPicksList.contains(stack.getItem())) {
+            context.playerContext().player().getInventory().setSelectedSlot(pickSlot);
         }
 
         Rotation floatingReachable = context.floatingFixReachablesRemoveFirst();

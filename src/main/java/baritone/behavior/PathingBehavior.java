@@ -33,16 +33,18 @@ import baritone.pathing.calc.AbstractNodeCostSearch;
 import baritone.pathing.movement.CalculationContext;
 import baritone.pathing.movement.MovementHelper;
 import baritone.pathing.path.PathExecutor;
-import baritone.process.ElytraProcess;
 import baritone.utils.PathRenderer;
 import baritone.utils.PathingCommandContext;
 import baritone.utils.pathing.Favoring;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.LinkedBlockingQueue;
-import net.minecraft.core.BlockPos;
 
 public final class PathingBehavior extends Behavior implements IPathingBehavior, Helper {
 
@@ -176,7 +178,9 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
                     queuePathEvent(PathEvent.AT_GOAL);
                     next = null;
                     if (Baritone.settings().disconnectOnArrival.value) {
-                        ctx.world().disconnect();
+                        if (ctx.world() instanceof ClientLevel clientLevel) {
+                            clientLevel.disconnect(Component.literal("[Baritone] Arrived at goal!"));
+                        }
                     }
                     return;
                 }

@@ -106,7 +106,7 @@ public class WhiteBlackSchematic extends AbstractSchematic {
 
     private BlockState getDefaultOrThrowaway() {
         if (UseThrowaway) {
-            List<ItemStack> inventory = BaritoneAPI.getProvider().getPrimaryBaritone().getPlayerContext().player().getInventory().items;
+            List<ItemStack> inventory = BaritoneAPI.getProvider().getPrimaryBaritone().getPlayerContext().player().getInventory().getNonEquipmentItems();
             BlockState onHotbar = firstThrowawayIn(inventory, 0, 9);
             if (onHotbar != null) {
                 return onHotbar;

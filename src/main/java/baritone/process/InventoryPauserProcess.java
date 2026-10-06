@@ -57,8 +57,7 @@ public class InventoryPauserProcess extends BaritoneProcessHelper {
 
     private boolean calmNow() {
         return !ctx.player().isSprinting()
-                && ctx.player().input.forwardImpulse == 0
-                && ctx.player().input.leftImpulse == 0;
+                && ctx.player().input.getMoveVector().lengthSquared() == 0;
     }
 
     /**

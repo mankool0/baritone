@@ -183,7 +183,7 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
      * for the server without desyncing from the physics. The impulses cover real keys too.
      */
     public boolean isMovementInputForced() {
-        if (ctx.player().input.forwardImpulse != 0 || ctx.player().input.leftImpulse != 0) {
+        if (ctx.player().input.getMoveVector().lengthSquared() != 0) {
             return true;
         }
         return baritone.getInputOverrideHandler().isInputForcedDown(Input.MOVE_FORWARD)

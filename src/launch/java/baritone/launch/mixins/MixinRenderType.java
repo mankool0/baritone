@@ -17,26 +17,22 @@
 
 package baritone.launch.mixins;
 
-import baritone.utils.accessor.IEntityRenderManager;
-import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
+import baritone.utils.accessor.IRenderType;
+import net.minecraft.client.renderer.rendertype.RenderSetup;
+import net.minecraft.client.renderer.rendertype.RenderType;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
 
-@Mixin(EntityRenderDispatcher.class)
-public class MixinEntityRenderManager implements IEntityRenderManager {
+@Mixin(RenderType.class)
+public abstract class MixinRenderType implements IRenderType {
 
-
-    @Override
-    public double renderPosX() {
-        return ((EntityRenderDispatcher) (Object) this).camera.position().x;
+    @Shadow
+    static RenderType create(final String string, final RenderSetup renderSetup) {
+        return null;
     }
 
     @Override
-    public double renderPosY() {
-        return ((EntityRenderDispatcher) (Object) this).camera.position().y;
-    }
-
-    @Override
-    public double renderPosZ() {
-        return ((EntityRenderDispatcher) (Object) this).camera.position().z;
+    public RenderType createRenderType(final String name, final RenderSetup renderSetup) {
+        return create(name, renderSetup);
     }
 }

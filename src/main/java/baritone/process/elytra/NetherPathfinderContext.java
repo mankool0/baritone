@@ -33,6 +33,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.level.chunk.PaletteResize;
 import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.phys.Vec3;
 
@@ -323,7 +324,8 @@ public final class NetherPathfinderContext implements IElytraPathFinder {
                     continue;
                 }
                 final PalettedContainer<BlockState> bsc = extendedblockstorage.getStates();
-                var palette = ((IPalettedContainer<BlockState>) bsc).getPalette();
+                IPalettedContainer<BlockState> iPalettedContainer = (IPalettedContainer<BlockState>) bsc;
+                var palette = iPalettedContainer.getPalette();
                 // Mushrooms spawn on the roof and writing them as solid will cause pages to be unnecessarily allocated.
                 // idFor can't be used because it may update the palette
                 int airId = -1;
@@ -342,7 +344,7 @@ public final class NetherPathfinderContext implements IElytraPathFinder {
                     continue;
                 }
                 // pasted from FasterWorldScanner
-                final BitStorage array = ((IPalettedContainer<BlockState>) bsc).getStorage();
+                final BitStorage array = iPalettedContainer.getStorage();
                 if (array == null) continue;
                 final long[] longArray = array.getRaw();
                 final int arraySize = array.getSize();

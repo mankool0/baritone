@@ -29,6 +29,7 @@ import baritone.api.process.PathingCommandType;
 import baritone.api.schematic.*;
 import baritone.api.schematic.format.ISchematicFormat;
 import baritone.api.utils.*;
+import baritone.api.utils.Rotation;
 import baritone.api.utils.input.Input;
 import baritone.behavior.LookBehavior;
 import baritone.pathing.movement.CalculationContext;
@@ -39,8 +40,8 @@ import baritone.utils.BaritoneProcessHelper;
 import baritone.utils.BlockStateInterface;
 import baritone.utils.PathingCommandContext;
 import baritone.utils.schematic.MapArtSchematic;
-import baritone.utils.schematic.SelectionSchematic;
 import baritone.utils.schematic.SchematicSystem;
+import baritone.utils.schematic.SelectionSchematic;
 import baritone.utils.schematic.litematica.LitematicaHelper;
 import baritone.utils.schematic.schematica.SchematicaHelper;
 import com.google.common.collect.ImmutableSet;
@@ -57,7 +58,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.monster.EnderMan;
-import net.minecraft.world.entity.vehicle.Boat;
+import net.minecraft.world.entity.vehicle.boat.Boat;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
@@ -534,7 +535,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
 
     private OptionalInt hasAnyItemThatWouldPlace(BlockState desired, HitResult result, Rotation rot) {
         for (int i = 0; i < 9; i++) {
-            ItemStack stack = ctx.player().getInventory().items.get(i);
+            ItemStack stack = ctx.player().getInventory().getNonEquipmentItems().get(i);
             if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem)) {
                 continue;
             }
@@ -875,7 +876,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         if (!slot.isPresent() || (requiredSlot >= 0 && slot.getAsInt() != requiredSlot)) {
             return -1;
         }
-        ctx.player().getInventory().selected = slot.getAsInt();
+        ctx.player().getInventory().setSelectedSlot(slot.getAsInt());
         InteractionResult result = ctx.playerController().processRightClickBlock(ctx.player(), ctx.world(), InteractionHand.MAIN_HAND, bhr);
         if (!result.consumesAction()) {
             return -1;
@@ -1051,10 +1052,10 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
      */
     private boolean printerCanInstaBreak(BlockState state, BlockPos pos) {
         var inventory = ctx.player().getInventory();
-        int previous = inventory.selected;
+        int previous = inventory.getSelectedSlot();
         MovementHelper.switchToBestToolFor(ctx, state);
         boolean instant = state.getDestroyProgress(ctx.player(), ctx.world(), pos) >= 1.0f;
-        inventory.selected = previous;
+        inventory.setSelectedSlot(previous);
         return instant;
     }
 
@@ -1280,7 +1281,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                 Rotation rot = toPlace.get().rot;
                 legitAimTargetLastTick = new BetterBlockPos(toPlace.get().placeAgainst);
                 baritone.getLookBehavior().updateTarget(rot, true);
-                ctx.player().getInventory().selected = toPlace.get().hotbarSelection;
+                ctx.player().getInventory().setSelectedSlot(toPlace.get().hotbarSelection);
                 baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
                 if (ctx.isLookingAt(toPlace.get().placeAgainst) && ((BlockHitResult) ctx.objectMouseOver()).getDirection().equals(toPlace.get().side)) {
                     baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
@@ -1881,7 +1882,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private List<BlockState> approxPlaceable(int size) {
         List<BlockState> result = new ArrayList<>();
         for (int i = 0; i < size; i++) {
-            ItemStack stack = ctx.player().getInventory().items.get(i);
+            ItemStack stack = ctx.player().getInventory().getNonEquipmentItems().get(i);
             if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem)) {
                 result.add(Blocks.AIR.defaultBlockState());
                 continue;

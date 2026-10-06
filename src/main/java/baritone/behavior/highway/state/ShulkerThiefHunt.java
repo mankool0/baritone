@@ -40,8 +40,8 @@ public class ShulkerThiefHunt extends State {
         HighwayState returnState = context.thiefHuntReturnState() != null ? context.thiefHuntReturnState() : HighwayState.Nothing;
 
         int swordSlot = context.putBestSwordHotbar();
-        if (swordSlot != -1) {
-            context.playerContext().player().getInventory().selected = swordSlot;
+        if (swordSlot != -1 && swordSlot < 9) {
+            context.playerContext().player().getInventory().setSelectedSlot(swordSlot);
         }
 
         Entity target = context.thiefTarget();

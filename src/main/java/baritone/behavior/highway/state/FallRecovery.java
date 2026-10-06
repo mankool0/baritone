@@ -113,9 +113,9 @@ public class FallRecovery extends State {
             Helper.HELPER.logDirect("Fall recovery: no gapple to eat for fire resistance!");
             return false;
         }
-        ItemStack stack = context.playerContext().player().getInventory().items.get(gappleSlot);
-        if (Item.getId(stack.getItem()) == Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) {
-            context.playerContext().player().getInventory().selected = gappleSlot;
+        ItemStack stack = context.playerContext().player().getInventory().getNonEquipmentItems().get(gappleSlot);
+        if (gappleSlot < 9 && Item.getId(stack.getItem()) == Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) {
+            context.playerContext().player().getInventory().setSelectedSlot(gappleSlot);
         }
         // suppressHitResult nulls the hitResult inside startUseItem() via a mixin redirect, preventing
         // block/container interaction while keyUse is held.

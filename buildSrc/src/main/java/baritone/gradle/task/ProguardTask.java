@@ -28,7 +28,8 @@ import org.gradle.jvm.toolchain.JavaToolchainService;
 import xyz.wagyourtail.unimined.api.UniminedExtension;
 import xyz.wagyourtail.unimined.api.minecraft.MinecraftConfig;
 
-import java.io.*;
+import java.io.File;
+import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -74,7 +75,7 @@ public class ProguardTask extends BaritoneGradleTask {
 
     private File getMcJar() {
         MinecraftConfig mcc = ext.getMinecrafts().get(sourceSets.getByName("main"));
-        return mcc.getMinecraft(mcc.getMcPatcher().getProdNamespace(), mcc.getMcPatcher().getProdNamespace()).toFile();
+        return mcc.getMinecraft(mcc.getMcPatcher().getProdNamespace()).toFile();
     }
 
     private boolean isMcJar(File f) {

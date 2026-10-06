@@ -50,7 +50,7 @@ public class EmergencyGapplePrep extends State {
             return;
         }
 
-        context.playerContext().player().getInventory().selected = gappleSlot;
+        context.playerContext().player().getInventory().setSelectedSlot(gappleSlot);
         context.transitionTo(HighwayState.EmergencyGapplePreEat);
         context.resetTimer();
     }

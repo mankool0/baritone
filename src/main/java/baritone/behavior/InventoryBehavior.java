@@ -25,17 +25,17 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Holder;
 import net.minecraft.core.NonNullList;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.tags.ItemTags;
+import net.minecraft.tags.TagKey;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.inventory.ClickType;
-import net.minecraft.world.item.AxeItem;
 import net.minecraft.world.item.BlockItem;
-import net.minecraft.world.item.DiggerItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.item.PickaxeItem;
-import net.minecraft.world.item.ShovelItem;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.EnchantmentEffectComponents;
 import net.minecraft.world.item.enchantment.ItemEnchantments;
@@ -47,6 +47,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.OptionalInt;
@@ -95,11 +96,11 @@ public final class InventoryBehavior extends Behavior implements Helper {
         if (Baritone.settings().keepToolsOnHotbar.value) {
             // not gated on pathing: walk-creep and the printer don't path, and switchToBestToolFor only looks at the hotbar
             keepToolAt(bestSwordSlot(), SWORD_SLOT);
-            keepToolAt(bestToolAgainst(Blocks.STONE, PickaxeItem.class), PICKAXE_SLOT);
-            keepToolAt(bestToolAgainst(Blocks.DIRT, ShovelItem.class), SHOVEL_SLOT);
-            keepToolAt(bestToolAgainst(Blocks.OAK_LOG, AxeItem.class), AXE_SLOT);
+            keepToolAt(bestToolAgainst(Blocks.STONE, ItemTags.PICKAXES), PICKAXE_SLOT);
+            keepToolAt(bestToolAgainst(Blocks.DIRT, ItemTags.SHOVELS), SHOVEL_SLOT);
+            keepToolAt(bestToolAgainst(Blocks.OAK_LOG, ItemTags.AXES), AXE_SLOT);
         } else if (pathing) {
-            int pick = bestToolAgainst(Blocks.STONE, PickaxeItem.class);
+            int pick = bestToolAgainst(Blocks.STONE, ItemTags.PICKAXES);
             if (pick >= 9) {
                 requestSwapWithHotBar(pick, 0);
             }
@@ -124,11 +125,11 @@ public final class InventoryBehavior extends Behavior implements Helper {
             case SWORD_SLOT:
                 return bestSwordSlot() != -1;
             case PICKAXE_SLOT:
-                return bestToolAgainst(Blocks.STONE, PickaxeItem.class) != -1;
+                return bestToolAgainst(Blocks.STONE, ItemTags.PICKAXES) != -1;
             case SHOVEL_SLOT:
-                return bestToolAgainst(Blocks.DIRT, ShovelItem.class) != -1;
+                return bestToolAgainst(Blocks.DIRT, ItemTags.SHOVELS) != -1;
             case AXE_SLOT:
-                return bestToolAgainst(Blocks.OAK_LOG, AxeItem.class) != -1;
+                return bestToolAgainst(Blocks.OAK_LOG, ItemTags.AXES) != -1;
             default:
                 return false;
         }
@@ -137,7 +138,7 @@ public final class InventoryBehavior extends Behavior implements Helper {
     // Ordered from highest to lowest priority
     private static final List<Item> SWORD_PRIORITY = List.of(
             Items.NETHERITE_SWORD, Items.DIAMOND_SWORD, Items.IRON_SWORD,
-            Items.STONE_SWORD, Items.GOLDEN_SWORD, Items.WOODEN_SWORD
+            Items.COPPER_SWORD, Items.STONE_SWORD, Items.GOLDEN_SWORD, Items.WOODEN_SWORD
     );
 
     /**
@@ -145,7 +146,7 @@ public final class InventoryBehavior extends Behavior implements Helper {
      * breaking ties, or -1 if there is none.
      */
     public int bestSwordSlot() {
-        NonNullList<ItemStack> invy = ctx.player().getInventory().items;
+        NonNullList<ItemStack> invy = ctx.player().getInventory().getNonEquipmentItems();
         for (Item swordType : SWORD_PRIORITY) {
             int bestSlot = -1;
             double bestEnchantBonus = -1;
@@ -192,7 +193,7 @@ public final class InventoryBehavior extends Behavior implements Helper {
         }
         List<Integer> empties = new ArrayList<>();
         for (int i = 1; i < 8; i++) { // 0 and 8 stay reserved for the sword/pickaxe and throwaway
-            if (ctx.player().getInventory().items.get(i).isEmpty() && !reservedForTool(i) && !disallowedHotbar.test(i)) {
+            if (ctx.player().getInventory().getNonEquipmentItems().get(i).isEmpty() && !reservedForTool(i) && !disallowedHotbar.test(i)) {
                 empties.add(i);
             }
         }
@@ -215,7 +216,7 @@ public final class InventoryBehavior extends Behavior implements Helper {
         // 0 and 8 are the sword/pickaxe and throwaway, and occupied tool homes are off-limits too
         ArrayList<Integer> candidates = new ArrayList<>();
         for (int i = 1; i < 8; i++) {
-            if (ctx.player().getInventory().items.get(i).isEmpty() && !reservedForTool(i) && !disallowedHotbar.test(i)) {
+            if (ctx.player().getInventory().getNonEquipmentItems().get(i).isEmpty() && !reservedForTool(i) && !disallowedHotbar.test(i)) {
                 candidates.add(i);
             }
         }
@@ -264,7 +265,7 @@ public final class InventoryBehavior extends Behavior implements Helper {
     }
 
     private int firstValidThrowaway() { // TODO offhand idk
-        NonNullList<ItemStack> invy = ctx.player().getInventory().items;
+        NonNullList<ItemStack> invy = ctx.player().getInventory().getNonEquipmentItems();
         for (int i = 0; i < invy.size(); i++) {
             if (Baritone.settings().acceptableThrowawayItems.value.contains(invy.get(i).getItem())) {
                 return i;
@@ -273,8 +274,8 @@ public final class InventoryBehavior extends Behavior implements Helper {
         return -1;
     }
 
-    private int bestToolAgainst(Block against, Class<? extends DiggerItem> cla$$) {
-        NonNullList<ItemStack> invy = ctx.player().getInventory().items;
+    private int bestToolAgainst(Block against, TagKey<Item> kind) {
+        NonNullList<ItemStack> invy = ctx.player().getInventory().getNonEquipmentItems();
         int bestInd = -1;
         double bestSpeed = -1;
         for (int i = 0; i < invy.size(); i++) {
@@ -285,7 +286,7 @@ public final class InventoryBehavior extends Behavior implements Helper {
             if (Baritone.settings().itemSaver.value && (stack.getDamageValue() + Baritone.settings().itemSaverThreshold.value) >= stack.getMaxDamage() && stack.getMaxDamage() > 1) {
                 continue;
             }
-            if (cla$$.isInstance(stack.getItem())) {
+            if (stack.is(kind)) {
                 double speed = ToolSet.calculateSpeedVsBlock(stack, against.defaultBlockState()); // takes into account enchants
                 if (speed > bestSpeed) {
                     bestSpeed = speed;
@@ -327,7 +328,7 @@ public final class InventoryBehavior extends Behavior implements Helper {
 
     public boolean throwaway(boolean select, Predicate<? super ItemStack> desired, boolean allowInventory) {
         LocalPlayer p = ctx.player();
-        NonNullList<ItemStack> inv = p.getInventory().items;
+        NonNullList<ItemStack> inv = p.getInventory().getNonEquipmentItems();
         for (int i = 0; i < 9; i++) {
             ItemStack item = inv.get(i);
             // this usage of settings() is okay because it's only called once during pathing
@@ -337,12 +338,12 @@ public final class InventoryBehavior extends Behavior implements Helper {
             // acceptableThrowawayItems to the CalculationContext
             if (desired.test(item)) {
                 if (select) {
-                    p.getInventory().selected = i;
+                    p.getInventory().setSelectedSlot(i);
                 }
                 return true;
             }
         }
-        if (desired.test(p.getInventory().offhand.get(0))) {
+        if (desired.test(p.getItemBySlot(EquipmentSlot.OFFHAND))) {
             // main hand takes precedence over off hand
             // that means that if we have block A selected in main hand and block B in off hand, right clicking places block B
             // we've already checked above ^ and the main hand can't possible have an acceptablethrowawayitem
@@ -350,9 +351,9 @@ public final class InventoryBehavior extends Behavior implements Helper {
             // so not a shovel, not a hoe, not a block, etc
             for (int i = 0; i < 9; i++) {
                 ItemStack item = inv.get(i);
-                if (item.isEmpty() || item.getItem() instanceof PickaxeItem) {
+                if (item.isEmpty() || item.getItem().components().has(DataComponents.TOOL)) {
                     if (select) {
-                        p.getInventory().selected = i;
+                        p.getInventory().setSelectedSlot(i);
                     }
                     return true;
                 }
@@ -364,7 +365,7 @@ public final class InventoryBehavior extends Behavior implements Helper {
                 if (desired.test(inv.get(i))) {
                     if (select) {
                         requestSwapWithHotBar(i, 7);
-                        p.getInventory().selected = 7;
+                        p.getInventory().setSelectedSlot(7);
                     }
                     return true;
                 }

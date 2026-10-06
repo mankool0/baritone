@@ -48,7 +48,7 @@ public class FarmingEnderChest extends State {
 
         // Keep a non-silk-touch pickaxe selected so the eChest drops obsidian when broken.
         int pickSlot = context.putPickaxeHotbar(true);
-        if (context.playerContext().player().getInventory().selected != pickSlot) {
+        if (context.playerContext().player().getInventory().getSelectedSlot() != pickSlot) {
             context.transitionTo(HighwayState.FarmingEnderChestPrepEchest);
             context.resetTimer();
             return;

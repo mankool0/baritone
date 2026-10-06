@@ -26,19 +26,12 @@ import baritone.api.utils.IPlayerContext;
 import baritone.utils.accessor.IPalettedContainer;
 import io.netty.buffer.Unpooled;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.IdMapper;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.util.BitStorage;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.chunk.GlobalPalette;
-import net.minecraft.world.level.chunk.ChunkSource;
-import net.minecraft.world.level.chunk.LevelChunk;
-import net.minecraft.world.level.chunk.LevelChunkSection;
-import net.minecraft.world.level.chunk.Palette;
-import net.minecraft.world.level.chunk.PalettedContainer;
-import net.minecraft.world.level.chunk.SingleValuePalette;
+import net.minecraft.world.level.chunk.*;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -289,7 +282,7 @@ public enum FasterWorldScanner implements IWorldScanner {
             return PALETTE_REGISTRY_SENTINEL;
         } else {
             FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
-            palette.write(buf);
+            palette.write(buf, Block.BLOCK_STATE_REGISTRY);
             int size = buf.readVarInt();
             BlockState[] states = new BlockState[size];
             for (int i = 0; i < size; i++) {

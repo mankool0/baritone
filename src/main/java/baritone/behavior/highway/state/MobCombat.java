@@ -39,8 +39,8 @@ public class MobCombat extends State {
     @Override
     public void handle(HighwayContext context) {
         int swordSlot = context.putBestSwordHotbar();
-        if (swordSlot != -1) {
-            context.playerContext().player().getInventory().selected = swordSlot;
+        if (swordSlot != -1 && swordSlot < 9) {
+            context.playerContext().player().getInventory().setSelectedSlot(swordSlot);
         }
 
         Optional<Entity> mob = context.findMobTargetingPlayer();
