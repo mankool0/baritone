@@ -264,13 +264,13 @@ final class PathFinder {
         final long primaryTimeoutTime = startTime + 500L;
         final long timeout = timeoutMs != 0 ? timeoutMs : 30_000L;
         final long failureTimeout = startTime + timeout;
-        long timeDoingIO = 0; // milliseconds spent reading region files, which the timeouts do not count
+        long nanosDoingIO = 0; // spent reading region files, which the timeouts do not count
 
         int numNodes = 0;
         int fakeChunkVisits = 0; // if this gets too high we return
         while (!s.openSet.isEmpty()) {
             if ((numNodes & 63) == 0) { // only look at the clock once every 64 nodes
-                final long now = System.currentTimeMillis() - timeDoingIO;
+                final long now = System.currentTimeMillis() - nanosDoingIO / 1_000_000;
                 if (now >= failureTimeout || (!s.failing && now >= primaryTimeoutTime)) {
                     break;
                 } else if (ctx.isCancelled()) {
@@ -314,7 +314,7 @@ final class PathFinder {
                 final int neighborCz = (nz >> 4);
                 final long region = NetherPathfinder.key(neighborCx >> 5, neighborCz >> 5);
                 if (region != lastRegion) {
-                    timeDoingIO += ctx.tryLoadRegion(neighborCx, neighborCz);
+                    nanosDoingIO += ctx.tryLoadRegion(neighborCx, neighborCz);
                     lastRegion = region;
                 }
                 final NetherPathfinder.Entry entry = neighborCx == cx && neighborCz == cz ? currentChunk : ctx.getChunkOrAir(neighborCx, neighborCz);

@@ -273,7 +273,8 @@ public final class NetherPathfinder implements AutoCloseable {
 
     /**
      * Loads the Baritone region holding chunk (cx, cz) the first time it is asked about. A chunk
-     * that is already in the table wins over the file's. Returns the milliseconds spent on the file.
+     * that is already in the table wins over the file's. Returns the nanoseconds spent on the file,
+     * 0 if it wasn't read. Not milliseconds: a warm read takes less than one, which read as 0.
      */
     long tryLoadRegion(int cx, int cz) {
         if (this.baritoneCache == null) {
@@ -284,9 +285,9 @@ public final class NetherPathfinder implements AutoCloseable {
         if (!this.checkedRegions.add(key(regionX, regionZ))) {
             return 0;
         }
-        final long t1 = System.currentTimeMillis();
+        final long t1 = System.nanoTime();
         final boolean read = BaritoneRegion.load(this.baritoneCache, regionX, regionZ,
                 (x, z, chunk) -> this.chunks.putIfAbsent(key(x, z), new Entry(true, chunk, x, z)));
-        return read ? System.currentTimeMillis() - t1 : 0;
+        return read ? Math.max(1, System.nanoTime() - t1) : 0;
     }
 }
