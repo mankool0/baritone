@@ -1690,7 +1690,9 @@ public class HighwayContext {
             }
             handled.handle(this);
             handled.noteHandled();
-            if (i >= CHAIN_LIMIT || currentState == handled || !INSTANT_STATES.contains(currentState.getState())) {
+            // stop() inside a handle leaves us in Nothing with the end cleared: chaining into it
+            // restarts the builder unbounded, and it places until the next nhwstop lands
+            if (paused || i >= CHAIN_LIMIT || currentState == handled || !INSTANT_STATES.contains(currentState.getState())) {
                 break;
             }
         }
