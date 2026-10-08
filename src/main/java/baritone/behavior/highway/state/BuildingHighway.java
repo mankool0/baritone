@@ -119,14 +119,21 @@ public class BuildingHighway extends State {
         }
 
         // TODO: Change shulker threshold from 0 to a customizable value
-        if (getObsidianCountInventory(context) <= context.settings().highwayObsidianThreshold.value && context.paving()) {
+        int obsidian = getObsidianCountInventory(context);
+        int runNeed = obsidian <= context.settings().highwayObsidianThreshold.value && context.paving() ? context.runObsidianNeed() : -1;
+        if (obsidian <= context.settings().highwayObsidianThreshold.value && context.paving() && (runNeed < 0 || obsidian < runNeed)) {
             // A farm with nowhere to put its drops would cycle the box forever: place, loot nothing, mine, repeat.
             if (!context.enderChestFarmCanProgress()) {
                 context.baritone().getPathingBehavior().cancelEverything();
                 context.pause("Obsidian is under the threshold but the inventory has no room for more, clear some slots and restart.");
                 return;
             }
-            if (context.getShulkerCountInventory(ShulkerType.EnderChest) == 0) {
+            int runChests = runNeed < 0 ? -1 : HighwayContext.chestsForObsidian(runNeed, obsidian);
+            context.setFarmRunChests(runChests);
+            context.setFarmLooseChests(context.looseChestsCoverRun(runChests));
+            if (context.farmLooseChests()) {
+                Helper.HELPER.logDirect("The rest of the run needs " + runNeed + " obsidian and we have " + obsidian + ", farming " + runChests + " loose ender chests");
+            } else if (context.getShulkerCountInventory(ShulkerType.EnderChest) == 0) {
                 if (!context.thresholdConfirmed("Ender chest shulker count")) {
                     return;
                 }

@@ -42,6 +42,7 @@ public class LootingEnderShulker extends State {
         }
 
         int target;
+        boolean forRun = false;
         if (context.paving()) {
             // Loot no more than the obsidian room can take: a looted stack trades its slot for eight
             // of obsidian once broken, and the box takes a slot back once mined. Stacks come out
@@ -49,12 +50,18 @@ public class LootingEnderShulker extends State {
             int keep = context.settings().highwayEnderChestsToKeep.value;
             int fits = keep + context.enderChestFarmCapacity(keep, -1, context.obsidianOnGroundNearby());
             target = Math.min(context.settings().highwayEnderChestsToLoot.value, fits);
+            if (context.farmRunChests() >= 0 && keep + context.farmRunChests() < target) {
+                target = keep + context.farmRunChests();
+                forRun = true;
+            }
         } else {
             target = Math.min(64, Math.max(context.settings().highwayEnderChestsToHave.value, Math.min(context.settings().highwayEnderChestsThreshold.value, 56)));
         }
 
         if (context.getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) >= target) {
-            if (context.paving() && target < context.settings().highwayEnderChestsToLoot.value) {
+            if (forRun) {
+                Helper.HELPER.logDirect("Looting stopped at " + context.getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) + " ender chests, the rest of the run needs the obsidian of " + context.farmRunChests());
+            } else if (context.paving() && target < context.settings().highwayEnderChestsToLoot.value) {
                 Helper.HELPER.logDirect("Looting stopped at " + context.getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) + " ender chests, the inventory only has room for the obsidian of " + Math.max(0, target - context.settings().highwayEnderChestsToKeep.value));
             }
             context.transitionTo(HighwayState.MiningEnderShulker);
@@ -66,7 +73,8 @@ public class LootingEnderShulker extends State {
             return;
         }
 
-        int enderChestsLooted = context.paving()
+        // Whole stacks overshoot a small target; a top-up fills one slot and leaves the rest in the box
+        int enderChestsLooted = context.paving() && (!forRun || target > 64)
                 ? context.lootEnderChestSlot()
                 : context.topUpEnderChestSlotFromShulker(target);
         context.noteContainerClick();

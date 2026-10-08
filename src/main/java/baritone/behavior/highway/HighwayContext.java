@@ -3001,6 +3001,110 @@ public class HighwayContext {
         return (chests + 64) - enderChestFarmKeep(chests + 64, 0, ground, 64) > 0;
     }
 
+    private int runObsidianNeed = -1;
+    private int runObsidianNeedTick = -1;
+    private int farmRunChests = -1;
+    private boolean farmLooseChests = false;
+
+    /** Ender chests to break for {@code need} obsidian with {@code have} on hand */
+    public static int chestsForObsidian(int need, int have) {
+        return Math.max(0, need - have + 7) / 8;
+    }
+
+    /** The farm's keep once it may break no more than {@code runChests} (-1: no cap) of {@code chests} */
+    public static int farmKeepForRun(int keep, int chests, int runChests) {
+        return runChests < 0 ? keep : Math.max(keep, chests - runChests);
+    }
+
+    /**
+     * Obsidian still to place from the check-back slice to the end, or -1 when the run has no end,
+     * any of it is out of view, or it needs more than highwayFarmForRunMaxObsidian. Rescanned at
+     * most once a second.
+     */
+    public int runObsidianNeed() {
+        int tick = playerContext.player().tickCount;
+        if (runObsidianNeedTick >= 0 && tick >= runObsidianNeedTick && tick - runObsidianNeedTick < 20) {
+            return runObsidianNeed;
+        }
+        runObsidianNeedTick = tick;
+        runObsidianNeed = scanRunObsidianNeed();
+        return runObsidianNeed;
+    }
+
+    private int scanRunObsidianNeed() {
+        int max = settings.highwayFarmForRunMaxObsidian.value;
+        if (endPos == null || max <= 0) {
+            return -1;
+        }
+        // The range isHighwayEndComplete scans, so the count is what stands between us and the end
+        Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
+        Vec3 feet = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
+        BetterBlockPos feetClosest = getClosestPoint(originVector, direction, feet, LocationType.HighwayBuild);
+        BlockPos startPos = sliceAlongLine(originVector, new Vec3(feetClosest.getX(), feetClosest.getY(), feetClosest.getZ()), -highwayCheckBackDistance, LocationType.HighwayBuild);
+        int distanceToCheck = stepsAlongHighway(startPos, endPos) + 1;
+        int scanT0 = pattern.isCustom() ? sliceIndexOf(startPos, originVector) : 0;
+        int need = 0;
+        for (int i = distanceToCheck - 1; i >= 1; i--) {
+            BlockPos curPos = pattern.isCustom()
+                    ? startPos.offset(sliceDelta(scanT0, i))
+                    : startPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
+            CompositeSchematic sliceSchem = schematicForSlice(scanT0 + i);
+            for (int y = 0; y < schematic.heightY(); y++) {
+                for (int z = 0; z < schematic.lengthZ(); z++) {
+                    for (int x = 0; x < schematic.widthX(); x++) {
+                        BlockPos pos = new BlockPos(x + curPos.getX(), y + curPos.getY(), z + curPos.getZ());
+                        if (!baritone.bsi.worldContainsLoadedChunk(pos.getX(), pos.getZ())) {
+                            return -1;
+                        }
+                        BlockState current = playerContext.world().getBlockState(pos);
+                        if (current.is(Blocks.OBSIDIAN) || current.is(Blocks.CRYING_OBSIDIAN) || !sliceSchem.inSchematic(x, y, z, current)) {
+                            continue;
+                        }
+                        ISchematic sub = sliceSchem.getSchematic(x, y, z, current).schematic;
+                        if (!(sub instanceof WhiteBlackSchematic wb) || wb.serverRequirement() != WhiteBlackSchematic.ServerRequirement.OBSIDIAN) {
+                            continue;
+                        }
+                        if (wb.isValidIfUnder() && MovementHelper.isBlockNormalCube(playerContext.world().getBlockState(pos.above()))) {
+                            continue;
+                        }
+                        if (++need > max) {
+                            return -1;
+                        }
+                    }
+                }
+            }
+        }
+        return need;
+    }
+
+    /** Ender chests the farm being set up may break for the run, -1 for no cap */
+    public int farmRunChests() {
+        return farmRunChests;
+    }
+
+    public void setFarmRunChests(int farmRunChests) {
+        this.farmRunChests = farmRunChests;
+    }
+
+    /** The farm being set up breaks loose chests only and never places the ender chest shulker */
+    public boolean farmLooseChests() {
+        return farmLooseChests && paving;
+    }
+
+    public void setFarmLooseChests(boolean farmLooseChests) {
+        this.farmLooseChests = farmLooseChests;
+    }
+
+    public void resetFarmForRun() {
+        runObsidianNeedTick = -1;
+        farmRunChests = -1;
+        farmLooseChests = false;
+    }
+
+    public boolean looseChestsCoverRun(int runChests) {
+        return runChests >= 0 && enderChestCountAll() - settings.highwayEnderChestsToKeep.value >= runChests;
+    }
+
     public int getPickCountInventory() {
         int count = 0;
         for (int i = 0; i < 36; i++) {

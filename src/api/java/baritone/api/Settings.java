@@ -1843,6 +1843,12 @@ public final class Settings {
     public final Setting<Integer> highwayEnderChestsToKeep = new Setting<>(8);
 
     /**
+     * Farm only the obsidian the rest of the run still needs when that is at most this many and
+     * all of it is in view. 0 always farms in full.
+     */
+    public final Setting<Integer> highwayFarmForRunMaxObsidian = new Setting<>(64);
+
+    /**
      * While digging, refill loose ender chests from an ender chest shulker when below this count.
      * Clamped to 56: a refill can't exceed one slot (64), so a trigger near 64 would refill forever.
      */

@@ -63,6 +63,10 @@ public class PlacingShulkerSupport extends State {
             return;
         }
 
+        if (state == HighwayState.PlacingEnderShulkerSupport && context.farmLooseChests()) {
+            context.transitionTo(HighwayState.GoingToPlaceLocEnderChest);
+            return;
+        }
         context.transitionTo(getNextState());
     }
 

@@ -60,11 +60,17 @@ public class GoingToPlaceLocEnderChest extends State {
             // Stop early rather than drop obsidian the inventory can't take. Nothing else moves
             // during the farm: the original offhand item comes back out of the slot it borrows.
             // A mined box whose pickup is still in flight lands in a slot that reads empty right now.
+            if (context.farmLooseChests()) {
+                context.setPreMineShulkerCount(-1); // no box was mined for this farm
+                context.setFarmLooseChests(false);
+            }
             int boxSlots = context.minedShulkerLanded() ? 0 : -1;
-            int farmKeep = context.enderChestFarmKeep(chests, boxSlots, context.obsidianOnGroundNearby());
+            int roomKeep = context.enderChestFarmKeep(chests, boxSlots, context.obsidianOnGroundNearby());
+            int farmKeep = HighwayContext.farmKeepForRun(roomKeep, chests, context.farmRunChests());
             context.setFarmEnderChestsToKeep(farmKeep);
             Helper.HELPER.logDirect("Farming " + Math.max(0, chests - farmKeep) + " of " + chests + " ender chests, keeping " + farmKeep
-                    + (farmKeep > context.settings().highwayEnderChestsToKeep.value ? " instead of " + context.settings().highwayEnderChestsToKeep.value + " (obsidian room)" : "")
+                    + (farmKeep > roomKeep ? " instead of " + roomKeep + " (the rest of the run needs no more)"
+                    : farmKeep > context.settings().highwayEnderChestsToKeep.value ? " instead of " + context.settings().highwayEnderChestsToKeep.value + " (obsidian room)" : "")
                     + " [" + context.obsidianRoomBreakdown() + (boxSlots < 0 ? " boxInFlight" : "") + "]");
             context.setInstantMineCalibrated(false);
             context.transitionTo(HighwayState.FarmingEnderChestPrepEchest);
