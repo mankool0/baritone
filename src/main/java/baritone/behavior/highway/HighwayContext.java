@@ -33,6 +33,9 @@ import baritone.behavior.highway.enums.ShulkerType;
 import baritone.behavior.highway.enums.LocationType;
 import baritone.pathing.movement.MovementHelper;
 import baritone.process.BuilderProcess;
+import baritone.utils.accessor.IClientLevel;
+import it.unimi.dsi.fastutil.ints.IntArrayFIFOQueue;
+import net.minecraft.client.multiplayer.prediction.BlockStatePredictionHandler;
 import net.minecraft.core.*;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
@@ -2716,6 +2719,16 @@ public class HighwayContext {
 
     private int farmObsidianStart = 0;
     private int farmChestsStart = 0;
+    // Prediction sequences of farm places the server hasn't acked. The server echoes the offhand as an
+    // absolute count, and that echo trails the places by a round trip, so the chest count the client
+    // shows still includes these.
+    private final IntArrayFIFOQueue farmUnackedPlaces = new IntArrayFIFOQueue();
+    // Offhand stack the client decremented for farm places, and by how much. An echo replaces the
+    // stack, and those decrements go with it.
+    private ItemStack farmOffhandStack = ItemStack.EMPTY;
+    private int farmOffhandDecrements = 0;
+    // Sequence of the click asking the server to resend placeLoc since the last dig, -1 if none sent.
+    private int farmResyncSequence = -1;
 
     private int obsidianCountAll() {
         int count = getItemCountInventory(Item.getId(Blocks.OBSIDIAN.asItem()));
@@ -2738,6 +2751,75 @@ public class HighwayContext {
     public void beginFarmAccounting() {
         farmObsidianStart = obsidianCountAll();
         farmChestsStart = enderChestCountAll();
+        farmUnackedPlaces.clear();
+        farmOffhandStack = ItemStack.EMPTY;
+        farmOffhandDecrements = 0;
+        farmResyncSequence = -1;
+    }
+
+    /** Places the next farm chest from the offhand and tracks it until the server acks it */
+    public PlaceResult placeFarmEnderChest() {
+        BlockStatePredictionHandler predictions = ((IClientLevel) playerContext.minecraft().level).getPredictionHandler();
+        ItemStack offhand = playerContext.player().getOffhandItem();
+        int sequence = predictions.currentSequence();
+        PlaceResult result = place(placeLoc(), 5.0f, false, false, InteractionHand.OFF_HAND);
+        // Every click that went out counts, even one the client didn't predict: the server may still place it.
+        while (sequence < predictions.currentSequence()) {
+            farmUnackedPlaces.enqueue(++sequence);
+        }
+        if (result == PlaceResult.Placed) {
+            if (offhand != farmOffhandStack) {
+                farmOffhandStack = offhand;
+                farmOffhandDecrements = 0;
+            }
+            farmOffhandDecrements++;
+        }
+        return result;
+    }
+
+    /** Farm places sent that the server hasn't acked yet */
+    public int farmPlacesInFlight() {
+        int acked = ((IClientLevel) playerContext.minecraft().level).getLastAckedSequence();
+        while (!farmUnackedPlaces.isEmpty() && farmUnackedPlaces.firstInt() <= acked) {
+            farmUnackedPlaces.dequeueInt();
+        }
+        return farmUnackedPlaces.size();
+    }
+
+    private int farmOffhandDecrementsStanding() {
+        return playerContext.player().getOffhandItem() == farmOffhandStack ? farmOffhandDecrements : 0;
+    }
+
+    /**
+     * Loose ender chests left once every farm place still in flight has landed. At high ping the
+     * client's own count runs high by about one chest per tick of round trip.
+     */
+    public int farmEnderChestsLeft() {
+        int inFlight = farmPlacesInFlight();
+        return enderChestCountAll() + farmOffhandDecrementsStanding() - inFlight;
+    }
+
+    /** Ender chests the server's offhand holds once every farm place still in flight has landed */
+    public int farmOffhandChestsLeft() {
+        int inFlight = farmPlacesInFlight();
+        ItemStack offhand = playerContext.player().getOffhandItem();
+        return (offhand.is(Blocks.ENDER_CHEST.asItem()) ? offhand.getCount() : 0) + farmOffhandDecrementsStanding() - inFlight;
+    }
+
+    /**
+     * Whether placeLoc as shown is what the server has had since the farm's last dig. The client never
+     * sees that dig itself, only the server's block update a round trip later, so a chest still on
+     * screen may already be gone. The first call asks the server to resend placeLoc; once that click
+     * is acked, its reply has landed.
+     */
+    public boolean farmPlaceLocConfirmed() {
+        IClientLevel level = (IClientLevel) playerContext.minecraft().level;
+        if (farmResyncSequence == -1) {
+            requestBlockResync(placeLoc());
+            farmResyncSequence = level.getPredictionHandler().currentSequence();
+            return false;
+        }
+        return level.getLastAckedSequence() >= farmResyncSequence;
     }
 
     /**
@@ -2746,7 +2828,7 @@ public class HighwayContext {
      */
     public int farmObsidianInFlight(int ground) {
         int picked = obsidianCountAll() - farmObsidianStart;
-        int consumed = farmChestsStart - enderChestCountAll();
+        int consumed = farmChestsStart - farmEnderChestsLeft();
         return Math.max(0, 8 * consumed - picked - ground);
     }
 
@@ -2756,7 +2838,7 @@ public class HighwayContext {
      */
     public int farmRoomAfterOneMore() {
         int ground = obsidianOnGroundNearby();
-        int remaining = getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) + playerContext.player().getOffhandItem().getCount() - 1;
+        int remaining = farmEnderChestsLeft() - 1;
         Item origItem = instantMineOriginalOffhandItem();
         boolean origInInventory = origItem != null && origItem != Items.AIR && getItemSlot(Item.getId(origItem)) != -1
                 && playerContext.player().getOffhandItem().is(Blocks.ENDER_CHEST.asItem());
@@ -5248,6 +5330,7 @@ public class HighwayContext {
         Direction face = faceMineTarget(pos);
         instantMineDirection = face;
         instantMineLastBlock = pos;
+        farmResyncSequence = -1; // the server's earlier reply predates this dig
         playerContext.player().connection.send(new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, pos, face));
         playerContext.player().connection.send(new ServerboundSwingPacket(InteractionHand.MAIN_HAND));
         try {

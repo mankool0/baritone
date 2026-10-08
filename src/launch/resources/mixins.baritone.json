@@ -11,6 +11,7 @@
     "MixinBlockStateBase",
     "MixinChunkArray",
     "MixinClientChunkProvider",
+    "MixinClientLevel",
     "MixinClientPlayerEntity",
     "MixinClientPlayNetHandler",
     "MixinCommandSuggestionHelper",

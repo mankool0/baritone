@@ -33,6 +33,14 @@ import net.minecraft.world.level.block.state.BlockState;
 import java.util.Optional;
 
 public class FarmingEnderChest extends State {
+
+    /** Ticks to wait for the server to ack the places in flight before leaving anyway. */
+    private static final int IN_FLIGHT_WAIT_TICKS = 100;
+
+    // Decided to stop; held while the places in flight land so the stop isn't re-decided and re-logged.
+    private boolean stopping;
+    private int inFlightWaitTicks;
+
     public FarmingEnderChest(HighwayState state) {
         super(state);
     }
@@ -72,6 +80,13 @@ public class FarmingEnderChest extends State {
                 return;
             }
 
+            // Not one we placed since the last dig, so it may be the chest that dig already broke,
+            // still on screen until the server's update lands. Grim flags digging air (START and
+            // FINISHED alike), so only dig what the server confirms is there.
+            if (!context.echestPlacedServerSide() && !context.farmPlaceLocConfirmed()) {
+                return;
+            }
+
             // First chest of the session so break it the legitimate way (real client mining) so
             // the server's destroy target is set. With instant mining off every chest goes this
             // way and the destroy target is never reused.
@@ -93,9 +108,14 @@ public class FarmingEnderChest extends State {
         }
 
         // placeLoc is clear (or gets cleared by this tick's break): decide whether to keep farming.
+        // Both counts take in the places still in flight: the server's offhand count reaches us a
+        // round trip after the places it covers.
         Item origItem = context.playerContext().player().getOffhandItem().getItem();
-        boolean outOfChests = (context.getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) + context.playerContext().player().getOffhandItem().getCount()) <= context.farmEnderChestsToKeep();
-        boolean needsEchest = !(origItem instanceof BlockItem) || !(((BlockItem) origItem).getBlock().equals(Blocks.ENDER_CHEST));
+        boolean outOfChests = stopping || context.farmEnderChestsLeft() <= context.farmEnderChestsToKeep();
+        // The server's offhand runs dry before ours shows it. A place it can't back is refused, and
+        // the next tick's dig would hit air.
+        boolean needsEchest = !(origItem instanceof BlockItem) || !(((BlockItem) origItem).getBlock().equals(Blocks.ENDER_CHEST))
+                || context.farmOffhandChestsLeft() <= 0;
         // The keep is a forecast; the measured room is the truth. Stop when one more chest's obsidian
         // would not fit, whatever the chest count says.
         if (!outOfChests && !needsEchest) {
@@ -105,8 +125,16 @@ public class FarmingEnderChest extends State {
                 outOfChests = true;
             }
         }
+        stopping = outOfChests;
 
         if (outOfChests || needsEchest) {
+            // Both exits click the offhand. Late offhand counts for the places in flight would land on
+            // top of those clicks, so let the places land first. Stopping also waits out the chest
+            // this tick dug, which is still on screen: the clear that follows would mine air.
+            boolean waiting = context.farmPlacesInFlight() > 0 || (outOfChests && chestVisible);
+            if (waiting && inFlightWaitTicks++ < IN_FLIGHT_WAIT_TICKS) {
+                return;
+            }
             if (outOfChests) {
                 // Out of ender chests to farm, swap the offhand back and move on.
                 context.baritone().getInputOverrideHandler().clearAllKeys();
@@ -134,8 +162,8 @@ public class FarmingEnderChest extends State {
 
         // A place that falls through needs no recovery: a pipelining tick has already dug, so
         // nothing is left standing, and the stale place tick drops the next tick back to the
-        // legacy path.
-        if (context.place(context.placeLoc(), 5.0f, false, false, InteractionHand.OFF_HAND) == HighwayContext.PlaceResult.Placed) {
+        // legacy path, which has the server confirm any chest still on screen before digging.
+        if (context.placeFarmEnderChest() == HighwayContext.PlaceResult.Placed) {
             context.setEchestPlacedServerSide(true);
             context.setLastEchestPlaceTick(context.playerContext().player().tickCount);
             context.resetTimer();
