@@ -85,6 +85,15 @@ public abstract class PlacingShulkerBase extends State {
             }
         }
 
+        // A box already in the spot is ours, sent back here because it wouldn't open. Everything
+        // below is about getting a box down, and the sight check even takes this box for the wall
+        // in its own way and digs it out, with nothing set up to collect the drop.
+        if (testState.getBlock() instanceof ShulkerBoxBlock) {
+            placed = true;
+            context.resetTimer();
+            return;
+        }
+
         // Lava has crept into the spot (or was never safe) - don't break netherrack into it, pick a new spot
         HighwayState relocateState = getRelocateState();
         if (relocateState != null && !context.isSideStorageSpotSafe(context.placeLoc())) {
@@ -120,6 +129,15 @@ public abstract class PlacingShulkerBase extends State {
         if (context.handleShulkerPlaceOutOfSight(context.placeLoc(), getPreviousState(), relocateState)) {
             placed = false;
             return;
+        }
+
+        // Count the box before it goes down. One fetched from storage on this trip comes straight
+        // here without BuildingHighway ever counting it, so if the cycle then lost it, the inventory
+        // still matched startShulkerCount and nothing went looking for it.
+        int shulkerCount = context.getShulkerCountInventory(ShulkerType.Any);
+        if (shulkerCount > context.startShulkerCount()) {
+            Helper.HELPER.logDirect("Counting the shulker we're placing, raising startShulkerCount from " + context.startShulkerCount() + " to " + shulkerCount);
+            context.setStartShulkerCount(shulkerCount);
         }
 
         // Convert to regular BlockPos to avoid BetterBlockPos/BlockPos collision in block entity maps

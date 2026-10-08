@@ -21,6 +21,7 @@ import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.enums.HighwayState;
 import baritone.behavior.highway.enums.ShulkerType;
+import net.minecraft.world.level.block.ShulkerBoxBlock;
 
 public class PlacingEmptyShulker extends PlacingShulkerBase {
     public PlacingEmptyShulker(HighwayState state) {
@@ -51,8 +52,10 @@ public class PlacingEmptyShulker extends PlacingShulkerBase {
     public void handle(HighwayContext context) {
         handleWithShulkerType(context, ShulkerType.Empty);
 
-        // Decrement shulker count after empty shulker placed
-        if (context.currentState().getState() == HighwayState.Nothing) {
+        // Decrement shulker count after empty shulker placed. Only a box that's actually standing
+        // there counts: the timeout, refusal and nothing-to-place exits go to Nothing too.
+        if (context.currentState().getState() == HighwayState.Nothing
+                && context.playerContext().world().getBlockState(context.placeLoc()).getBlock() instanceof ShulkerBoxBlock) {
             Helper.HELPER.logDirect("Lowering startShulkerCount from " + context.startShulkerCount() + " to " + (context.startShulkerCount() - 1));
             context.setStartShulkerCount(context.startShulkerCount() - 1);
         }

@@ -188,6 +188,7 @@ public class HighwayContext {
     private int placeRefusedTries = 0;
     private BlockPos standClearSpot = null; // spot the step-off-it attempts below are counted against
     private int standClearTries = 0;
+    private boolean standClearWalking = false; // a step-off walk we sent and haven't seen finish yet
     private BlockPos shulkerSightFailSpot = null; // spot the sight failures below are counted against
     private int shulkerSightDigs = 0;
     private int shulkerSightWalks = 0;
@@ -2974,8 +2975,11 @@ public class HighwayContext {
         // Get shulker slot and validate
         int shulkerSlot = putShulkerHotbar(shulkerType);
         if (shulkerSlot == -1) {
-            Helper.HELPER.logDirect("Error getting shulker slot");
-            return currentHighwayState;
+            // Returning the current state here means "click sent" to the caller, which then waits
+            // out the confirm timeout for a box that never existed. Let BuildingHighway sort out
+            // where it went instead.
+            Helper.HELPER.logDirect("No " + shulkerType + " shulker in the inventory to place, restarting.");
+            return HighwayState.Nothing;
         }
         if (shulkerSlot >= 9) {
             Helper.HELPER.logDirect("Couldn't put shulker to hotbar, waiting");
@@ -3410,6 +3414,15 @@ public class HighwayContext {
 
     public boolean handleStandingInPlaceSpot(BlockPos placeLoc, HighwayState relocateState) {
         BlockPos key = new BlockPos(placeLoc.getX(), placeLoc.getY(), placeLoc.getZ());
+        // Let a step-off walk we sent finish rather than placing the moment the hitbox leaves the
+        // cell: that put the box down with the walk still running, and that box never opened.
+        if (standClearWalking) {
+            if (baritone.getCustomGoalProcess().isActive()) {
+                resetTimer();
+                return true;
+            }
+            standClearWalking = false;
+        }
         if (!playerInWayOfPlacement(key)) {
             standClearSpot = null;
             standClearTries = 0;
@@ -3429,6 +3442,7 @@ public class HighwayContext {
             Helper.HELPER.logDirect("Standing in the shulker spot at " + key.toShortString()
                     + ", stepping back to " + clear.toShortString() + ".");
             baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(new BetterBlockPos(clear)));
+            standClearWalking = true;
             resetTimer();
             return true;
         }

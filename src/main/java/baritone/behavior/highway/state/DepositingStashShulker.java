@@ -68,9 +68,9 @@ public class DepositingStashShulker extends State {
         context.playerContext().player().closeContainer();
         int shulkerCount = context.getShulkerCountInventory(ShulkerType.Any);
         if (shulkerCount < context.startShulkerCount()) {
-            // The stashed shulker was carried (and counted) at startup rather than grabbed on this
-            // trip: lower the expectation so we don't go walking back in search of a "lost" shulker.
-            Helper.HELPER.logDirect("Stashed a shulker we started with, lowering startShulkerCount from " + context.startShulkerCount() + " to " + shulkerCount);
+            // The stashed shulker was counted, either carried at startup or counted when its top-up
+            // cycle placed it: lower the expectation so we don't go walking back in search of a "lost" shulker.
+            Helper.HELPER.logDirect("Stashed a counted shulker, lowering startShulkerCount from " + context.startShulkerCount() + " to " + shulkerCount);
             context.setStartShulkerCount(shulkerCount);
         }
         context.setStashingShulker(false);

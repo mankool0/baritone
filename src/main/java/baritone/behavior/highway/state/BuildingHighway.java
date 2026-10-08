@@ -64,6 +64,38 @@ public class BuildingHighway extends State {
             }
         }
 
+        // Ahead of the refills: a box the place cycle lost can be the very thing a refill is short
+        // of, and each refill holds this state on its threshold confirm for longer than the 10
+        // ticks this waits, so placed after them it never ran before the storage trip went out.
+        if (context.timer() >= 10) {
+            int shulkerCount = context.getShulkerCountInventory(ShulkerType.Any);
+            if (shulkerCount < context.startShulkerCount()) {
+                // Lost a shulker somewhere :(
+                if (context.maybeStartThiefHunt(HighwayState.BuildingHighway)) {
+                    return; // A piglin is carrying it; get it back before resorting to the ground search
+                }
+                if (context.maybeMineMisplacedShulker(32, 8)) {
+                    return; // Inventory desync placed the box into the highway; mine it back instead of searching
+                }
+                if (context.maybeLostShulkerRelog()) {
+                    return;
+                }
+                Helper.HELPER.logDirect("We lost a shulker somewhere. Going back a maximum of " + context.settings().highwayMaxLostShulkerSearchDist.value + " blocks to look for it.");
+                context.transitionTo(HighwayState.ShulkerSearchPrep);
+                context.baritone().getPathingBehavior().cancelEverything();
+                context.resetTimer();
+                return;
+            }
+            // Nothing missing (or the loss was accepted); the next loss gets a fresh relog attempt
+            context.clearLostShulkerRelogAttempt();
+            if (shulkerCount > context.startShulkerCount()) {
+                Helper.HELPER.logDirect("We picked up a shulker somewhere, updating startShulkerCount from " + context.startShulkerCount() + " to " + shulkerCount);
+                context.setStartShulkerCount(shulkerCount);
+                context.resetTimer();
+                return;
+            }
+        }
+
         if (context.getPickCountInventory() < context.settings().highwayPicksThreshold.value) {
             if (context.getShulkerCountInventory(context.picksToUse()) == 0) {
                 // No shulker in hand, so this costs a storage trip or a pause: confirm the count
@@ -309,35 +341,6 @@ public class BuildingHighway extends State {
 
             // No case for Air because that's what it should be
             //return;
-        }
-
-        if (context.timer() >= 10) {
-            int shulkerCount = context.getShulkerCountInventory(ShulkerType.Any);
-            if (shulkerCount < context.startShulkerCount()) {
-                // Lost a shulker somewhere :(
-                if (context.maybeStartThiefHunt(HighwayState.BuildingHighway)) {
-                    return; // A piglin is carrying it; get it back before resorting to the ground search
-                }
-                if (context.maybeMineMisplacedShulker(32, 8)) {
-                    return; // Inventory desync placed the box into the highway; mine it back instead of searching
-                }
-                if (context.maybeLostShulkerRelog()) {
-                    return;
-                }
-                Helper.HELPER.logDirect("We lost a shulker somewhere. Going back a maximum of " + context.settings().highwayMaxLostShulkerSearchDist.value + " blocks to look for it.");
-                context.transitionTo(HighwayState.ShulkerSearchPrep);
-                context.baritone().getPathingBehavior().cancelEverything();
-                context.resetTimer();
-                return;
-            }
-            // Nothing missing (or the loss was accepted); the next loss gets a fresh relog attempt
-            context.clearLostShulkerRelogAttempt();
-            if (shulkerCount > context.startShulkerCount()) {
-                Helper.HELPER.logDirect("We picked up a shulker somewhere, updating startShulkerCount from " + context.startShulkerCount() + " to " + shulkerCount);
-                context.setStartShulkerCount(shulkerCount);
-                context.resetTimer();
-                return;
-            }
         }
 
         if (context.timer() >= 10 && (context.playerContext().player().isOnFire() || context.playerContext().player().getFoodData().getFoodLevel() <= 16)) {
