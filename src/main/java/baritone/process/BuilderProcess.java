@@ -45,7 +45,11 @@ import baritone.utils.schematic.SelectionSchematic;
 import baritone.utils.schematic.litematica.LitematicaHelper;
 import baritone.utils.schematic.schematica.SchematicaHelper;
 import com.google.common.collect.ImmutableSet;
+import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectMaps;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.objects.ObjectIterator;
 import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.gui.screens.PauseScreen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
@@ -127,6 +131,21 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private List<BlockState> approxPlaceable;
     private Set<BetterBlockPos> toBreakEntity = new LinkedHashSet<>();
     public int stopAtHeight = 0;
+    /**
+     * Positions completed within the last {@link #COMPLETED_WATCH_TICKS}, kept even after the window
+     * they were in has repeated away. Main thread only; calculation contexts get {@link #snapshotCompletedWatch}.
+     */
+    private final Long2ObjectOpenHashMap<CompletedWatch> completedWatch = new Long2ObjectOpenHashMap<>();
+    private Long2ObjectMap<CompletedWatch> completedWatchSnapshot; // never mutated once handed out, null when stale
+    private long builderTick;
+
+    /**
+     * How long a completed position stays watched for a server revert. Completion is the client's
+     * own prediction, so a window repeats away the moment its last placement or break goes out,
+     * and the server's verdict on that action arrives a round trip later. Without the watch a
+     * revert there is outside the schematic and nothing looks at it again.
+     */
+    private static final int COMPLETED_WATCH_TICKS = 40;
 
     /**
      * How far the aimed-at yaw may sit from the movement yaw before a pitch-only aim is hopeless.
@@ -182,6 +201,29 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
 
         boolean acted() {
             return placed || broke;
+        }
+    }
+
+    /**
+     * A recently completed position and the schematic and origin of the window it was completed
+     * in, so it is judged exactly as it was there.
+     */
+    private static final class CompletedWatch {
+
+        private final BetterBlockPos pos;
+        private final ISchematic schematic;
+        private final int originX;
+        private final int originY;
+        private final int originZ;
+        private long completedTick; // main thread only, calculation threads only read the window
+
+        private CompletedWatch(BetterBlockPos pos, ISchematic schematic, int originX, int originY, int originZ, long completedTick) {
+            this.pos = pos;
+            this.schematic = schematic;
+            this.originX = originX;
+            this.originY = originY;
+            this.originZ = originZ;
+            this.completedTick = completedTick;
         }
     }
 
@@ -255,6 +297,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         this.observedCompleted = new LongOpenHashSet();
         this.incorrectPositions = null;
         this.toBreakEntity.clear();
+        clearCompletedWatch();
         printerResetNoRotateDetection();
     }
 
@@ -1107,6 +1150,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         }
         if (recursions == 0) {
             printerMovementForced = baritone.getLookBehavior().isMovementInputForced();
+            builderTick++;
         }
         baritone.getInputOverrideHandler().clearAllKeys();
         if (paused) {
@@ -1391,10 +1435,67 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             }
         }
         recalcNearby(bcc);
+        // before the emptiness check, so a revert behind us holds the window where it is
+        recheckCompletedWatch(bcc);
         if (incorrectPositions.isEmpty()) {
             fullRecalc(bcc);
         }
         return !incorrectPositions.isEmpty();
+    }
+
+    private void watchCompleted(BuilderCalculationContext bcc, BetterBlockPos pos, BlockState current) {
+        long hash = BetterBlockPos.longHash(pos);
+        CompletedWatch watch = completedWatch.get(hash);
+        if (watch != null) {
+            watch.completedTick = builderTick; // fixed again after a revert, which can be reverted too
+            return;
+        }
+        if (!bcc.schematic.inSchematic(pos.x - bcc.originX, pos.y - bcc.originY, pos.z - bcc.originZ, current)) {
+            return;
+        }
+        completedWatch.put(hash, new CompletedWatch(pos, bcc.schematic, bcc.originX, bcc.originY, bcc.originZ, builderTick));
+        completedWatchSnapshot = null;
+    }
+
+    /**
+     * Puts watched positions that have been undone back into {@link #incorrectPositions}, wherever
+     * they are; the nearby scan only covers the ones close by.
+     */
+    private void recheckCompletedWatch(BuilderCalculationContext bcc) {
+        ObjectIterator<CompletedWatch> it = completedWatch.values().iterator();
+        while (it.hasNext()) {
+            CompletedWatch watch = it.next();
+            BetterBlockPos pos = watch.pos;
+            BlockState current = bcc.bsi.get0(pos);
+            // the builder's own view: the current window wins where it covers the position
+            BlockState desired = bcc.getSchematic(pos.x, pos.y, pos.z, current);
+            if (desired == null) {
+                // masked out of its window by what's there now, so there's nothing to judge it by
+                incorrectPositions.remove(pos);
+                it.remove();
+                completedWatchSnapshot = null;
+            } else if (!valid(current, desired, false)) {
+                // reverted: stays watched until it's fixed, or getSchematic would stop knowing it
+                incorrectPositions.add(pos);
+            } else if (incorrectPositions.remove(pos)) {
+                watch.completedTick = builderTick;
+            } else if (builderTick - watch.completedTick >= COMPLETED_WATCH_TICKS) {
+                it.remove();
+                completedWatchSnapshot = null;
+            }
+        }
+    }
+
+    private Long2ObjectMap<CompletedWatch> snapshotCompletedWatch() {
+        if (completedWatchSnapshot == null) {
+            completedWatchSnapshot = completedWatch.isEmpty() ? Long2ObjectMaps.emptyMap() : new Long2ObjectOpenHashMap<>(completedWatch);
+        }
+        return completedWatchSnapshot;
+    }
+
+    private void clearCompletedWatch() {
+        completedWatch.clear();
+        completedWatchSnapshot = null;
     }
 
     private void trim() {
@@ -1414,12 +1515,15 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                     int x = center.x + dx;
                     int y = center.y + dy;
                     int z = center.z + dz;
-                    BlockState desired = bcc.getSchematic(x, y, z, bcc.bsi.get0(x, y, z));
+                    BlockState current = bcc.bsi.get0(x, y, z);
+                    BlockState desired = bcc.getSchematic(x, y, z, current);
                     if (desired != null) {
                         // we care about this position
                         BetterBlockPos pos = new BetterBlockPos(x, y, z);
-                        if (valid(bcc.bsi.get0(x, y, z), desired, false)) {
-                            incorrectPositions.remove(pos);
+                        if (valid(current, desired, false)) {
+                            if (incorrectPositions.remove(pos)) {
+                                watchCompleted(bcc, pos, current);
+                            }
                             observedCompleted.add(BetterBlockPos.longHash(pos));
                         } else {
                             incorrectPositions.add(pos);
@@ -1862,6 +1966,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         legitAimTargetLastTick = null;
         printerBreakStarvation = 0;
         printerMovementForced = false;
+        clearCompletedWatch();
         printerResetNoRotateDetection();
     }
 
@@ -1942,6 +2047,27 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         return false;
     }
 
+    /**
+     * @return what the schematic placed at the origin wants at this world position, or null if the
+     * position isn't part of it
+     */
+    private BlockState desiredIn(ISchematic schematic, int originX, int originY, int originZ, int x, int y, int z, BlockState current) {
+        if (schematic.inSchematic(x - originX, y - originY, z - originZ, current)) {
+            // Case of special schematic
+            if (schematic instanceof MaskSchematic && ((MaskSchematic)schematic).getSchematic() instanceof CompositeSchematic) {
+                ISchematic ourSchem = ((CompositeSchematic)((MaskSchematic)schematic).getSchematic()).getSchematic(x - originX, y - originY, z - originZ, current).schematic;
+                if (ourSchem instanceof WhiteBlackSchematic && ((WhiteBlackSchematic) ourSchem).isValidIfUnder() &&
+                        MovementHelper.isBlockNormalCube(ctx.world().getBlockState(new BlockPos(x, y + 1, z)))) {
+                    return current;
+                }
+            }
+
+            return schematic.desiredState(x - originX, y - originY, z - originZ, current, this.approxPlaceable);
+        } else {
+            return null;
+        }
+    }
+
     private static boolean valid(BlockState current, BlockState desired, boolean itemVerify) {
         if (desired == null) {
             return true;
@@ -1980,6 +2106,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         private int originX;
         private int originY;
         private int originZ;
+        private Long2ObjectMap<CompletedWatch> watched;
 
         public BuilderCalculationContext() {
             super(BuilderProcess.this.baritone, true); // wew lad
@@ -2001,24 +2128,17 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             this.originX = origin.getX();
             this.originY = origin.getY();
             this.originZ = origin.getZ();
+            this.watched = snapshotCompletedWatch();
             return this;
         }
 
         private BlockState getSchematic(int x, int y, int z, BlockState current) {
-            if (schematic.inSchematic(x - originX, y - originY, z - originZ, current)) {
-                // Case of special schematic
-                if (schematic instanceof MaskSchematic && ((MaskSchematic)schematic).getSchematic() instanceof CompositeSchematic) {
-                    ISchematic ourSchem = ((CompositeSchematic)((MaskSchematic)schematic).getSchematic()).getSchematic(x - originX, y - originY, z - originZ, current).schematic;
-                    if (ourSchem instanceof WhiteBlackSchematic && ((WhiteBlackSchematic) ourSchem).isValidIfUnder() &&
-                            MovementHelper.isBlockNormalCube(ctx.world().getBlockState(new BlockPos(x, y + 1, z)))) {
-                        return current;
-                    }
-                }
-
-                return schematic.desiredState(x - originX, y - originY, z - originZ, current, BuilderProcess.this.approxPlaceable);
-            } else {
-                return null;
+            BlockState desired = desiredIn(schematic, originX, originY, originZ, x, y, z, current);
+            if (desired != null || watched.isEmpty()) {
+                return desired;
             }
+            CompletedWatch watch = watched.get(BetterBlockPos.longHash(x, y, z));
+            return watch == null ? null : desiredIn(watch.schematic, watch.originX, watch.originY, watch.originZ, x, y, z, current);
         }
 
         @Override
