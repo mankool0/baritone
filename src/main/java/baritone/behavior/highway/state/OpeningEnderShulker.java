@@ -70,6 +70,9 @@ public class OpeningEnderShulker extends State {
             context.transitionTo(HighwayState.LootingEnderShulker);
             return;
         }
-        context.baritone().getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
+        // One click per server round trip: a second one landing before this screen does opens it twice
+        if (!context.openClickPending(context.placeLoc())) {
+            context.baritone().getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
+        }
     }
 }

@@ -44,6 +44,7 @@ import net.minecraft.network.protocol.game.ClientboundContainerSetContentPacket;
 import net.minecraft.network.protocol.game.ClientboundLoginPacket;
 import net.minecraft.network.protocol.game.ClientboundRespawnPacket;
 import net.minecraft.network.protocol.game.ClientboundSystemChatPacket;
+import net.minecraft.network.protocol.game.ServerboundUseItemOnPacket;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
@@ -599,6 +600,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         }
         boolean escaping = highwayContext.currentState().getState() == HighwayState.PortalEscape;
 
+        highwayContext.closeStrayContainer();
+
         // Offhand rescue/autoTotem/clearCursorItem pause the state machine while they work, but the
         // stuck/health watchdogs must run regardless: a cursor stack that can never be placed (full
         // inventory) used to starve them and freeze the state machine forever with its keys latched.
@@ -779,6 +782,13 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 }
             });
             highwayContext.renderLockBuilding().unlock();
+        }
+    }
+
+    @Override
+    public void onSendPacket(PacketEvent event) {
+        if (event.getState() == EventState.PRE && event.getPacket() instanceof ServerboundUseItemOnPacket use) {
+            highwayContext.noteUseItemOn(use.getHitResult().getBlockPos());
         }
     }
 

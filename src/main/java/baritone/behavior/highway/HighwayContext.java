@@ -405,6 +405,26 @@ public class HighwayContext {
         lastContainerClickTick = contextTick;
     }
 
+    private BlockPos lastUseItemOnPos = null;
+    private long lastUseItemOnTick = Long.MIN_VALUE / 4;
+
+    /** Latch a right-click we sent on a block. Called from the send hook, on the main thread. */
+    public void noteUseItemOn(BlockPos pos) {
+        lastUseItemOnPos = pos.immutable();
+        lastUseItemOnTick = contextTick;
+    }
+
+    /**
+     * Whether a right-click on {@code pos} is still waiting on the server. The server opens a
+     * container once per click, so a second click sent before the first one's screen arrives opens
+     * it again: our close for the first then shuts the second server-side only, and its screen
+     * stays up with nothing left to ever close it.
+     */
+    public boolean openClickPending(BlockPos pos) {
+        return lastUseItemOnPos != null && lastUseItemOnPos.equals(pos)
+                && contextTick - lastUseItemOnTick < settings.highwayContainerOpenRetryTicks.value;
+    }
+
     private long lastObsidianStuckLogTick = Long.MIN_VALUE / 2;
 
     /** Rate limit for the "obsidian doesn't fit" log: states are re-created on every transition, so the throttle lives here. */
@@ -2100,6 +2120,44 @@ public class HighwayContext {
             HighwayState.FarmingEnderChestSwapBack,
             HighwayState.InQueue
     );
+
+    // States that open, or work inside, one of our own containers. Every state NOT listed here
+    // closes any container it finds open, so a new state that opens one has to be added. InQueue is
+    // here because queue servers can open menus of their own.
+    private static final EnumSet<HighwayState> CONTAINER_STATES = EnumSet.of(
+            HighwayState.OpeningPickaxeShulker,
+            HighwayState.LootingPickaxeShulker,
+            HighwayState.OpeningGappleShulker,
+            HighwayState.LootingGappleShulker,
+            HighwayState.OpeningTotemShulker,
+            HighwayState.LootingTotemShulker,
+            HighwayState.OpeningLootEnderChest,
+            HighwayState.DepositingLootEnderChestDepletedShulkers,
+            HighwayState.LootingLootEnderChestPicks,
+            HighwayState.LootingLootEnderChestEnderChests,
+            HighwayState.LootingLootEnderChestGapples,
+            HighwayState.LootingLootEnderChestTotems,
+            HighwayState.DepositingLootEnderChestDepletedShulkersFinal,
+            HighwayState.OpeningEnderShulker,
+            HighwayState.LootingEnderShulker,
+            HighwayState.DepositingStashShulker,
+            HighwayState.InQueue
+    );
+
+    /**
+     * Close a container left open outside the states that use one. A box that got clicked twice
+     * opens twice, and our close for the first shuts the second server-side only (see
+     * {@link #openClickPending}), so the server never closes its screen. Left alone, it blocks the
+     * printer and holds the Mining states until the stuck check, while the mined box sits on the
+     * ground despawning. The client-side close is immediate, so the state machine can run on this tick.
+     */
+    public void closeStrayContainer() {
+        if (!playerContext.player().hasContainerOpen() || CONTAINER_STATES.contains(currentState.getState())) {
+            return;
+        }
+        Helper.HELPER.logDirect("Closing a container left open in " + currentState.getState() + ".");
+        playerContext.player().closeContainer();
+    }
 
     public boolean autoTotem() {
         if (!settings.highwayAutoTotem.value

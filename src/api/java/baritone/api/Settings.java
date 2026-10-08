@@ -1711,6 +1711,16 @@ public final class Settings {
     public final Setting<Integer> highwayContainerClickInterval = new Setting<>(4);
 
     /**
+     * How long, in ticks, to wait for a shulker box or ender chest we right-clicked to open before
+     * right-clicking it again.
+     *
+     * <p>Keep this above the server round trip. A second click that lands while the first one's
+     * screen is still on its way opens the container a second time, and closing the first then
+     * leaves a screen the server no longer knows about.
+     */
+    public final Setting<Integer> highwayContainerOpenRetryTicks = new Setting<>(20);
+
+    /**
      * How long, in ticks, an inventory threshold (picks, gapples, ender chests, totems) has to stay
      * tripped before the builder commits to a storage trip or pauses.
      *
