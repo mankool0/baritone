@@ -121,6 +121,10 @@ public final class InventoryBehavior extends Behavior implements Helper {
         if (!Baritone.settings().keepToolsOnHotbar.value) {
             return false;
         }
+        if (holdsKeptTool(slot)) {
+            // a kept tool outside its home: evicting it has onTick swap it straight back
+            return true;
+        }
         switch (slot) {
             case SWORD_SLOT:
                 return bestSwordSlot() != -1;
@@ -133,6 +137,16 @@ public final class InventoryBehavior extends Behavior implements Helper {
             default:
                 return false;
         }
+    }
+
+    private boolean holdsKeptTool(int slot) {
+        if (ctx.player().getInventory().getNonEquipmentItems().get(slot).isEmpty()) {
+            return false;
+        }
+        return slot == bestSwordSlot()
+                || slot == bestToolAgainst(Blocks.STONE, ItemTags.PICKAXES)
+                || slot == bestToolAgainst(Blocks.DIRT, ItemTags.SHOVELS)
+                || slot == bestToolAgainst(Blocks.OAK_LOG, ItemTags.AXES);
     }
 
     // Ordered from highest to lowest priority
@@ -213,7 +227,7 @@ public final class InventoryBehavior extends Behavior implements Helper {
     }
 
     public OptionalInt getTempHotbarSlot(Predicate<Integer> disallowedHotbar) {
-        // 0 and 8 are the sword/pickaxe and throwaway, and occupied tool homes are off-limits too
+        // 0 and 8 are the sword/pickaxe and throwaway, and occupied tool homes and kept tools are off-limits too
         ArrayList<Integer> candidates = new ArrayList<>();
         for (int i = 1; i < 8; i++) {
             if (ctx.player().getInventory().getNonEquipmentItems().get(i).isEmpty() && !reservedForTool(i) && !disallowedHotbar.test(i)) {
@@ -364,8 +378,12 @@ public final class InventoryBehavior extends Behavior implements Helper {
             for (int i = 9; i < 36; i++) {
                 if (desired.test(inv.get(i))) {
                     if (select) {
-                        requestSwapWithHotBar(i, 7);
-                        p.getInventory().setSelectedSlot(7);
+                        int dest = reservedForTool(7) ? getTempHotbarSlot(slot -> false).orElse(-1) : 7;
+                        // select only once the swap went through: until then dest holds something
+                        // else, and if that's a block the movement places it instead
+                        if (dest != -1 && requestSwapWithHotBar(i, dest)) {
+                            p.getInventory().setSelectedSlot(dest);
+                        }
                     }
                     return true;
                 }

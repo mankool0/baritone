@@ -21,6 +21,7 @@ import baritone.Baritone;
 import baritone.api.process.PathingCommand;
 import baritone.api.process.PathingCommandType;
 import baritone.utils.BaritoneProcessHelper;
+import net.minecraft.world.entity.player.Input;
 
 public class InventoryPauserProcess extends BaritoneProcessHelper {
 
@@ -56,13 +57,17 @@ public class InventoryPauserProcess extends BaritoneProcessHelper {
     }
 
     private boolean calmNow() {
+        // Grim's MultiActionsC cancels a click while the last input packet held a movement key,
+        // and jump counts: a pillar holds it with a zero move vector
+        Input sent = ctx.player().getLastSentInput();
         return !ctx.player().isSprinting()
-                && ctx.player().input.getMoveVector().lengthSquared() == 0;
+                && ctx.player().input.getMoveVector().lengthSquared() == 0
+                && !(sent.forward() || sent.backward() || sent.left() || sent.right() || sent.jump());
     }
 
     /**
      * Quick variant of {@link #stationaryForInventoryMove()}: only needs one tick whose outgoing
-     * packets carried no sprint and no movement keys; momentum is fine.
+     * packets carried no sprint and no movement or jump keys; momentum is fine.
      */
     public boolean calmForInventoryMove() {
         if (safeToCancelLastTick && ticksOfCalm >= 1) {
