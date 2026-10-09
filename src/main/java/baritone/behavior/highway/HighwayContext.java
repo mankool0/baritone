@@ -4494,8 +4494,8 @@ public class HighwayContext {
 
     /**
      * Whether the cell at schematic coordinates ({@code x}, {@code y}, {@code z}) of the slice starting
-     * at {@code slicePos} already matches the highway. Cells the schematic doesn't cover, and cells held
-     * valid by the block above them, count as correct.
+     * at {@code slicePos} already matches the highway. Cells the schematic doesn't cover, cells held
+     * valid by the block above them, and cells the builder leaves alone count as correct.
      */
     private CellScan cellScan(BlockPos slicePos, int x, int y, int z) {
         return cellScan(schematic, slicePos, x, y, z);
@@ -4521,8 +4521,19 @@ public class HighwayContext {
                 MovementHelper.isBlockNormalCube(playerContext.world().getBlockState(new BlockPos(blockX, blockY + 1, blockZ)))) {
             return CellScan.CORRECT;
         }
-        return sliceSchem.desiredState(x, y, z, current, this.approxPlaceable).equals(current)
-                ? CellScan.CORRECT : CellScan.MISMATCH;
+        BlockState desired = sliceSchem.desiredState(x, y, z, current, this.approxPlaceable);
+        if (desired.equals(current)) {
+            return CellScan.CORRECT;
+        }
+        // The same cells BuilderProcess.valid() accepts and isHighwayCorrect skips: a lit portal pops
+        // once its frame is mined, and buildIgnoreBlocks (signs) are never touched. Read as unbuilt,
+        // a sign standing on the lane pinned the travel walk short of it for good while the builder
+        // had nothing left to do, so the bot restarted the builder over and over in place.
+        if (current.getBlock() instanceof NetherPortalBlock
+                || (desired.getBlock() instanceof AirBlock && settings.buildIgnoreBlocks.value.contains(current.getBlock()))) {
+            return CellScan.CORRECT;
+        }
+        return CellScan.MISMATCH;
     }
 
     private int scanFrontLength(int scanLength) {
