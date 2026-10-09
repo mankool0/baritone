@@ -192,6 +192,9 @@ public class HighwayContext {
     private BlockPos standClearSpot = null; // spot the step-off-it attempts below are counted against
     private int standClearTries = 0;
     private boolean standClearWalking = false; // a step-off walk we sent and haven't seen finish yet
+    private static final int STAND_FLOOR_TRIES = 3; // builds of a missing side-storage stand floor before giving up on the spot
+    private BlockPos standFloorSpot = null; // floor cell the stand-floor builds are counted against
+    private int standFloorTries = 0;
     private BlockPos shulkerSightFailSpot = null; // spot the sight failures below are counted against
     private int shulkerSightDigs = 0;
     private int shulkerSightWalks = 0;
@@ -3298,27 +3301,16 @@ public class HighwayContext {
     private BlockPos scanSideStorageSpots(int minDist, int maxDist, int sign) {
         Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
         Vec3 origin = new Vec3(eChestEmptyShulkOriginVector.x, eChestEmptyShulkOriginVector.y, eChestEmptyShulkOriginVector.z);
-        if (pattern.isCustom()) {
-            // Walk the line in slices: shifting our feet by the direction vector first, as the
-            // straight case does, would step a 45 degree diagonal away from the pattern's path.
-            BetterBlockPos feetOnLine = getClosestPoint(origin, direction,
-                    new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ()),
-                    LocationType.SideStorage);
-            for (int slices = slicesForBlocks(minDist); slices <= slicesForBlocks(maxDist); slices++) {
-                BetterBlockPos candidate = alongLine(feetOnLine, LocationType.SideStorage, slices * sign);
-                if (isSideStorageSpotUsable(candidate)) {
-                    return candidate;
-                }
-            }
-            return null;
-        }
-        for (int dist = minDist; dist <= maxDist; dist++) {
-            Vec3 curPos = new Vec3(
-                    playerContext.playerFeet().getX() + (dist * sign * highwayDirection.getX()),
-                    playerContext.playerFeet().getY(),
-                    playerContext.playerFeet().getZ() + (dist * sign * highwayDirection.getZ())
-            );
-            BetterBlockPos candidate = getClosestPoint(origin, direction, curPos, LocationType.SideStorage);
+        // Project our feet once and walk the line in slices from there. Projecting every candidate
+        // instead ran each one through the build's start and end clamps: on a short run they all
+        // collapsed onto the first and last slice, and the pavement behind the start never got
+        // looked at. Slice steps also keep an angled pattern on its path, where shifting our feet
+        // by the direction vector would step a 45 degree diagonal away from it.
+        BetterBlockPos feetOnLine = getClosestPoint(origin, direction,
+                new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ()),
+                LocationType.SideStorage);
+        for (int slices = slicesForBlocks(minDist); slices <= slicesForBlocks(maxDist); slices++) {
+            BetterBlockPos candidate = alongLine(feetOnLine, LocationType.SideStorage, slices * sign);
             if (isSideStorageSpotUsable(candidate)) {
                 return candidate;
             }
@@ -3330,7 +3322,9 @@ public class HighwayContext {
      * A side-storage spot we can actually work with: lava-free, with something under it to set the
      * box on, and a floor beside it to stand on while placing and opening it. The lava-only check
      * this wraps happily handed back spots hanging in the middle of a crossing highway's corridor,
-     * where the support block has nothing to attach to and the standing spot is thin air.
+     * where the support block has nothing to attach to and the standing spot is thin air. Missing
+     * blocks under the box or the standing spots are fine while we can build them: the support
+     * states put the box's down, {@link #buildSideStorageStandFloor} the standing spots'.
      */
     public boolean isSideStorageSpotUsable(BlockPos placeLoc) {
         if (!isSideStorageSpotSafe(placeLoc)) {
@@ -3340,21 +3334,72 @@ public class HighwayContext {
         if (isShulkerSpotKnownBad(placeLoc) || !shulkerColumnWorkable(placeLoc)) {
             return false;
         }
-        // Under the box: either solid already, or a face the support block can be placed against -
-        // and that second half only counts while we still carry a block to build the support out of
-        if (!MovementHelper.canWalkOn(baritone.bsi, placeLoc.getX(), placeLoc.getY() - 1, placeLoc.getZ())
-                && !(canBuildSupportBlock() && hasSturdyNeighbor(placeLoc.below()))) {
+        if (!hasFloorUnder(placeLoc) && !canBuildFloorAt(placeLoc.below())) {
             return false;
         }
         // We stand one step along the highway from the box to place it and to open it, and one
         // step further back when our own body turns out to be in the way of the placement
         for (int step : new int[]{1, 2}) {
             BlockPos stand = standOffAlongLine(placeLoc, LocationType.SideStorage, step);
-            if (!MovementHelper.canWalkOn(baritone.bsi, stand.getX(), stand.getY() - 1, stand.getZ())) {
+            if (!hasFloorUnder(stand) && !canBuildFloorAt(stand.below())) {
                 return false;
             }
         }
         return true;
+    }
+
+    /**
+     * Whether a support block can go in {@code floor}: we carry a block to build it out of, and it
+     * has a face to be placed against.
+     */
+    private boolean canBuildFloorAt(BlockPos floor) {
+        return canBuildSupportBlock() && !isLavaAt(floor) && hasSturdyNeighbor(floor);
+    }
+
+    /** Builds a support block at {@code pos}: netherrack, or obsidian when we carry none. */
+    public void buildSupportBlock(BlockPos pos) {
+        WhiteBlackSchematic supportSchem = new WhiteBlackSchematic(1, 1, 1, blackListBlocks(), Blocks.NETHERRACK.defaultBlockState(), false, false, true);
+        supportSchem.setThrowawayFallback(Blocks.OBSIDIAN.defaultBlockState());
+        baritone.getBuilderProcess().build("supportBlock", supportSchem, pos);
+    }
+
+    /**
+     * Out over open ground, like an intersection, the side lane has nothing under the cells we
+     * stand in to place and open the box. The go-to states walk to the exact cell above that floor
+     * and the box's own support only goes down once we're there, so the floor has to be built first.
+     *
+     * @return true while a floor is going down, or after giving up on the spot and moving to
+     *         {@code relocateState}; either way the caller is done for this tick
+     */
+    public boolean buildSideStorageStandFloor(HighwayState relocateState) {
+        if (placeLocLine != LocationType.SideStorage) {
+            return false;
+        }
+        for (int step : new int[]{1, 2}) {
+            BetterBlockPos stand = placeLocStand(step);
+            if (hasFloorUnder(stand)) {
+                continue;
+            }
+            BlockPos floor = new BlockPos(stand.getX(), stand.getY() - 1, stand.getZ());
+            if (!floor.equals(standFloorSpot)) {
+                standFloorSpot = floor;
+                standFloorTries = 0;
+            }
+            if (!canBuildFloorAt(floor) || standFloorTries++ >= STAND_FLOOR_TRIES) {
+                rememberBadShulkerSpot(placeLoc);
+                Helper.HELPER.logDirect("Couldn't build a floor to stand on next to " + placeLoc.toShortString() + ", picking a different spot.");
+                standFloorSpot = null;
+                standFloorTries = 0;
+                transitionTo(relocateState);
+                return true;
+            }
+            Helper.HELPER.logDirect("Nothing to stand on next to " + placeLoc.toShortString() + ", building a floor at " + floor.toShortString() + ".");
+            baritone.getPathingBehavior().cancelEverything();
+            settings.buildRepeat.value = new Vec3i(0, 0, 0);
+            buildSupportBlock(floor);
+            return true;
+        }
+        return false;
     }
 
     private boolean hasSturdyNeighbor(BlockPos pos) {

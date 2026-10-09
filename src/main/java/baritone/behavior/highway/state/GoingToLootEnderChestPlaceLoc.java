@@ -23,6 +23,8 @@ import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
 
 public class GoingToLootEnderChestPlaceLoc extends State {
+    private boolean buildingFloor = false;
+
     public GoingToLootEnderChestPlaceLoc(HighwayState state) {
         super(state);
     }
@@ -31,6 +33,13 @@ public class GoingToLootEnderChestPlaceLoc extends State {
     public void handle(HighwayContext context) {
         if (context.baritone().getCustomGoalProcess().isActive()) {
             return; // Wait to get there
+        }
+        if (buildingFloor && !context.baritone().getBuilderProcess().isPaused() && context.baritone().getBuilderProcess().isActive()) {
+            return; // Wait for the floor we're going to stand on
+        }
+        buildingFloor = context.buildSideStorageStandFloor(HighwayState.LootEnderChestPlaceLocPrep);
+        if (buildingFloor) {
+            return;
         }
 
         if (context.playerContext().playerFeet().equals(context.placeLocStand(1))) {

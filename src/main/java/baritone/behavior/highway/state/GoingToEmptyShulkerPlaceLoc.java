@@ -26,6 +26,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.AABB;
 
 public class GoingToEmptyShulkerPlaceLoc extends State {
+    private boolean buildingFloor = false;
+
     public GoingToEmptyShulkerPlaceLoc(HighwayState state) {
         super(state);
     }
@@ -34,6 +36,13 @@ public class GoingToEmptyShulkerPlaceLoc extends State {
     public void handle(HighwayContext context) {
         if (context.baritone().getCustomGoalProcess().isActive()) {
             return; // Wait to get there
+        }
+        if (buildingFloor && !context.baritone().getBuilderProcess().isPaused() && context.baritone().getBuilderProcess().isActive()) {
+            return; // Wait for the floor we're going to stand on
+        }
+        buildingFloor = context.buildSideStorageStandFloor(HighwayState.EmptyShulkerPlaceLocPrep);
+        if (buildingFloor) {
+            return;
         }
 
         BlockPos oneBlockAway = context.placeLocStand(1);
