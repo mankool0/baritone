@@ -5562,23 +5562,29 @@ public class HighwayContext {
     }
 
     /**
-     * Room for a shulker: a throwaway, else the smallest obsidian stack. A paver digging out an
-     * obsidian-filled road refills every slot with obsidian, which is never a throwaway while paving.
+     * Room for a shulker: a throwaway, else the smallest obsidian stack, else the smallest crying
+     * obsidian stack. A paver digging out an obsidian-filled road refills every slot with obsidian,
+     * which is never a throwaway while paving.
      */
     public int roomSlotToToss() {
         int slot = getThrowawaySlotToToss();
         if (slot != -1) {
             return slot;
         }
-        int smallest = Integer.MAX_VALUE;
-        for (int i = 0; i < 36; i++) {
-            ItemStack stack = playerContext.player().getInventory().getNonEquipmentItems().get(i);
-            if (i != 8 && stack.is(Blocks.OBSIDIAN.asItem()) && stack.getCount() < smallest) {
-                smallest = stack.getCount();
-                slot = i;
+        for (Item item : List.of(Blocks.OBSIDIAN.asItem(), Blocks.CRYING_OBSIDIAN.asItem())) {
+            int smallest = Integer.MAX_VALUE;
+            for (int i = 0; i < 36; i++) {
+                ItemStack stack = playerContext.player().getInventory().getNonEquipmentItems().get(i);
+                if (i != 8 && stack.is(item) && stack.getCount() < smallest) {
+                    smallest = stack.getCount();
+                    slot = i;
+                }
+            }
+            if (slot != -1) {
+                return slot;
             }
         }
-        return slot;
+        return -1;
     }
 
     public int getAcceptableThrowawaySlotNoHotbar() {

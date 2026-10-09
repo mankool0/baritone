@@ -22,6 +22,8 @@ import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
 import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
 
 public class InventoryCleaningPickaxeShulker extends State {
     public InventoryCleaningPickaxeShulker(HighwayState state) {
@@ -30,6 +32,12 @@ public class InventoryCleaningPickaxeShulker extends State {
 
     @Override
     public void handle(HighwayContext context) {
+        if (context.getItemCountInventory(Item.getId(Items.AIR)) > 0) {
+            // Room was made some other way (cleaned out by hand, an item used up), so go
+            // pick the box up instead of waiting for something to throw out
+            context.transitionTo(HighwayState.CollectingPickaxeShulker);
+            return;
+        }
         if (!context.containerClickReady()) {
             return;
         }
