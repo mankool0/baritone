@@ -23,6 +23,7 @@ import baritone.api.pathing.goals.Goal;
 import baritone.api.pathing.goals.GoalBlock;
 import baritone.api.pathing.goals.GoalComposite;
 import baritone.api.pathing.goals.GoalGetToBlock;
+import baritone.api.pathing.movement.IMovement;
 import baritone.api.process.IBuilderProcess;
 import baritone.api.process.PathingCommand;
 import baritone.api.process.PathingCommandType;
@@ -158,7 +159,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private static final int PRINTER_MAX_BREAK_STARVATION = 20;
 
     /**
-     * How many nodes ahead on the current path the printer treats as off limits for breaking.
+     * How many nodes ahead on the current path the printer treats as off limits for breaking, and
+     * how many movements ahead the builder won't place into.
      */
     private static final int PRINTER_PATH_PROTECT_LENGTH = 24;
 
@@ -523,6 +525,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                             continue;
                         }
                         desirableOnHotbar.add(desired);
+                        if (pathAheadNeedsClear(new BlockPos(x, y, z))) {
+                            continue;
+                        }
                         Optional<Placement> opt = possibleToPlace(desired, x, y, z, bcc.bsi);
                         if (opt.isPresent()) {
                             return opt;
@@ -906,6 +911,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         if (toBreakEntity.contains(placeAt)) {
             return -1; // being cleared for an entity; filling it back in would just fight the break
         }
+        if (pathAheadNeedsClear(placeAt)) {
+            return -1;
+        }
         if (!MovementHelper.canPlaceAgainst(bcc.bsi, clicked) || printerAvoidClicking(bcc.bsi.get0(clicked))) {
             return -1;
         }
@@ -988,7 +996,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                         || desired.getBlock() instanceof AirBlock
                         || !containsBlockState(hotbar, desired)
                         || !desired.canSurvive(ctx.world(), pos)
-                        || !placementPlausible(pos, desired)) {
+                        || !placementPlausible(pos, desired)
+                        || pathAheadNeedsClear(pos)) {
                     continue;
                 }
                 for (Direction d : Direction.values()) { // same faces, same order, as possibleToPlace
@@ -1087,6 +1096,30 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             }
         }
         return true;
+    }
+
+    /**
+     * Whether the current path still has to move through this cell. Filling it makes the path
+     * break it straight back out or fail, and under the highway it can seal the hole that a tunnel
+     * beneath the road climbs out through, leaving us shut in below the road.
+     */
+    private boolean pathAheadNeedsClear(BlockPos pos) {
+        PathExecutor current = baritone.getPathingBehavior().getCurrent();
+        if (current == null || current.getPath() == null) {
+            return false;
+        }
+        List<IMovement> movements = current.getPath().movements();
+        int start = Math.max(0, current.getPosition());
+        int end = Math.min(movements.size(), current.getPosition() + PRINTER_PATH_PROTECT_LENGTH);
+        for (int i = start; i < end; i++) {
+            // everything the movement needs clear: feet and head along the way, jump headroom
+            for (BlockPos clear : ((Movement) movements.get(i)).toBreakAll()) {
+                if (clear.equals(pos)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private boolean printerBreakAllowed() {

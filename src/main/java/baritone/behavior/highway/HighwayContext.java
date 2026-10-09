@@ -165,6 +165,9 @@ public class HighwayContext {
     private int preMineShulkerCount = -1; // inventory shulker count snapshotted before a refill box is mined
     private BetterBlockPos recoveryTarget = null;
     private int recoveryExtraBack = 0;
+    // feet block and ticks spent on it while a path runs underneath the road, see trappedUnderRoad
+    private BetterBlockPos underRoadLastFeet = null;
+    private int underRoadStillTicks = 0;
     private boolean recoveryHoldingJump = false; // here, not on FallRecovery: transitionTo throws the state object away, and a latched jump key would outlive it
     private Boolean recoverySwimThroughLavaSaved = null; // non-null while we've overridden allowSwimThroughLava for recovery
     private boolean invalidBlockFixActive = false;
@@ -1105,62 +1108,76 @@ public class HighwayContext {
     }
 
     /**
-     * Find a standable, already-built spot on the highway behind the player to path back to after a fall.
+     * Find a standable, already-built spot on the highway to path back to after a fall.
      * Starts {@code highwayRecoveryBackDistance} (+ any grown offset) blocks back and searches further
      * until a column with solid footing and clear feet/head is found, up to {@code highwayRecoveryMaxSearch}.
+     * A spot ahead wins if it's nearer, as long as restarting from it can't skip anything.
      *
      * @return the feet position to stand at, or null if nothing suitable was found
      */
     public BetterBlockPos computeRecoveryTarget() {
-        int dirX = highwayDirection.getX();
-        int dirZ = highwayDirection.getZ();
-        // perpendicular to the highway in the XZ plane
-        int perpX = dirZ;
-        int perpZ = -dirX;
+        int start = Math.max(1, settings.highwayRecoveryBackDistance.value) + recoveryExtraBack;
+        int max = Math.max(start, settings.highwayRecoveryMaxSearch.value);
+        BetterBlockPos behind = null;
+        int behindAt = max + 1;
+        for (int d = start; d <= max; d++) {
+            behind = standableSpotAcross(-d);
+            if (behind != null) {
+                behindAt = d;
+                break;
+            }
+        }
+        // The road behind can be unwalkable for a long way while it's clear just ahead: an
+        // obsidian-filled stretch we got under through a tunnel. Walking back past the fill only
+        // leaves the build on its far side, and the builder heads for it under the road again.
+        // The restart begins highwayCheckBackDistance behind wherever we stand, so a spot further
+        // ahead than that past the build origin would skip the stretch in between.
+        for (int d = start; d < behindAt; d++) {
+            BetterBlockPos ahead = standableSpotAcross(d);
+            if (ahead != null) {
+                boolean skipsNothing = originBuild == null || stepsAlongHighway(originBuild, ahead) <= highwayCheckBackDistance;
+                return skipsNothing ? ahead : behind;
+            }
+        }
+        return behind;
+    }
+
+    /**
+     * The first standable spot at highway level across the slice {@code slices} along the highway
+     * from our feet (negative is behind), scanning outward from the walk lane, or null.
+     */
+    private BetterBlockPos standableSpotAcross(int slices) {
         int floorY = settings.highwayLowestY.value + (paving ? 1 : 0);
         BetterBlockPos feet = playerContext.playerFeet();
         int maxLateral = settings.highwayWidth.value + 2;
-        int start = Math.max(1, settings.highwayRecoveryBackDistance.value) + recoveryExtraBack;
-        int max = Math.max(start, settings.highwayRecoveryMaxSearch.value);
+        int baseX;
+        int baseZ;
+        int crossX;
+        int crossZ;
         if (pattern.isCustom()) {
-            // Walk back slice by slice along the pattern (a straight walk-back leaves the road
-            // within a few slices), scanning across the road width from the walk lane.
-            int crossX = pattern.majorIsX() ? 0 : 1;
-            int crossZ = pattern.majorIsX() ? 1 : 0;
-            int tFeet = sliceIndexNear(feet.x, feet.z);
-            int laneOx = (int) Math.round(backPathOriginVector.x);
-            int laneOz = (int) Math.round(backPathOriginVector.z);
-            for (int d = start; d <= max; d++) {
-                int t = tFeet - d;
-                int baseX = laneOx + pattern.worldOffsetX(t);
-                int baseZ = laneOz + pattern.worldOffsetZ(t);
-                for (int w = 0; w <= maxLateral; w++) {
-                    for (int sign = (w == 0 ? 1 : -1); sign <= 1; sign += 2) {
-                        int fx = baseX + crossX * w * sign;
-                        int fz = baseZ + crossZ * w * sign;
-                        if (MovementHelper.canWalkOn(baritone.bsi, fx, floorY, fz)
-                                && MovementHelper.canWalkThrough(baritone.bsi, fx, floorY + 1, fz)
-                                && MovementHelper.canWalkThrough(baritone.bsi, fx, floorY + 2, fz)) {
-                            return new BetterBlockPos(fx, floorY + 1, fz);
-                        }
-                    }
-                }
-            }
-            return null;
+            // Walk slice by slice along the pattern (a straight walk leaves the road within a few
+            // slices), scanning across the road width from the walk lane.
+            int t = sliceIndexNear(feet.x, feet.z) + slices;
+            baseX = (int) Math.round(backPathOriginVector.x) + pattern.worldOffsetX(t);
+            baseZ = (int) Math.round(backPathOriginVector.z) + pattern.worldOffsetZ(t);
+            crossX = pattern.majorIsX() ? 0 : 1;
+            crossZ = pattern.majorIsX() ? 1 : 0;
+        } else {
+            baseX = feet.x + highwayDirection.getX() * slices;
+            baseZ = feet.z + highwayDirection.getZ() * slices;
+            // perpendicular to the highway in the XZ plane
+            crossX = highwayDirection.getZ();
+            crossZ = -highwayDirection.getX();
         }
-        for (int d = start; d <= max; d++) {
-            int baseX = feet.x - dirX * d;
-            int baseZ = feet.z - dirZ * d;
-            // scan laterally outward from our column to snap onto a built part of the highway
-            for (int w = 0; w <= maxLateral; w++) {
-                for (int sign = (w == 0 ? 1 : -1); sign <= 1; sign += 2) {
-                    int fx = baseX + perpX * w * sign;
-                    int fz = baseZ + perpZ * w * sign;
-                    if (MovementHelper.canWalkOn(baritone.bsi, fx, floorY, fz)
-                            && MovementHelper.canWalkThrough(baritone.bsi, fx, floorY + 1, fz)
-                            && MovementHelper.canWalkThrough(baritone.bsi, fx, floorY + 2, fz)) {
-                        return new BetterBlockPos(fx, floorY + 1, fz);
-                    }
+        // scan laterally outward from our column to snap onto a built part of the highway
+        for (int w = 0; w <= maxLateral; w++) {
+            for (int sign = (w == 0 ? 1 : -1); sign <= 1; sign += 2) {
+                int fx = baseX + crossX * w * sign;
+                int fz = baseZ + crossZ * w * sign;
+                if (MovementHelper.canWalkOn(baritone.bsi, fx, floorY, fz)
+                        && MovementHelper.canWalkThrough(baritone.bsi, fx, floorY + 1, fz)
+                        && MovementHelper.canWalkThrough(baritone.bsi, fx, floorY + 2, fz)) {
+                    return new BetterBlockPos(fx, floorY + 1, fz);
                 }
             }
         }
@@ -1218,6 +1235,33 @@ public class HighwayContext {
         return underRoadChecksApply()
                 && playerContext.playerFeet().y < highwayFloorY()
                 && roadOverhead();
+    }
+
+    /** How long a path may hold us on one block under the road before we count as sealed in anyway. */
+    private static final int UNDER_ROAD_STILL_TICKS = 100;
+
+    /**
+     * {@link #sealedUnderHighway}, except while a path is carrying us through underneath the road.
+     * A tunnel dug beneath an obsidian-filled stretch is the cheapest way past it, and pulling the
+     * bot out of the tunnel only leaves it on the wrong side, where the restarted builder heads into
+     * the same tunnel again. A path that stops getting anywhere still counts as trapped.
+     */
+    private boolean trappedUnderRoad() {
+        if (!sealedUnderHighway()) {
+            underRoadLastFeet = null;
+            return false;
+        }
+        // planning counts too, or the gap between two path segments would fire it mid-tunnel
+        if (!baritone.getPathingBehavior().hasPath() && baritone.getPathingBehavior().getInProgress().isEmpty()) {
+            underRoadLastFeet = null;
+            return true;
+        }
+        BetterBlockPos feet = playerContext.playerFeet();
+        if (!feet.equals(underRoadLastFeet)) {
+            underRoadLastFeet = feet;
+            underRoadStillTicks = 0;
+        }
+        return ++underRoadStillTicks > UNDER_ROAD_STILL_TICKS;
     }
 
     /**
@@ -1677,7 +1721,7 @@ public class HighwayContext {
         // built spot behind us
         boolean fellFar = playerContext.playerFeet().y <= highwayFeetY() - settings.highwayFallDetectThreshold.value;
         if (settings.highwayFallRecovery.value && currentStateEnum == HighwayState.BuildingHighway
-                && (fellFar || sealedUnderHighway())) {
+                && (fellFar || trappedUnderRoad())) {
             Helper.HELPER.logDirect((fellFar ? "Fell off the highway" : "Trapped underneath the highway")
                     + " (y=" + playerContext.playerFeet().y + "). Recovering.");
             setPreviousState(currentStateEnum);
