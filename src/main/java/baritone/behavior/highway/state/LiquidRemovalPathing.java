@@ -24,6 +24,7 @@ import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayBlockState;
 import baritone.behavior.highway.enums.HighwayState;
 import baritone.pathing.movement.MovementHelper;
+import baritone.utils.BrokenBlocks;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
@@ -34,7 +35,6 @@ import net.minecraft.world.level.block.AirBlock;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LiquidBlock;
-import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
@@ -48,12 +48,16 @@ public class LiquidRemovalPathing extends State {
     private static final int FILL_NONE = -1;
     private static final int FILL_PENDING = -2;
 
-    /** Ticks of neither moving, placing nor starting on a new block before we call the approach stuck. */
+    /** Ticks without placing, breaking a block for good or closing in on the liquid before we call the approach stuck. */
     private static final int STALL_TICKS = 300;
+    /** How much closer to the liquid than ever before counts as closing in, so drifting in place doesn't. */
+    private static final double STALL_CLOSER = 0.5;
 
     private int aimWaitTicks = 0;
-    private BetterBlockPos stallAnchor = null;
     private BlockPos breakTarget = null;
+    private BlockPos stallTarget = null;
+    private double stallClosest = Double.MAX_VALUE;
+    private long stallBrokenMark = 0;
     private int stallTicks = 0;
 
     public LiquidRemovalPathing(HighwayState state) {
@@ -84,12 +88,19 @@ public class LiquidRemovalPathing extends State {
             return;
         }
 
+        // Only the line-of-sight route walks through lava on fire resistance. The through-walls route
+        // never asked for any - Prep sends it here without a gapple - so the last minute of an older
+        // gapple is no worse than none. Bailing on it bounced Prep -> here -> Nothing ->
+        // BuildingHighway -> Prep twice a second until the effect ran out completely.
         MobEffectInstance fireRest = context.playerContext().player().getEffect(MobEffects.FIRE_RESISTANCE);
-        if (fireRest != null && fireRest.getDuration() < context.fireRestMinDuration()) {
+        if (!throughWalls && fireRest != null && fireRest.getDuration() < context.fireRestMinDuration()) {
             Helper.HELPER.logDirect("Running out of fire resistance. Restarting liquid clearing.");
-            context.transitionTo(HighwayState.Nothing);
             context.baritone().getInputOverrideHandler().clearAllKeys();
             context.baritone().getPathingBehavior().cancelEverything();
+            // Straight to Prep, not Nothing: BuildingHighway would lift the suppression that put us
+            // on this route, and Prep would send us back in through walls instead of back for a gapple
+            context.transitionTo(HighwayState.LiquidRemovalPrep);
+            context.resetTimer();
             return;
         }
 
@@ -119,33 +130,6 @@ public class LiquidRemovalPathing extends State {
             return;
         }
 
-        // Nothing else in this state times out: an approach that cannot make progress - pinned by a
-        // block we refuse to mine, or a fill the server keeps refusing - used to hold W against it
-        // until the fire resistance ran out minutes later. Standing in the same block without
-        // placing anything is the signature of that, so treat it as stuck and re-plan.
-        BetterBlockPos feet = context.playerContext().playerFeet();
-        if (!feet.equals(stallAnchor)) {
-            stallAnchor = feet;
-            stallTicks = 0;
-        } else if (++stallTicks > STALL_TICKS) {
-            stallTicks = 0;
-            logStallDiagnostics(context, throughWalls);
-            context.baritone().getInputOverrideHandler().clearAllKeys();
-            if (throughWalls) {
-                // Through-wall filling is what forbids mining the cover in front of us, so drop it
-                // for the rest of this removal and dig in with line of sight like the classic flow
-                Helper.HELPER.logDirect("Stuck approaching the liquid. Finishing this removal with line-of-sight placing.");
-                context.suppressThroughWalls();
-                context.transitionTo(HighwayState.LiquidRemovalPrep);
-                context.resetTimer();
-            } else {
-                Helper.HELPER.logDirect("Stuck approaching the liquid. Restarting liquid clearing.");
-                context.baritone().getPathingBehavior().cancelEverything();
-                context.transitionTo(HighwayState.Nothing);
-            }
-            return;
-        }
-
         // Everything directional - the support-block test, the source we walk at, which source we
         // fill first - runs off the nearest one we haven't filled yet. The list comes out of a DFS
         // flood fill, so its head can sit on the far side of the lake; walking at that marched us
@@ -155,6 +139,44 @@ public class LiquidRemovalPathing extends State {
             context.transitionTo(HighwayState.LiquidRemovalPrep); // all filled, let Prep re-scan
             context.resetTimer();
             return;
+        }
+
+        // Nothing else in this state times out: an approach that cannot make progress - pinned by a
+        // block we refuse to mine, or a fill the server keeps refusing - used to hold W against it
+        // until the fire resistance ran out minutes later. Progress is a placement, a block that
+        // stayed broken, or getting closer to the liquid than we have been yet. Merely standing in
+        // a different block isn't: walking upstream, the lava current carries us back over the
+        // edge every time we stop to dig and W carries us forward again, so a same-block check
+        // stayed quiet for minutes while the bot got nowhere.
+        BrokenBlocks broken = context.baritone().getInputOverrideHandler().getBlockBreakHelper().broken();
+        double approach = context.playerContext().playerHead().distanceTo(Vec3.atCenterOf(approachTarget));
+        if (!approachTarget.equals(stallTarget) || approach < stallClosest - STALL_CLOSER) {
+            stallTarget = approachTarget;
+            stallClosest = approach;
+            stallBrokenMark = broken.count();
+            stallTicks = 0;
+        } else if (++stallTicks > STALL_TICKS) {
+            stallTicks = 0;
+            if (broken.stayedGoneSince(stallBrokenMark, context.playerContext().world()::getBlockState)) {
+                // dug through something since the last check, which is progress even standing still
+                stallBrokenMark = broken.count();
+            } else {
+                logStallDiagnostics(context, throughWalls);
+                context.baritone().getInputOverrideHandler().clearAllKeys();
+                if (throughWalls) {
+                    // Through-wall filling is what forbids mining the cover in front of us, so drop it
+                    // for the rest of this removal and dig in with line of sight like the classic flow
+                    Helper.HELPER.logDirect("Stuck approaching the liquid. Finishing this removal with line-of-sight placing.");
+                    context.suppressThroughWalls();
+                    context.transitionTo(HighwayState.LiquidRemovalPrep);
+                    context.resetTimer();
+                } else {
+                    Helper.HELPER.logDirect("Stuck approaching the liquid. Restarting liquid clearing.");
+                    context.baritone().getPathingBehavior().cancelEverything();
+                    context.transitionTo(HighwayState.Nothing);
+                }
+                return;
+            }
         }
 
         boolean supportNeeded = false;
@@ -336,22 +358,33 @@ public class LiquidRemovalPathing extends State {
                 }
             }
 
-            ArrayList<Rotation> possibleIssueReachableList = new ArrayList<>();
-            BlockPos firstIssuePos = null;
-            for (BlockPos curIssuePos : possibleIssuePosList) {
-                Optional<Rotation> curIssuePosReachable = RotationUtils.reachable(context.playerContext(), curIssuePos, context.playerContext().playerController().getBlockReachDistance());
-                BlockState state = context.playerContext().world().getBlockState(curIssuePos);
-                Block block = state.getBlock();
-                if (block != Blocks.BEDROCK && !(block instanceof LiquidBlock) && !(block instanceof AirBlock) && curIssuePosReachable.isPresent() && curIssuePos.getY() >= context.settings().highwayMainY.value) {
-                    if (possibleIssueReachableList.isEmpty()) {
-                        firstIssuePos = curIssuePos;
-                    }
-                    possibleIssueReachableList.add(curIssuePosReachable.get());
+            double reach = context.playerContext().playerController().getBlockReachDistance();
+            BlockPos digPos = null;
+            Optional<Rotation> digRotation = Optional.empty();
+            // Finish the block we already started on before picking another. The scan is anchored on
+            // our feet and starts over every tick, so stepping over a block edge - the lava current
+            // carries us back while we stand still to dig - hands it a different first block, and
+            // switching throws the break progress away. Obsidian takes 40+ ticks, and the bot traded
+            // it for a neighbor and back every couple of seconds without finishing either.
+            if (breakTarget != null && context.liquidPathingCanMine() && isDiggable(context, breakTarget)
+                    && !(throughWalls && mustStayAsCover(context, breakTarget))) {
+                digRotation = RotationUtils.reachable(context.playerContext(), breakTarget, reach);
+                if (digRotation.isPresent()) {
+                    digPos = breakTarget;
                 }
             }
-            if (!possibleIssueReachableList.isEmpty()) {
-                noteBreaking(firstIssuePos);
-                context.baritone().getLookBehavior().updateTarget(possibleIssueReachableList.get(0), true);
+            for (int i = 0; digPos == null && i < possibleIssuePosList.size(); i++) {
+                BlockPos curIssuePos = possibleIssuePosList.get(i);
+                if (isDiggable(context, curIssuePos)) {
+                    digRotation = RotationUtils.reachable(context.playerContext(), curIssuePos, reach);
+                    if (digRotation.isPresent()) {
+                        digPos = curIssuePos;
+                    }
+                }
+            }
+            breakTarget = digPos;
+            if (digPos != null) {
+                context.baritone().getLookBehavior().updateTarget(digRotation.get(), true);
                 context.baritone().getInputOverrideHandler().clearAllKeys();
                 context.baritone().getInputOverrideHandler().setInputForceState(Input.CLICK_LEFT, true);
                 return;
@@ -422,7 +455,7 @@ public class LiquidRemovalPathing extends State {
                         }
                         
                         // Look at the block and break it
-                        noteBreaking(blockToBreak);
+                        breakTarget = blockToBreak;
                         context.baritone().getLookBehavior().updateTarget(breakRotation.get(), true);
                         context.baritone().getInputOverrideHandler().setInputForceState(Input.CLICK_LEFT, true);
                         Helper.HELPER.logDirect("Breaking obstructing block at " + blockToBreak);
@@ -585,16 +618,11 @@ public class LiquidRemovalPathing extends State {
         return best;
     }
 
-    /**
-     * Breaking a block is progress even though we stand still for it, and a bare netherite pick
-     * spends 167 ticks on one obsidian - but only while the target keeps changing. Hammering the
-     * same block forever is the stall we are looking for, so that one still counts up.
-     */
-    private void noteBreaking(BlockPos pos) {
-        if (!pos.equals(breakTarget)) {
-            breakTarget = pos;
-            stallTicks = 0;
-        }
+    /** A block the approach may dig out of its way: solid, breakable, and not below the highway floor. */
+    private static boolean isDiggable(HighwayContext context, BlockPos pos) {
+        Block block = context.playerContext().world().getBlockState(pos).getBlock();
+        return block != Blocks.BEDROCK && !(block instanceof LiquidBlock) && !(block instanceof AirBlock)
+                && pos.getY() >= context.settings().highwayMainY.value;
     }
 
     private static void logStallDiagnostics(HighwayContext context, boolean throughWalls) {
