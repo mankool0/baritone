@@ -20,7 +20,9 @@ package baritone.utils;
 import baritone.api.BaritoneAPI;
 import baritone.api.utils.IPlayerContext;
 import baritone.utils.accessor.IPlayerControllerMP;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 
@@ -35,6 +37,7 @@ public final class BlockBreakHelper {
     private final IPlayerContext ctx;
     private boolean wasHitting;
     private int breakDelayTimer = 0;
+    private final BrokenBlocks broken = new BrokenBlocks();
 
     BlockBreakHelper(IPlayerContext ctx) {
         this.ctx = ctx;
@@ -58,6 +61,8 @@ public final class BlockBreakHelper {
         boolean isBlockTrace = trace != null && trace.getType() == HitResult.Type.BLOCK;
 
         if (isLeftClick && isBlockTrace) {
+            BlockPos pos = ((BlockHitResult) trace).getBlockPos();
+            BlockState before = ctx.world().getBlockState(pos);
             ctx.playerController().setHittingBlock(wasHitting);
             if (ctx.playerController().hasBrokenBlock()) {
                 ctx.playerController().syncHeldItem();
@@ -80,8 +85,15 @@ public final class BlockBreakHelper {
             // since we're not spoofing the click keybind to the client, the client will stop the break if isDestroyingBlock is true
             // we store and restore this value on the next tick to determine if we're breaking a block
             ctx.playerController().setHittingBlock(false);
+            if (ctx.world().getBlockState(pos) != before) {
+                broken.add(pos, before);
+            }
         } else {
             wasHitting = false;
         }
+    }
+
+    public BrokenBlocks broken() {
+        return broken;
     }
 }

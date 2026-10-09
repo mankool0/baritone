@@ -33,6 +33,7 @@ import baritone.behavior.highway.enums.ShulkerType;
 import baritone.behavior.highway.enums.LocationType;
 import baritone.pathing.movement.MovementHelper;
 import baritone.process.BuilderProcess;
+import baritone.utils.BrokenBlocks;
 import baritone.utils.accessor.IClientLevel;
 import it.unimi.dsi.fastutil.ints.IntArrayFIFOQueue;
 import net.minecraft.client.multiplayer.prediction.BlockStatePredictionHandler;
@@ -263,6 +264,7 @@ public class HighwayContext {
     private BlockPos enderChestAccessLoc = null;
     private ShulkerType picksToUse;
     private BetterBlockPos cachedPlayerFeet = null;
+    private long brokenAtStuckCheck = 0;
     private int startShulkerCount = 0;
     private boolean lostShulkerRelogAttempted = false;
 
@@ -2305,6 +2307,11 @@ public class HighwayContext {
         }
         
         if (stuckTimer >= settings.highwayStuckCheckTicks.value) {
+            BrokenBlocks broken = baritone.getInputOverrideHandler().getBlockBreakHelper().broken();
+            long dug = broken.count() - brokenAtStuckCheck;
+            boolean digging = broken.stayedGoneSince(brokenAtStuckCheck, playerContext.world()::getBlockState);
+            brokenAtStuckCheck = broken.count();
+
             if (playerContext.player().hasContainerOpen()) {
                 playerContext.player().closeContainer(); // Close chest gui so we can actually build
                 stuckTimer = 0;
@@ -2327,6 +2334,13 @@ public class HighwayContext {
                     baritone.getInputOverrideHandler().clearAllKeys();
                     baritone.getPathingBehavior().cancelEverything();
                     return true;
+                }
+
+                if (digging) {
+                    Helper.HELPER.logDirect("Haven't moved in " + settings.highwayStuckCheckTicks.value + " ticks, but dug " + dug + " blocks - not stuck");
+                    cachedPlayerFeet = new BetterBlockPos(playerContext.playerFeet());
+                    stuckTimer = 0;
+                    return false;
                 }
 
                 Helper.HELPER.logDirect("We haven't moved in " + settings.highwayStuckCheckTicks.value + " ticks. Restarting builder");
