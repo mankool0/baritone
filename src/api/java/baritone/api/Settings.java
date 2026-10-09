@@ -1934,6 +1934,14 @@ public final class Settings {
     public final Setting<Boolean> highwayMobCombatAttack = new Setting<>(false);
 
     /**
+     * How close mob combat walks up to the engaged mob before standing still, in blocks to the
+     * nearest point of its hitbox. Measured from both our feet (where the killaura checks its range
+     * from) and our eyes (where the server and anticheat check reach from), whichever is farther.
+     * Keep it below the killaura range so lag can't leave the mob just out of reach.
+     */
+    public final Setting<Double> highwayMobCombatApproachDistance = new Setting<>(2.5);
+
+    /**
      * Avoid placing and breaking refill shulker boxes while a piglin that could steal the dropped box
      * (a baby, or any piglin with an empty main hand) is within this range of the spot. Placement prep
      * shifts the spot further back along the highway; the mining states wait for the piglin to wander
