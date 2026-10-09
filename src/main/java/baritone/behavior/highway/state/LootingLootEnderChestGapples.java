@@ -66,6 +66,10 @@ public class LootingLootEnderChestGapples extends State {
 
         int gappleShulksLooted = context.lootShulkerChestSlot(ShulkerType.Gapple);
         context.noteContainerClick();
+        if (gappleShulksLooted < 0) {
+            context.pauseNoRoomFor("gapple");
+            return;
+        }
         if (gappleShulksLooted > 0) {
             Helper.HELPER.logDirect("Looted " + gappleShulksLooted + " gapple shulker");
             return;

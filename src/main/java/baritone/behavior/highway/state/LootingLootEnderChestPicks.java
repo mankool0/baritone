@@ -50,6 +50,10 @@ public class LootingLootEnderChestPicks extends State {
 
         int picksShulksLooted = context.lootShulkerChestSlot(context.picksToUse());
         context.noteContainerClick();
+        if (picksShulksLooted < 0) {
+            context.pauseNoRoomFor("pickaxe");
+            return;
+        }
         if (picksShulksLooted > 0) {
             Helper.HELPER.logDirect("Looted " + picksShulksLooted + " pickaxe shulker");
             return;

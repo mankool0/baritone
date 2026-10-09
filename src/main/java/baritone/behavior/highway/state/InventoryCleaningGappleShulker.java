@@ -34,7 +34,7 @@ public class InventoryCleaningGappleShulker extends State {
             return;
         }
 
-        int throwawaySlot = context.getThrowawaySlotToToss();
+        int throwawaySlot = context.roomSlotToToss();
         if (throwawaySlot == -1) {
             return;
         }

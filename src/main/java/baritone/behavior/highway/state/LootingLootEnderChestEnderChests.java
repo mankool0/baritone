@@ -56,6 +56,10 @@ public class LootingLootEnderChestEnderChests extends State {
 
         int enderShulksLooted = context.lootShulkerChestSlot(ShulkerType.EnderChest);
         context.noteContainerClick();
+        if (enderShulksLooted < 0) {
+            context.pauseNoRoomFor("ender chest");
+            return;
+        }
         if (enderShulksLooted > 0) {
             Helper.HELPER.logDirect("Looted " + enderShulksLooted + " ender chest shulker");
             return;

@@ -3895,6 +3895,12 @@ public class HighwayContext {
         return count;
     }
 
+    public void pauseNoRoomFor(String shulker) {
+        playerContext.player().closeContainer();
+        pause("No room in the inventory for a " + shulker + " shulker, and nothing to throw out.");
+    }
+
+    /** Shulkers taken, 0 when storage holds none, -1 when one is there but cannot be taken. */
     public int lootShulkerChestSlot(ShulkerType shulkerType) {
         AbstractContainerMenu curContainer = playerContext.player().containerMenu;
         for (int i = 0; i < 27; i++) {
@@ -3947,10 +3953,9 @@ public class HighwayContext {
                         playerContext.playerController().windowClick(curContainer.containerId, depletedSlot < 9 ? depletedSlot + 54 : depletedSlot + 18, 0, ClickType.PICKUP, playerContext.player()); // Have to convert slot id to single chest slot id
                         playerContext.playerController().windowClick(curContainer.containerId, i, 0, ClickType.PICKUP, playerContext.player()); // Put depleted shulker in looted slot
                     } else if (getItemSlot(Item.getId(Items.AIR)) == -1) {
-                        // For some reason we have no air slots so we have to throw out some throwaway items
-                        int throwawaySlot = getThrowawaySlotToToss();
+                        int throwawaySlot = roomSlotToToss();
                         if (throwawaySlot == -1) {
-                            return 0;
+                            return -1;
                         }
                         playerContext.playerController().windowClick(curContainer.containerId, i, 0, ClickType.PICKUP, playerContext.player());
                         playerContext.playerController().windowClick(curContainer.containerId, throwawaySlot < 9 ? throwawaySlot + 54 : throwawaySlot + 18, 0, ClickType.PICKUP, playerContext.player()); // Have to convert slot id to single chest slot id
@@ -5554,6 +5559,26 @@ public class HighwayContext {
             }
         }
         return -1;
+    }
+
+    /**
+     * Room for a shulker: a throwaway, else the smallest obsidian stack. A paver digging out an
+     * obsidian-filled road refills every slot with obsidian, which is never a throwaway while paving.
+     */
+    public int roomSlotToToss() {
+        int slot = getThrowawaySlotToToss();
+        if (slot != -1) {
+            return slot;
+        }
+        int smallest = Integer.MAX_VALUE;
+        for (int i = 0; i < 36; i++) {
+            ItemStack stack = playerContext.player().getInventory().getNonEquipmentItems().get(i);
+            if (i != 8 && stack.is(Blocks.OBSIDIAN.asItem()) && stack.getCount() < smallest) {
+                smallest = stack.getCount();
+                slot = i;
+            }
+        }
+        return slot;
     }
 
     public int getAcceptableThrowawaySlotNoHotbar() {

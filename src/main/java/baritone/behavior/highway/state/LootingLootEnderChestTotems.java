@@ -66,6 +66,10 @@ public class LootingLootEnderChestTotems extends State {
 
         int totemShulksLooted = context.lootShulkerChestSlot(ShulkerType.Totem);
         context.noteContainerClick();
+        if (totemShulksLooted < 0) {
+            context.pauseNoRoomFor("totem");
+            return;
+        }
         if (totemShulksLooted > 0) {
             Helper.HELPER.logDirect("Looted " + totemShulksLooted + " totem shulker");
             return;
