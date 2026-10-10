@@ -2127,15 +2127,11 @@ public class HighwayContext {
     private int getPickaxeSlot(boolean avoidSilkTouch) {
         for (int i = 0; i < 36; i++) {
             ItemStack stack = playerContext.player().getInventory().getNonEquipmentItems().get(i);
-            if (stack.is(ItemTags.PICKAXES)) {
-                if (settings.itemSaver.value && (stack.getDamageValue() + settings.itemSaverThreshold.value) >= stack.getMaxDamage() && stack.getMaxDamage() > 1) {
-                    continue;
-                }
-                
+            if (isUsablePick(stack)) {
                 if (avoidSilkTouch && hasSilkTouch(stack)) {
                     continue;
                 }
-                
+
                 return i;
             }
         }
@@ -2551,7 +2547,7 @@ public class HighwayContext {
         int pickaxeCount = 0;
         for (ItemStack curStack : contents) {
             if (curStack.is(ItemTags.PICKAXES)) {
-                if (settings.itemSaver.value && (curStack.getDamageValue() + settings.itemSaverThreshold.value) >= curStack.getMaxDamage() && curStack.getMaxDamage() > 1) {
+                if (!isUsablePick(curStack)) {
                     continue;
                 }
                 pickaxeCount++;
@@ -2581,7 +2577,7 @@ public class HighwayContext {
         int pickaxeCount = 0;
         for (ItemStack curStack : contents) {
             if (curStack.is(ItemTags.PICKAXES)) {
-                if (settings.itemSaver.value && (curStack.getDamageValue() + settings.itemSaverThreshold.value) >= curStack.getMaxDamage() && curStack.getMaxDamage() > 1) {
+                if (!isUsablePick(curStack)) {
                     continue;
                 }
                 pickaxeCount++;
@@ -3195,14 +3191,22 @@ public class HighwayContext {
         return runChests >= 0 && enderChestCountAll() - settings.highwayEnderChestsToKeep.value >= runChests;
     }
 
+    /**
+     * A pick the builder runs on: diamond or netherite, and not retired by item saver. A stray
+     * wooden pick picked up off the road must not count, or it holds the count at the threshold
+     * and the builder digs on with it instead of refilling from a pick shulker.
+     */
+    private boolean isUsablePick(ItemStack stack) {
+        if (!validPicksList.contains(stack.getItem())) {
+            return false;
+        }
+        return !settings.itemSaver.value || (stack.getDamageValue() + settings.itemSaverThreshold.value) < stack.getMaxDamage() || stack.getMaxDamage() <= 1;
+    }
+
     public int getPickCountInventory() {
         int count = 0;
         for (int i = 0; i < 36; i++) {
-            ItemStack stack = playerContext.player().getInventory().getNonEquipmentItems().get(i);
-            if (stack.is(ItemTags.PICKAXES)) {
-                if (settings.itemSaver.value && (stack.getDamageValue() + settings.itemSaverThreshold.value) >= stack.getMaxDamage() && stack.getMaxDamage() > 1) {
-                    continue;
-                }
+            if (isUsablePick(playerContext.player().getInventory().getNonEquipmentItems().get(i))) {
                 count++;
             }
         }
@@ -3840,11 +3844,8 @@ public class HighwayContext {
     public int lootPickaxeChestSlot() {
         AbstractContainerMenu curContainer = playerContext.player().containerMenu;
         for (int i = 0; i < 27; i++) {
-            if (curContainer.getSlot(i).getItem().is(ItemTags.PICKAXES)) {
-                // Don't loot depleted picks if we're using item saver mode
-                if (settings.itemSaver.value && (curContainer.getSlot(i).getItem().getDamageValue() + settings.itemSaverThreshold.value) >= curContainer.getSlot(i).getItem().getMaxDamage() && curContainer.getSlot(i).getItem().getMaxDamage() > 1) {
-                    continue;
-                }
+            // Don't loot depleted picks if we're using item saver mode, or picks that wouldn't count
+            if (isUsablePick(curContainer.getSlot(i).getItem())) {
                 int swapSlot = settings.itemSaver.value ? getDepletedPickSlot() : -1;
 
                 // No depleted picks
