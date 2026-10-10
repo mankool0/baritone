@@ -39,12 +39,14 @@ import it.unimi.dsi.fastutil.ints.IntArrayFIFOQueue;
 import net.minecraft.client.multiplayer.prediction.BlockStatePredictionHandler;
 import net.minecraft.core.*;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerInputPacket;
 import net.minecraft.network.protocol.game.ServerboundSwingPacket;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.tags.ItemTags;
+import net.minecraft.util.Mth;
 import net.minecraft.util.ProblemReporter;
 import net.minecraft.world.ContainerHelper;
 import net.minecraft.world.InteractionHand;
@@ -90,6 +92,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.IntPredicate;
 
 public class HighwayContext {
     public static final List<Block> blackList = Arrays.asList(Blocks.ENDER_CHEST, Blocks.CHEST, Blocks.TRAPPED_CHEST, Blocks.CRAFTING_TABLE, Blocks.ANVIL, Blocks.BREWING_STAND, Blocks.HOPPER,
@@ -2308,8 +2311,12 @@ public class HighwayContext {
                     cursorStackNonEmpty = false;
                     return true;
                 } else {
-                    if (isAcceptableThrowawayItem(curContainer.getCarried().getItem())) {
-                        // Netherrack on our cursor, we can just throw it out
+                    // Junk by the list only: a scrap tool on the cursor may be the user's only
+                    // shovel, and the kept-tool ranking only sees the inventory slots
+                    boolean listedJunk = settings.highwayThrowJunk.value
+                            && HighwayJunk.isJunk(curContainer.getCarried(), settings.highwayJunkItems.value, List.of());
+                    if (isAcceptableThrowawayItem(curContainer.getCarried().getItem()) || listedJunk) {
+                        // Netherrack or junk on our cursor, we can just throw it out
                         playerContext.playerController().windowClick(curContainer.containerId, -999, 0, ClickType.PICKUP, playerContext.player());
                         cursorStackNonEmpty = false;
                         return true;
@@ -2928,15 +2935,24 @@ public class HighwayContext {
 
     /** Obsidian the inventory can still take */
     public int obsidianRoomInventory(int slotsFreedLater) {
+        return obsidianRoom(playerContext.player().getInventory().getNonEquipmentItems(), junkSlots(),
+                settings.acceptableThrowawayItems.value, slotsFreedLater);
+    }
+
+    /**
+     * Obsidian room in an inventory: partial obsidian stacks plus 64 for every slot that is empty
+     * or that the paving pickers would throw out for it (junk, then non-obsidian throwaways).
+     */
+    static int obsidianRoom(List<ItemStack> inventory, IntPredicate junkSlot, List<Item> throwaway, int slotsFreedLater) {
         int room = 0;
         int slots = slotsFreedLater;
         for (int i = 0; i < 36; i++) {
-            ItemStack stack = playerContext.player().getInventory().getNonEquipmentItems().get(i);
+            ItemStack stack = inventory.get(i);
             if (stack.isEmpty()) {
                 slots++;
             } else if (stack.is(Blocks.OBSIDIAN.asItem())) {
                 room += stack.getMaxStackSize() - stack.getCount();
-            } else if (i != 8 && !stack.is(Blocks.CRYING_OBSIDIAN.asItem()) && settings.acceptableThrowawayItems.value.contains(stack.getItem())) {
+            } else if (junkSlot.test(i) || (i != 8 && !stack.is(Blocks.CRYING_OBSIDIAN.asItem()) && throwaway.contains(stack.getItem()))) {
                 slots++;
             }
         }
@@ -2947,9 +2963,13 @@ public class HighwayContext {
 
     /** Slot breakdown behind the obsidian room figures, for the farm-entry and stuck-collection logs. */
     public String obsidianRoomBreakdown() {
-        int empty = 0, throwaway = 0, partial = 0, chestSlots = 0, obsidianSlots = 0;
+        List<ItemStack> inventory = playerContext.player().getInventory().getNonEquipmentItems();
+        IntPredicate junkSlot = junkSlots();
+        int empty = 0, junk = 0, throwaway = 0, partial = 0, chestSlots = 0, obsidianSlots = 0;
+        // item -> {count, slots} for everything no bucket takes, slot 8 aside (it has its own field)
+        Map<Item, int[]> other = new LinkedHashMap<>();
         for (int i = 0; i < 36; i++) {
-            ItemStack stack = playerContext.player().getInventory().getNonEquipmentItems().get(i);
+            ItemStack stack = inventory.get(i);
             if (stack.isEmpty()) {
                 empty++;
             } else if (stack.is(Blocks.OBSIDIAN.asItem())) {
@@ -2957,14 +2977,30 @@ public class HighwayContext {
                 partial += stack.getMaxStackSize() - stack.getCount();
             } else if (stack.is(Blocks.ENDER_CHEST.asItem())) {
                 chestSlots++;
+            } else if (junkSlot.test(i)) {
+                junk++;
             } else if (i != 8 && !stack.is(Blocks.CRYING_OBSIDIAN.asItem()) && settings.acceptableThrowawayItems.value.contains(stack.getItem())) {
                 throwaway++;
+            } else if (i != 8) {
+                int[] tally = other.computeIfAbsent(stack.getItem(), item -> new int[2]);
+                tally[0] += stack.getCount();
+                tally[1]++;
             }
         }
-        return "empty=" + empty + " throwaway=" + throwaway + " obsidianSlots=" + obsidianSlots + " partialRoom=" + partial
+        StringBuilder others = new StringBuilder();
+        for (Map.Entry<Item, int[]> entry : other.entrySet()) {
+            if (others.length() > 0) {
+                others.append(',');
+            }
+            others.append(BuiltInRegistries.ITEM.getKey(entry.getKey()).getPath()).append('x').append(entry.getValue()[0]);
+            if (entry.getValue()[1] > 1) {
+                others.append('/').append(entry.getValue()[1]).append("slots");
+            }
+        }
+        return "empty=" + empty + " junk=" + junk + " throwaway=" + throwaway + " obsidianSlots=" + obsidianSlots + " partialRoom=" + partial
                 + " chestSlots=" + chestSlots + " chests=" + getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem()))
                 + " offhand=" + playerContext.player().getOffhandItem().getCount() + "x" + playerContext.player().getOffhandItem().getItem()
-                + " ground=" + obsidianOnGroundNearby() + " slot8=" + playerContext.player().getInventory().getNonEquipmentItems().get(8).getItem();
+                + " ground=" + obsidianOnGroundNearby() + " slot8=" + inventory.get(8).getItem() + " other=[" + others + "]";
     }
 
     public int enderChestSlotsInventory() {
@@ -5599,16 +5635,45 @@ public class HighwayContext {
         return -1;
     }
 
+    /**
+     * Junk slots ({@link HighwayJunk}), shared by the pickers and the room counts: a slot a picker
+     * would throw that the counts miss stops the farm short with junk still aboard, and a counted
+     * slot no picker throws leaves farmed obsidian on the ground.
+     */
+    private IntPredicate junkSlots() {
+        if (!settings.highwayThrowJunk.value) {
+            return slot -> false;
+        }
+        List<ItemStack> inventory = playerContext.player().getInventory().getNonEquipmentItems();
+        IntPredicate keptTool = baritone.getInventoryBehavior()::holdsKeptTool;
+        return slot -> HighwayJunk.isJunkSlot(slot, inventory.get(slot), keptTool,
+                settings.highwayJunkItems.value, settings.highwayScrapMaterials.value);
+    }
+
     public int getThrowawaySlotToToss() {
-        for (Item throwawayItem : settings.acceptableThrowawayItems.value) {
+        return throwawaySlotToToss(playerContext.player().getInventory().getNonEquipmentItems(), junkSlots(),
+                settings.acceptableThrowawayItems.value, paving());
+    }
+
+    /**
+     * Junk first, then acceptableThrowawayItems blocks in the setting's order; never slot 8.
+     * Netherrack goes after the junk because lava removal, support blocks and pillaring still use it.
+     */
+    static int throwawaySlotToToss(List<ItemStack> inventory, IntPredicate junkSlot, List<Item> throwaway, boolean paving) {
+        // in slot order, so the hotbar goes first: that's where pickups land
+        for (int i = 0; i < 36; i++) {
+            if (junkSlot.test(i)) {
+                return i;
+            }
+        }
+        for (Item throwawayItem : throwaway) {
             // Paving's product is never a throwaway, whatever the list says; obsidianRoomInventory
             // assumes as much.
-            if (paving() && (throwawayItem == Blocks.OBSIDIAN.asItem() || throwawayItem == Blocks.CRYING_OBSIDIAN.asItem())) {
+            if (paving && (throwawayItem == Blocks.OBSIDIAN.asItem() || throwawayItem == Blocks.CRYING_OBSIDIAN.asItem())) {
                 continue;
             }
-            int itemId = Item.getId(throwawayItem);
             for (int i = 0; i < 36; i++) {
-                if (i != 8 && Item.getId(playerContext.player().getInventory().getNonEquipmentItems().get(i).getItem()) == itemId) {
+                if (i != 8 && inventory.get(i).is(throwawayItem)) {
                     return i;
                 }
             }
@@ -5617,19 +5682,24 @@ public class HighwayContext {
     }
 
     /**
-     * Room for a shulker: a throwaway, else the smallest obsidian stack, else the smallest crying
-     * obsidian stack. A paver digging out an obsidian-filled road refills every slot with obsidian,
-     * which is never a throwaway while paving.
+     * Room for a shulker: junk, then a throwaway, else the smallest obsidian stack, else the
+     * smallest crying obsidian stack. A paver digging out an obsidian-filled road refills every
+     * slot with obsidian, which is never a throwaway while paving.
      */
     public int roomSlotToToss() {
-        int slot = getThrowawaySlotToToss();
+        return roomSlotToToss(playerContext.player().getInventory().getNonEquipmentItems(), junkSlots(),
+                settings.acceptableThrowawayItems.value, paving());
+    }
+
+    static int roomSlotToToss(List<ItemStack> inventory, IntPredicate junkSlot, List<Item> throwaway, boolean paving) {
+        int slot = throwawaySlotToToss(inventory, junkSlot, throwaway, paving);
         if (slot != -1) {
             return slot;
         }
         for (Item item : List.of(Blocks.OBSIDIAN.asItem(), Blocks.CRYING_OBSIDIAN.asItem())) {
             int smallest = Integer.MAX_VALUE;
             for (int i = 0; i < 36; i++) {
-                ItemStack stack = playerContext.player().getInventory().getNonEquipmentItems().get(i);
+                ItemStack stack = inventory.get(i);
                 if (i != 8 && stack.is(item) && stack.getCount() < smallest) {
                     smallest = stack.getCount();
                     slot = i;
@@ -5640,6 +5710,37 @@ public class HighwayContext {
             }
         }
         return -1;
+    }
+
+    /** Ticks a throw waits for the server to take {@link #aimToThrow}'s aim before going out anyway. */
+    private static final int THROW_AIM_TIMEOUT_TICKS = 20;
+
+    /**
+     * Faces back along the highway and a little up; true once a stack thrown now flies that way.
+     * A thrown stack leaves along the rotation the server last received, and our click goes out
+     * before this tick's movement packet, so the aim has to be sent a tick ahead of the throw.
+     * Behind us is road the build has already passed, and the lift carries the stack over a box
+     * placed beside us. The old fixed yaw of 45 threw straight down the road on one diagonal, where
+     * the bot walked back over its junk and picked it up again. A path still walking us to the
+     * pickup is stopped: its look would fight ours, and Grim drops clicks sent with movement keys
+     * held.
+     *
+     * @param ticksWaited ticks the throw has been waiting; past the timeout it goes out unaimed, so
+     *                    a look something else keeps overriding can't wedge the room-making
+     */
+    public boolean aimToThrow(int ticksWaited) {
+        // the input packet that releases the keys goes out at the end of this tick, so not now
+        boolean stopping = baritone.getPathingBehavior().isPathing();
+        if (stopping) {
+            baritone.getPathingBehavior().cancelEverything();
+        }
+        Rotation aim = new Rotation(highwayDirectionYaw() + 180, -30);
+        baritone.getLookBehavior().updateTarget(aim, true);
+        Rotation sent = baritone.getLookBehavior().getServerRotation().orElse(null);
+        if (!stopping && sent != null && Math.abs(Mth.wrapDegrees(sent.getYaw() - aim.getYaw())) < 10 && Math.abs(sent.getPitch() - aim.getPitch()) < 10) {
+            return true;
+        }
+        return ticksWaited >= THROW_AIM_TIMEOUT_TICKS;
     }
 
     public int getAcceptableThrowawaySlotNoHotbar() {

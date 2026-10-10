@@ -17,7 +17,6 @@
 
 package baritone.behavior.highway.state;
 
-import baritone.api.utils.Rotation;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
@@ -43,10 +42,9 @@ public class InventoryCleaningGappleShulker extends State {
         }
 
         int throwawaySlot = context.roomSlotToToss();
-        if (throwawaySlot == -1) {
+        if (throwawaySlot == -1 || !context.aimToThrow(ticksInState())) {
             return;
         }
-        context.baritone().getLookBehavior().updateTarget(new Rotation(45, 0), true);
         context.playerContext().playerController().windowClick(context.playerContext().player().inventoryMenu.containerId, throwawaySlot < 9 ? throwawaySlot + 36 : throwawaySlot, 0, ClickType.PICKUP, context.playerContext().player());
         context.playerContext().playerController().windowClick(context.playerContext().player().inventoryMenu.containerId, -999, 0, ClickType.PICKUP, context.playerContext().player());
         context.noteContainerClick();

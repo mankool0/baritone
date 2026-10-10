@@ -139,7 +139,11 @@ public final class InventoryBehavior extends Behavior implements Helper {
         }
     }
 
-    private boolean holdsKeptTool(int slot) {
+    /**
+     * Whether the slot holds the class-best sword, pickaxe, shovel or axe, whether or not
+     * keepToolsOnHotbar is on: the highway never throws one out as scrap.
+     */
+    public boolean holdsKeptTool(int slot) {
         if (ctx.player().getInventory().getNonEquipmentItems().get(slot).isEmpty()) {
             return false;
         }

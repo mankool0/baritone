@@ -18,7 +18,6 @@
 package baritone.behavior.highway.state;
 
 import baritone.api.utils.Helper;
-import baritone.api.utils.Rotation;
 import baritone.api.utils.VecUtils;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
@@ -47,7 +46,9 @@ public class InventoryCleaningObsidian extends State {
         // Only free as many slots as the nearby drops actually need, so we keep throwaway
         // items we might still want (support blocks etc.) instead of dumping them all
         int stacksToThrow = slotsNeededForDrops(context) - context.getItemCountInventory(Item.getId(Items.AIR));
-        context.baritone().getLookBehavior().updateTarget(new Rotation(45, 0), true);
+        if (stacksToThrow > 0 && context.getThrowawaySlotToToss() != -1 && !context.aimToThrow(ticksInState())) {
+            return;
+        }
         for (int i = 0; i < stacksToThrow; i++) {
             int throwawaySlot = context.getThrowawaySlotToToss();
             if (throwawaySlot == -1) {

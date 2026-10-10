@@ -27,6 +27,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.core.Vec3i;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.Mirror;
@@ -1790,6 +1791,61 @@ public final class Settings {
      * totems are a safety net, not a build input, so an empty totem stash just keeps building.
      */
     public final Setting<Boolean> highwayPauseWhenOutOfTotems = new Setting<>(false);
+
+    /**
+     * When the builder has to make room (obsidian to pick up, a shulker to collect or loot), throw
+     * junk first: highwayJunkItems and scrap gear (see highwayScrapMaterials). Netherrack and the
+     * other acceptableThrowawayItems go only once no junk is left. Off means junk is never thrown.
+     */
+    public final Setting<Boolean> highwayThrowJunk = new Setting<>(true);
+
+    /**
+     * Items the builder may throw out as junk. Only listed items count: an item the builder
+     * doesn't recognise is kept. Pickaxes, shulker boxes, ender chests, obsidian, crying obsidian,
+     * enchanted golden apples, totems, ender pearls, elytra, custom-named stacks, slot 8 and the
+     * best sword, axe and shovel are never thrown, whatever this list says.
+     */
+    public final Setting<List<Item>> highwayJunkItems = new Setting<>(new ArrayList<>(Arrays.asList(
+            // dig drops
+            Items.GOLD_NUGGET,
+            Items.QUARTZ,
+            Items.GLOWSTONE_DUST,
+            Items.GRAVEL,
+            Items.FLINT,
+            Items.MAGMA_BLOCK,
+            Items.BONE_BLOCK,
+            Items.BROWN_MUSHROOM,
+            Items.RED_MUSHROOM,
+            Items.CRIMSON_FUNGUS,
+            Items.WARPED_FUNGUS,
+            Items.CRIMSON_ROOTS,
+            Items.WARPED_ROOTS,
+            Items.WEEPING_VINES,
+            Items.TWISTING_VINES,
+            Items.NETHER_WART_BLOCK,
+            Items.WARPED_WART_BLOCK,
+            Items.CRIMSON_STEM,
+            Items.WARPED_STEM,
+            // mob drops
+            Items.ROTTEN_FLESH,
+            Items.BONE,
+            Items.ARROW,
+            Items.BOW,
+            Items.CROSSBOW,
+            Items.GUNPOWDER,
+            Items.MAGMA_CREAM,
+            Items.STRING,
+            Items.LEATHER,
+            Items.COAL
+    )));
+
+    /**
+     * Materials whose armor, swords, axes and shovels count as junk, enchanted or not. Matched
+     * against the item id ("golden" covers golden_sword, golden_helmet...).
+     */
+    public final Setting<List<String>> highwayScrapMaterials = new Setting<>(new ArrayList<>(Arrays.asList(
+            "golden", "iron", "chainmail", "leather", "stone", "wooden", "copper"
+    )));
 
     /**
      * Obsidian threshold for acquiring more obsidian
