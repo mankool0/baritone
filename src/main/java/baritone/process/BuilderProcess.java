@@ -39,6 +39,7 @@ import baritone.pathing.movement.MovementHelper;
 import baritone.pathing.path.PathExecutor;
 import baritone.utils.BaritoneProcessHelper;
 import baritone.utils.BlockStateInterface;
+import baritone.utils.EntityHole;
 import baritone.utils.PathingCommandContext;
 import baritone.utils.schematic.MapArtSchematic;
 import baritone.utils.schematic.SchematicSystem;
@@ -62,8 +63,7 @@ import net.minecraft.util.Tuple;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.monster.EnderMan;
-import net.minecraft.world.entity.vehicle.boat.Boat;
+import net.minecraft.world.entity.vehicle.boat.AbstractBoat;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
@@ -130,7 +130,17 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private int layer;
     private int numRepeats;
     private List<BlockState> approxPlaceable;
+    /** Cells of {@link #entityHole} still to dig. */
     private Set<BetterBlockPos> toBreakEntity = new LinkedHashSet<>();
+    /**
+     * Every cell of the holes entities are being dropped through, dug out or not: nothing gets
+     * placed in them, or the support we just dug comes straight back and gets dug out again.
+     */
+    private final Set<BetterBlockPos> entityHole = new HashSet<>();
+    /** Cells missing a block that an entity is standing in. */
+    private final Set<BetterBlockPos> entityBlocked = new HashSet<>();
+    /** The ones of those a boat is in; the highway's BoatRemoval deals with boats. */
+    private final Set<BetterBlockPos> boatBlocked = new HashSet<>();
     public int stopAtHeight = 0;
     /**
      * Positions completed within the last {@link #COMPLETED_WATCH_TICKS}, kept even after the window
@@ -298,7 +308,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         this.numRepeats = 0;
         this.observedCompleted = new LongOpenHashSet();
         this.incorrectPositions = null;
-        this.toBreakEntity.clear();
+        clearEntityHoles();
         clearCompletedWatch();
         printerResetNoRotateDetection();
     }
@@ -427,6 +437,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         List<Optional<Tuple<BetterBlockPos, Rotation>>> toReturn = new ArrayList<>();
 
         for (BetterBlockPos pos : toBreakEntity) {
+            if (pos.y == center.y - 1 && pos.x == pathStart.x && pos.z == pathStart.z) {
+                continue; // same as below: a hole for something else is no reason to drop ourselves in it
+            }
             BlockState curr = bcc.bsi.get0(pos);
             if (curr.getBlock() != Blocks.AIR && !(curr.getBlock() instanceof LiquidBlock) && !valid(curr, Blocks.AIR.defaultBlockState(), false)) {
                 Optional<Rotation> rot = RotationUtils.reachable(ctx, pos, ctx.playerController().getBlockReachDistance());
@@ -523,6 +536,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                     if (MovementHelper.isReplaceable(x, y, z, curr, bcc.bsi) && !valid(curr, desired, false)) {
                         if (dy == 1 && bcc.bsi.get0(x, y + 1, z).getBlock() instanceof AirBlock) {
                             continue;
+                        }
+                        if (entityHole.contains(new BetterBlockPos(x, y, z))) {
+                            continue; // kept open for an entity to drop through
                         }
                         desirableOnHotbar.add(desired);
                         if (pathAheadNeedsClear(new BlockPos(x, y, z))) {
@@ -859,9 +875,10 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     }
 
     private BlockState printerDesired(BuilderCalculationContext bcc, BetterBlockPos pos, BlockState curr) {
-        if (toBreakEntity.contains(pos)) {
+        if (entityHole.contains(pos)) {
             BlockState air = Blocks.AIR.defaultBlockState();
-            // the same emptiness test toBreakNearPlayer uses, so both paths agree on what's a target
+            // the same emptiness test toBreakNearPlayer uses, so both paths agree on what's a target;
+            // a cell already dug out has nothing left to do until its entity is gone
             return valid(curr, air, false) ? null : air;
         }
         if (!incorrectPositions.contains(pos)) {
@@ -908,7 +925,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         if (!incorrectPositions.contains(placeAt)) {
             return -1;
         }
-        if (toBreakEntity.contains(placeAt)) {
+        if (entityHole.contains(placeAt)) {
             return -1; // being cleared for an entity; filling it back in would just fight the break
         }
         if (pathAheadNeedsClear(placeAt)) {
@@ -1292,6 +1309,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         if (Baritone.settings().distanceTrim.value) {
             trim();
         }
+        updateEntityHoles(bcc);
 
         List<Optional<Tuple<BetterBlockPos, Rotation>>> toBreak = toBreakNearPlayer(bcc);
 
@@ -1447,6 +1465,11 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             }
         }
         if (goal == null) {
+            if (entityBlocked.stream().anyMatch(pos -> !boatBlocked.contains(pos))) {
+                // What's left is waiting on an entity: still falling through the hole we just dug,
+                // or walking off. A pause would sit idle long after it's gone, so check every tick.
+                return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
+            }
             if (Baritone.settings().skipFailedLayers.value && Baritone.settings().buildInLayers.value && layer * Baritone.settings().layerHeight.value < realSchematic.heightY()) {
                 logDirect("Skipping layer that I cannot construct! Layer #" + layer);
                 layer++;
@@ -1642,6 +1665,82 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         return true;
     }
 
+    private void clearEntityHoles() {
+        toBreakEntity.clear();
+        entityHole.clear();
+        entityBlocked.clear();
+        boatBlocked.clear();
+    }
+
+    /**
+     * Finds the entities standing where a missing block goes and plans the hole each one drops
+     * through ({@link EntityHole}). Redone every tick from where they are now, so a dug hole cell
+     * stays protected for as long as its entity is still in the way, not just while there's still
+     * something in it to dig.
+     */
+    private void updateEntityHoles(BuilderCalculationContext bcc) {
+        clearEntityHoles();
+        Entity self = ctx.player().getRootVehicle();
+        BlockState air = Blocks.AIR.defaultBlockState();
+        // each vehicle once with everything riding it, since they drop together
+        List<Entity> roots = ctx.entitiesStream()
+                .filter(e -> e.isAlive() && e.blocksBuilding)
+                .map(Entity::getRootVehicle)
+                .filter(root -> root != self)
+                .distinct()
+                .toList();
+        for (Entity root : roots) {
+            List<BetterBlockPos> blocked = new ArrayList<>();
+            boolean boat = false;
+            for (Entity member : (Iterable<Entity>) root.getSelfAndPassengers()::iterator) {
+                if (!member.isAlive() || !member.blocksBuilding) {
+                    continue;
+                }
+                boat |= member instanceof AbstractBoat;
+                AABB box = member.getBoundingBox();
+                // the cells it overlaps, by the same strict test checkNoEntityCollision makes
+                for (int x = Mth.floor(box.minX); x < box.maxX; x++) {
+                    for (int y = Mth.floor(box.minY); y < box.maxY; y++) {
+                        for (int z = Mth.floor(box.minZ); z < box.maxZ; z++) {
+                            BetterBlockPos pos = new BetterBlockPos(x, y, z);
+                            if (incorrectPositions.contains(pos) && bcc.bsi.get0(pos).getBlock() instanceof AirBlock) {
+                                blocked.add(pos);
+                            }
+                        }
+                    }
+                }
+            }
+            if (blocked.isEmpty()) {
+                continue;
+            }
+            entityBlocked.addAll(blocked);
+            if (boat) {
+                boatBlocked.addAll(blocked);
+                continue;
+            }
+            if (!EntityHole.falls(root)) {
+                continue;
+            }
+            int clearY = blocked.stream().mapToInt(pos -> pos.y).min().getAsInt();
+            List<BlockPos> hole = EntityHole.plan(ctx.world(), EntityHole.groupBox(root), clearY, pos -> {
+                BlockState desired = bcc.getSchematic(pos.getX(), pos.getY(), pos.getZ(), air);
+                return desired != null && !(desired.getBlock() instanceof AirBlock);
+            });
+            if (hole == null) {
+                continue; // nothing we'd dig drops it, so its cell just waits for it to move
+            }
+            for (BlockPos cell : hole) {
+                BetterBlockPos pos = new BetterBlockPos(cell);
+                entityHole.add(pos);
+                BlockState state = bcc.bsi.get0(pos);
+                if (!(state.getBlock() instanceof AirBlock) && !(state.getBlock() instanceof LiquidBlock)
+                        && !state.getCollisionShape(ctx.world(), cell).isEmpty()) {
+                    toBreakEntity.add(pos);
+                }
+            }
+        }
+    }
+
     private Goal assemble(BuilderCalculationContext bcc, List<BlockState> approxPlaceable, boolean logMissing, Collection<BetterBlockPos> candidates) {
         List<BetterBlockPos> placeable = new ArrayList<>();
         List<BetterBlockPos> breakable = new ArrayList<>();
@@ -1652,45 +1751,16 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         AtomicBoolean entityDetected = new AtomicBoolean(false);
         AtomicBoolean boatDetected = new AtomicBoolean(false);
         List<BetterBlockPos> outOfBounds = new ArrayList<>();
-        toBreakEntity.clear();
         candidates.forEach(pos -> {
             BlockState state = bcc.bsi.get0(pos);
             if (state.getBlock() instanceof AirBlock) {
-                // Mine out blocks below if entity in the way
-                if (!checkNoEntityCollision(new AABB(pos), ctx.player())) {
+                if (entityBlocked.contains(pos)) {
+                    // waits for the entity to drop through the hole updateEntityHoles planned under it
                     entityDetected.set(true);
-                    int xSize = 1;
-                    int zSize = 1;
-                    int ySize = 2;
-                    boolean mineObby = false;
-                    List<Entity> entityList = ctx.world().getEntities((Entity)null, new AABB(pos));
-                    for (Entity entity : entityList) {
-                        if (entity instanceof EnderMan) {
-                            ySize = 3;
-                        }
-                        else if (entity instanceof Boat) {
-                            //xSize = 2;
-                            //ySize = 2;
-                            //mineObby = true;
-                            // can't do boats lol
-                            boatDetected.set(true);
-                        }
+                    if (boatBlocked.contains(pos)) {
+                        boatDetected.set(true); // can't do boats lol
                     }
-                    for (int x = -xSize; x <= xSize; x++) {
-                        for (int z = -zSize; z <= zSize; z++) {
-                            for (int y = -ySize; y <= 0; y++) {
-                                BlockState lowerState = bcc.bsi.get0(pos.offset(x, y, z));
-                                if ((lowerState.is(Blocks.OBSIDIAN) || lowerState.is(Blocks.CRYING_OBSIDIAN)) && !mineObby) {
-                                    continue;
-                                }
-                                if (!(lowerState.getBlock() instanceof AirBlock) && !(lowerState.getBlock() instanceof LiquidBlock)) {
-                                    breakable.add(new BetterBlockPos(pos.offset(x, y, z)));
-                                    toBreakEntity.add(new BetterBlockPos(pos.offset(x, y, z)));
-                                }
-                            }
-                        }
-                    }
-                } else {
+                } else if (!entityHole.contains(pos)) { // dug out for an entity to drop through: stays empty until it has
                     BlockState desired = bcc.getSchematic(pos.x, pos.y, pos.z, state);
                     if (desired == null) {
                         outOfBounds.add(pos);
@@ -1983,7 +2053,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     @Override
     public void onLostControl() {
         incorrectPositions = null;
-        toBreakEntity.clear();
+        clearEntityHoles();
         name = null;
         schematic = null;
         realSchematic = null;

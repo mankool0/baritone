@@ -34,6 +34,7 @@ import baritone.behavior.highway.enums.LocationType;
 import baritone.pathing.movement.MovementHelper;
 import baritone.process.BuilderProcess;
 import baritone.utils.BrokenBlocks;
+import baritone.utils.EntityHole;
 import baritone.utils.accessor.IClientLevel;
 import it.unimi.dsi.fastutil.ints.IntArrayFIFOQueue;
 import net.minecraft.client.multiplayer.prediction.BlockStatePredictionHandler;
@@ -56,7 +57,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.monster.Shulker;
-import net.minecraft.world.entity.vehicle.boat.Boat;
+import net.minecraft.world.entity.vehicle.boat.AbstractBoat;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.*;
@@ -631,16 +632,6 @@ public class HighwayContext {
     }
 
     private BlockPos boatLocation = null;
-
-    public boolean boatHasPassenger() {
-        return boatHasPassenger;
-    }
-
-    public void setBoatHasPassenger(boolean boatHasPassenger) {
-        this.boatHasPassenger = boatHasPassenger;
-    }
-
-    private boolean boatHasPassenger = false;
     private boolean inQueue = false;
     private HighwayState stateBeforeQueue = HighwayState.Nothing;
     
@@ -5164,9 +5155,8 @@ public class HighwayContext {
                                 if (!baritone.getBuilderProcess().checkNoEntityCollision(new AABB(new BlockPos(blockX, blockY, blockZ)), playerContext.player())) {
                                     List<Entity> entityList = playerContext.world().getEntities(null, new AABB(new BlockPos(blockX, blockY, blockZ)));
                                     for (Entity entity : entityList) {
-                                        if (entity instanceof Boat || entity.isVehicle()) {
+                                        if (entity instanceof AbstractBoat || entity.isVehicle()) {
                                             // can't do boats lol
-                                            boatHasPassenger = entity.isVehicle();
                                             boatLocation = new BlockPos(blockX, blockY, blockZ);
                                             renderLockBuilding.unlock();
                                             return HighwayBlockState.Boat;
@@ -5315,6 +5305,72 @@ public class HighwayContext {
 
     public BlockPos boatLocation() {
         return boatLocation;
+    }
+
+    /** Slices either side of a dropped entity that are checked for cells the highway builds back. */
+    private static final int ENTITY_HOLE_SLICES = 6;
+
+    /**
+     * The hole that drops whatever is in the way at {@code blocked} - a boat, or anything with a
+     * rider - out of the highway: dug under its own footprint only, and deep enough for it to end
+     * up below every floor, rail or support cell the hole takes out, since those get built back
+     * over it.
+     *
+     * @return the hole's cells, empty once nothing is in the way; null if it can't be dropped
+     */
+    public List<BlockPos> entityDropHole(BlockPos blocked) {
+        Entity self = playerContext.player().getRootVehicle();
+        List<Entity> roots = playerContext.world().getEntities((Entity) null, new AABB(blocked), e -> e.isAlive() && e.blocksBuilding)
+                .stream()
+                .map(Entity::getRootVehicle)
+                .filter(root -> root != self)
+                .toList();
+        if (roots.isEmpty()) {
+            return List.of();
+        }
+        // the boat or ridden entity that sent us here, over anything else standing in the same cell
+        Entity root = roots.stream()
+                .filter(r -> r instanceof AbstractBoat || r.isVehicle())
+                .findFirst()
+                .orElse(roots.get(0));
+        if (!EntityHole.falls(root)) {
+            return null;
+        }
+        Set<BlockPos> refill = highwayBlockCellsNear(blocked, ENTITY_HOLE_SLICES);
+        return EntityHole.plan(playerContext.world(), EntityHole.groupBox(root), blocked.getY(), refill::contains);
+    }
+
+    /**
+     * Cells within {@code slices} slices of {@code pos} that the highway puts a block in when
+     * they're empty: the floor, the rails and the supports under them.
+     */
+    private Set<BlockPos> highwayBlockCellsNear(BlockPos pos, int slices) {
+        Set<BlockPos> cells = new HashSet<>();
+        BlockState air = Blocks.AIR.defaultBlockState();
+        BlockPos start = sliceAlongLine(originVector, new Vec3(pos.getX(), pos.getY(), pos.getZ()), -slices, LocationType.HighwayBuild);
+        int count = 2 * slices + 1;
+        if (endPos != null) {
+            count = Math.min(count, stepsAlongHighway(start, endPos) + 1);
+        }
+        int t0 = pattern.isCustom() ? sliceIndexOf(start, originVector) : 0;
+        for (int i = 0; i < count; i++) {
+            BlockPos anchor = pattern.isCustom()
+                    ? start.offset(sliceDelta(t0, i))
+                    : start.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
+            CompositeSchematic slice = schematicForSlice(t0 + i);
+            for (int y = 0; y < slice.heightY(); y++) {
+                for (int z = 0; z < slice.lengthZ(); z++) {
+                    for (int x = 0; x < slice.widthX(); x++) {
+                        if (slice.inSchematic(x, y, z, air)
+                                && !(slice.desiredState(x, y, z, air, this.approxPlaceable).getBlock() instanceof AirBlock)) {
+                            // plain BlockPos: EntityHole looks these up with plain ones
+                            cells.add(new BlockPos(anchor.getX() + x, anchor.getY() + y, anchor.getZ() + z));
+                        }
+                    }
+                }
+            }
+        }
+        return cells;
     }
 
     public enum PlaceResult
