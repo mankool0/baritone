@@ -89,6 +89,10 @@ public abstract class PlacingShulkerBase extends State {
         // below is about getting a box down, and the sight check even takes this box for the wall
         // in its own way and digs it out, with nothing set up to collect the drop.
         if (testState.getBlock() instanceof ShulkerBoxBlock) {
+            if (context.outOfReachWalkRunning()) {
+                context.resetTimer();
+                return; // back onto the standing spot first, see HighwayContext.handleContainerOutOfReach
+            }
             placed = true;
             context.resetTimer();
             return;

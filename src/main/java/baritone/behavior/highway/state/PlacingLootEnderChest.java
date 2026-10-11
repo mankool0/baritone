@@ -53,6 +53,10 @@ public class PlacingLootEnderChest extends State {
 
         // Chest is down with headroom to open it - we're done here
         if (placeState.getBlock() instanceof EnderChestBlock && aboveState.getBlock() instanceof AirBlock) {
+            if (context.outOfReachWalkRunning()) {
+                context.resetTimer();
+                return; // back onto the standing spot first, see HighwayContext.handleContainerOutOfReach
+            }
             context.baritone().getInputOverrideHandler().clearAllKeys();
             context.transitionTo(HighwayState.OpeningLootEnderChest);
             placed = false;

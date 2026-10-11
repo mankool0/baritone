@@ -38,6 +38,7 @@ import baritone.utils.EntityHole;
 import baritone.utils.accessor.IClientLevel;
 import it.unimi.dsi.fastutil.ints.IntArrayFIFOQueue;
 import net.minecraft.client.multiplayer.prediction.BlockStatePredictionHandler;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.*;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -208,6 +209,16 @@ public class HighwayContext {
     private int shulkerSightDigs = 0;
     private int shulkerSightWalks = 0;
     private long shulkerSightLastDigTick = Long.MIN_VALUE / 2;
+    private BlockPos reachFailSpot = null; // placed container the can't-reach failures below are counted against
+    private int reachDigs = 0;
+    private int reachWalks = 0;
+    private long reachLastDigTick = Long.MIN_VALUE / 2;
+    private boolean reachWalking = false; // a walk back onto the standing spot we sent and haven't seen finish yet
+    private static final int SNEAK_TAP_TICKS = 4; // two down, two up: see runSneakTap
+    private BlockPos refusedOpenSpot = null; // first spot since the last open where the server ignored a good click
+    private BlockPos sneakTapSpot = null; // spot the one sneak tap below was spent on
+    private int sneakTapTicks = 0; // ticks left in a running sneak tap, 0 when none
+    private boolean refusedOpenRelogAttempted = false; // cleared only by an open, so a rejoin that didn't help can't loop
     private boolean travellingToEnd = false; // walking up an already-built stretch because the builder found nothing to do
     private Goal travelGoal = null; // the goal object we handed the custom goal process, so we only ever cancel our own walk
     private BetterBlockPos travelTarget = null;
@@ -2013,6 +2024,13 @@ public class HighwayContext {
         }
     }
 
+    /** A chest we gave up on can't stay the one a later refill or stash leg walks back to reuse. */
+    private void forgetEnderChestAccessLoc(BlockPos spot) {
+        if (spot.equals(enderChestAccessLoc)) {
+            enderChestAccessLoc = null;
+        }
+    }
+
     public void setEnderChestAccessLoc(BlockPos enderChestAccessLoc) {
         this.enderChestAccessLoc = enderChestAccessLoc == null
                 ? null
@@ -3681,15 +3699,19 @@ public class HighwayContext {
         if (placeSide == null) {
             return null;
         }
-        BlockPos neighbor = placeLoc.relative(placeSide);
+        return rayBlockerShortOf(placeLoc.relative(placeSide));
+    }
+
+    /** What the ray from our eyes to the centre of {@code target} stops on before getting there. */
+    private BlockPos rayBlockerShortOf(BlockPos target) {
         Rotation aim = RotationUtils.calcRotationFromVec3d(playerContext.player().getEyePosition(1.0F),
-                VecUtils.calculateBlockCenter(playerContext.world(), neighbor), playerContext.playerRotations());
+                VecUtils.calculateBlockCenter(playerContext.world(), target), playerContext.playerRotations());
         HitResult hit = RayTraceUtils.rayTraceTowards(playerContext.player(),
                 baritone.getLookBehavior().getAimProcessor().peekRotation(aim),
                 playerContext.playerController().getBlockReachDistance(), false);
         if (hit != null && hit.getType() == HitResult.Type.BLOCK) {
             BlockPos hitAt = ((BlockHitResult) hit).getBlockPos();
-            if (!hitAt.equals(neighbor)) {
+            if (!hitAt.equals(target)) {
                 return hitAt;
             }
         }
@@ -3741,6 +3763,95 @@ public class HighwayContext {
         transitionTo(relocateState != null ? relocateState : HighwayState.Nothing);
         resetTimer();
         return true;
+    }
+
+    /**
+     * A container that's down but can't be reached from where we stand. Walking back only helps
+     * when we're off the standing spot: with a block between us and the box, the walk-closer state
+     * found us already there, the placing state found the box already down and handed it straight
+     * back, and that went round every five ticks for as long as nobody stepped in. So dig out what
+     * the ray to it stops on, walk only when nothing's in the way and we're off the spot, and give
+     * the spot up once neither gets it in reach.
+     *
+     * @param stand         where the go-to state stands to work on the spot
+     * @param retryState    the placing state, which waits a dig or walk out and hands the container back
+     * @param relocateState where to pick a new spot after giving up on an ender chest, which is left
+     *                      standing since mining it only drops obsidian. A shulker box is always mined
+     *                      back instead, whatever this is, so it's never left for someone else to take.
+     */
+    public void handleContainerOutOfReach(BlockPos spot, BlockPos stand, HighwayState retryState, HighwayState relocateState) {
+        BlockPos key = new BlockPos(spot.getX(), spot.getY(), spot.getZ());
+        // a click the last open tick forced would land on whatever the crosshair is on instead
+        baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, false);
+        if (!key.equals(reachFailSpot)) {
+            reachFailSpot = key;
+            reachDigs = 0;
+            reachWalks = 0;
+        }
+        if (!baritone.getBuilderProcess().isPaused() && baritone.getBuilderProcess().isActive()) {
+            transitionTo(retryState);
+            resetTimer();
+            return;
+        }
+        // A dispatched clearArea takes a couple of ticks to read as an active builder, see handleShulkerPlaceOutOfSight
+        if (contextTick - reachLastDigTick < SHULKER_SIGHT_DIG_SPINUP) {
+            resetTimer();
+            return;
+        }
+
+        String what = playerContext.world().getBlockState(key).getBlock().getName().getString();
+        BlockPos blocker = rayBlockerShortOf(key);
+        if (blocker != null) {
+            // a bare clearArea collects nothing, so a box in the way would just be lost
+            if (!(playerContext.world().getBlockState(blocker).getBlock() instanceof ShulkerBoxBlock)
+                    && reachDigs++ < SHULKER_SIGHT_DIGS) {
+                Helper.HELPER.logDirect(what + " at " + key.toShortString() + " can't be reached, digging out the "
+                        + playerContext.world().getBlockState(blocker).getBlock().getName().getString()
+                        + " at " + blocker.toShortString() + ".");
+                baritone.getPathingBehavior().cancelEverything();
+                settings.buildRepeat.value = new Vec3i(0, 0, 0);
+                baritone.getBuilderProcess().clearArea(blocker, blocker);
+                reachLastDigTick = contextTick;
+                transitionTo(retryState);
+                resetTimer();
+                return;
+            }
+        } else if (!playerContext.playerFeet().equals(stand) && reachWalks++ < SHULKER_SIGHT_WALKS) {
+            // Straight there rather than through the go-to state: the gapple, pickaxe, totem and loot
+            // chest ones give up once the inventory runs out of what they place, which this just did
+            Helper.HELPER.logDirect(what + " at " + key.toShortString() + " can't be reached, walking back to "
+                    + stand.toShortString() + ".");
+            baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(stand));
+            reachWalking = true;
+            transitionTo(retryState);
+            resetTimer();
+            return;
+        }
+
+        rememberBadShulkerSpot(key);
+        reachFailSpot = null;
+        baritone.getPathingBehavior().cancelEverything();
+        if (playerContext.world().getBlockState(key).getBlock() instanceof EnderChestBlock) {
+            Helper.HELPER.logDirect("Still can't reach the " + what + " at " + key.toShortString()
+                    + ", leaving it and placing one somewhere else.");
+            forgetEnderChestAccessLoc(key);
+            transitionTo(relocateState != null ? relocateState : HighwayState.Nothing);
+        } else {
+            Helper.HELPER.logDirect("Still can't reach the " + what + " at " + key.toShortString()
+                    + ", mining it back to place it somewhere else.");
+            setPlaceLoc(key);
+            transitionTo(HighwayState.MiningMisplacedShulker);
+        }
+        resetTimer();
+    }
+
+    /** Whether the walk {@link #handleContainerOutOfReach} sent is still going. The placing state holds the container until it ends. */
+    public boolean outOfReachWalkRunning() {
+        if (reachWalking && baritone.getCustomGoalProcess().isActive()) {
+            return true;
+        }
+        reachWalking = false;
+        return false;
     }
 
     /** A placement that went through is proof the spot works; drop the line-of-sight failures there. */
@@ -3851,10 +3962,103 @@ public class HighwayContext {
         return true;
     }
 
-    /** A box that opened is proof its spot is fine; don't carry earlier failures there forward. */
-    public void noteShulkerOpened() {
+    /** A box or loot chest that opened is proof its spot is fine; don't carry earlier failures there forward. */
+    public void noteContainerOpened() {
         shulkerOpenFailSpot = null;
         shulkerOpenFailTries = 0;
+        reachFailSpot = null;
+        refusedOpenSpot = null;
+        sneakTapSpot = null;
+        sneakTapTicks = 0;
+        refusedOpenRelogAttempted = false;
+    }
+
+    /**
+     * An open that timed out with the container still standing. Logs what the client knew. When
+     * the click did go out at a container in reach with room to open, the server ignored it, and
+     * nothing on the client side explains that: re-placing can't fix it, but a sneak tap has (the
+     * input packets reset whatever the server held for the player), and a rejoin resets the rest.
+     * So the first such spot gets one tap, and a second one relogs.
+     *
+     * @return true when this disconnected and the caller has nothing left to do
+     */
+    public boolean handleOpenRefused(BlockPos spot) {
+        BlockPos key = new BlockPos(spot.getX(), spot.getY(), spot.getZ());
+        String what = playerContext.world().getBlockState(key).getBlock().getName().getString();
+        Helper.HELPER.logDirect(what + " at " + key.toShortString() + " didn't open: " + openDiagnostics(key));
+        boolean clicked = key.equals(lastUseItemOnPos)
+                && contextTick - lastUseItemOnTick <= settings.highwayPlaceConfirmTimeout.value;
+        if (!clicked || !containerHasRoomToOpen(key)) {
+            return false; // the click never went out, or the lid is blocked: the callers' own retries cover those
+        }
+
+        if (refusedOpenSpot != null && !refusedOpenSpot.equals(key)) {
+            if (!settings.highwayRelogOnRefusedOpen.value || refusedOpenRelogAttempted) {
+                return false;
+            }
+            refusedOpenRelogAttempted = true;
+            Component dcMsg = Component.literal("The server won't open containers in reach at two spots. Reconnect to reset");
+            Helper.HELPER.logDirect(dcMsg);
+            baritone.getInputOverrideHandler().clearAllKeys();
+            baritone.getPathingBehavior().cancelEverything();
+            transitionTo(HighwayState.Nothing);
+            playerContext.player().connection.getConnection().disconnect(dcMsg);
+            return true;
+        }
+        refusedOpenSpot = key;
+        if (!key.equals(sneakTapSpot)) {
+            Helper.HELPER.logDirect("Tapping sneak once before the next try.");
+            sneakTapSpot = key;
+            sneakTapTicks = SNEAK_TAP_TICKS;
+        }
+        return false;
+    }
+
+    /**
+     * Runs the sneak tap {@link #handleOpenRefused} scheduled for {@code spot}. While it returns
+     * true the caller must not click: a click landing while the server thinks we're sneaking puts
+     * the held item to use instead of opening the container.
+     */
+    public boolean runSneakTap(BlockPos spot) {
+        if (sneakTapTicks <= 0) {
+            return false;
+        }
+        if (!spot.equals(sneakTapSpot)) {
+            sneakTapTicks = 0; // scheduled for a container that's gone since
+            return false;
+        }
+        // The input override ticks ahead of us, so a key forced here reaches the server a tick
+        // late: down for two ticks, then up for two so the release is out before the next click
+        baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, sneakTapTicks > SNEAK_TAP_TICKS / 2);
+        sneakTapTicks--;
+        return true;
+    }
+
+    private boolean containerHasRoomToOpen(BlockPos spot) {
+        BlockState state = playerContext.world().getBlockState(spot);
+        if (state.getBlock() instanceof ShulkerBoxBlock) {
+            return canShulkerOpenToward(spot, state.getValue(ShulkerBoxBlock.FACING));
+        }
+        BlockPos above = spot.above();
+        return !playerContext.world().getBlockState(above).isRedstoneConductor(playerContext.world(), above);
+    }
+
+    /** What the client knew when an open timed out, for telling a click that never went out from one the server ignored. */
+    private String openDiagnostics(BlockPos spot) {
+        LocalPlayer player = playerContext.player();
+        String click = lastUseItemOnPos == null ? "no click sent"
+                : (spot.equals(lastUseItemOnPos) ? "last click on it " : "last click at " + lastUseItemOnPos.toShortString() + " ")
+                + (contextTick - lastUseItemOnTick) + "t ago";
+        return click
+                + ", aim " + (playerContext.isLookingAt(spot) ? "on it" : "off it")
+                + ", sneak client=" + player.isShiftKeyDown() + " sent=" + player.getLastSentInput().shift()
+                + ", main=" + stackName(player.getMainHandItem()) + " off=" + stackName(player.getOffhandItem())
+                + ", pose=" + player.getPose() + (player.isFallFlying() ? " gliding" : "") + (player.onGround() ? "" : " airborne")
+                + ", screen=" + (playerContext.minecraft().screen == null ? "none" : playerContext.minecraft().screen.getClass().getSimpleName());
+    }
+
+    private static String stackName(ItemStack stack) {
+        return stack.isEmpty() ? "empty" : BuiltInRegistries.ITEM.getKey(stack.getItem()).getPath() + "x" + stack.getCount();
     }
 
     public boolean handleShulkerWouldNotOpen(BlockPos spot) {
@@ -3897,6 +4101,33 @@ public class HighwayContext {
         baritone.getPathingBehavior().cancelEverything();
         setPlaceLoc(key);
         transitionTo(HighwayState.MiningMisplacedShulker);
+        resetTimer();
+        return true;
+    }
+
+    /**
+     * A loot ender chest in reach that still won't open. The placing state hands a standing chest
+     * straight back, so without a count this re-clicked it every timeout forever. Past the plain
+     * retries the chest is left standing, since mining it only drops obsidian.
+     */
+    public boolean handleLootEnderChestWouldNotOpen(BlockPos spot) {
+        BlockPos key = new BlockPos(spot.getX(), spot.getY(), spot.getZ());
+        if (!key.equals(shulkerOpenFailSpot)) {
+            shulkerOpenFailSpot = key;
+            shulkerOpenFailTries = 0;
+        }
+        if (++shulkerOpenFailTries <= SHULKER_OPEN_RETRIES) {
+            return false;
+        }
+
+        rememberBadShulkerSpot(key);
+        Helper.HELPER.logDirect("Ender chest at " + key.toShortString() + " still won't open after "
+                + shulkerOpenFailTries + " tries, placing one somewhere else.");
+        shulkerOpenFailSpot = null;
+        shulkerOpenFailTries = 0;
+        forgetEnderChestAccessLoc(key);
+        baritone.getPathingBehavior().cancelEverything();
+        transitionTo(HighwayState.LootEnderChestPlaceLocPrep);
         resetTimer();
         return true;
     }
@@ -5610,11 +5841,19 @@ public class HighwayContext {
         final Block neighborBlock = playerContext.world().getBlockState(neighbor).getBlock();
         final boolean activated = playerContext.world().getBlockState(neighbor).useWithoutItem(playerContext.world(), playerContext.player(), blockHitResult) == InteractionResult.SUCCESS;
 
-        if (blackList.contains(neighborBlock) || shulkerBlockList.contains(neighborBlock) || activated)
+        final boolean sneak = blackList.contains(neighborBlock) || shulkerBlockList.contains(neighborBlock) || activated;
+        if (sneak)
         {
             sendShiftKey(true);
         }
         InteractionResult l_Result2 = playerContext.playerController().processRightClickBlock(playerContext.player(), playerContext.world(), hand, blockHitResult);
+        // Release whatever the click returned. LocalPlayer won't resend its input until its own keys
+        // change, so a sneak left down here turns the next box click with a block in hand into a
+        // placement against the box. An offhand place the client refuses comes back FAIL.
+        if (sneak)
+        {
+            sendShiftKey(false);
+        }
 
         if (l_Result2 == InteractionResult.SUCCESS)
         {
@@ -5622,10 +5861,6 @@ public class HighwayContext {
                 playerContext.player().connection.send(new ServerboundSwingPacket(hand));
             else
                 playerContext.player().swing(hand);
-            if (activated)
-            {
-                sendShiftKey(false);
-            }
             return PlaceResult.Placed;
         }
         return PlaceResult.CantPlace;

@@ -2031,6 +2031,14 @@ public final class Settings {
     public final Setting<Boolean> highwayLostShulkerRelog = new Setting<>(false);
 
     /**
+     * When the server won't open a shulker box or ender chest the bot is clicking from in reach,
+     * with room to open, at a second spot after a sneak tap didn't fix the first one, disconnect
+     * once so the rejoin resets the server's state for the player. Needs the client to reconnect on
+     * its own, like the stuck check. Not tried again until a container opens.
+     */
+    public final Setting<Boolean> highwayRelogOnRefusedOpen = new Setting<>(true);
+
+    /**
      * Disconnect from the server if lost some health
      */
     public final Setting<Boolean> highwayDcOnHealthLoss = new Setting<>(true);

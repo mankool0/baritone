@@ -39,14 +39,25 @@ public class OpeningLootEnderChest extends State {
         Optional<Rotation> enderChestReachable = RotationUtils.reachable(context.playerContext(), context.placeLoc(), context.playerContext().playerController().getBlockReachDistance());
         enderChestReachable.ifPresent(rotation -> context.baritone().getLookBehavior().updateTarget(rotation, true));
 
+        if (context.playerContext().world().getBlockState(context.placeLoc()).getBlock() instanceof EnderChestBlock && enderChestReachable.isEmpty()) {
+            context.handleContainerOutOfReach(context.placeLoc(), context.placeLocStand(1), HighwayState.PlacingLootEnderChest, HighwayState.LootEnderChestPlaceLocPrep);
+            return;
+        }
+
         // A placement the server refuses reverts a few ticks after the client predicted it. Without
         // this we would hold right-click on air forever, since nothing else here ever times out.
         boolean gone = !(context.playerContext().world().getBlockState(context.placeLoc()).getBlock() instanceof EnderChestBlock);
         if (gone || ticksInState() > context.settings().highwayPlaceConfirmTimeout.value) {
+            context.baritone().getInputOverrideHandler().clearAllKeys();
+            if (!gone && context.handleOpenRefused(context.placeLoc())) {
+                return;
+            }
+            if (!gone && context.handleLootEnderChestWouldNotOpen(context.placeLoc())) {
+                return;
+            }
             Helper.HELPER.logDirect(gone
                     ? "Ender chest didn't stay placed, retrying the placement."
                     : "Ender chest never opened, retrying the placement.");
-            context.baritone().getInputOverrideHandler().clearAllKeys();
             context.transitionTo(HighwayState.PlacingLootEnderChest);
             context.resetTimer();
             return;
@@ -54,13 +65,20 @@ public class OpeningLootEnderChest extends State {
 
         context.baritone().getInputOverrideHandler().clearAllKeys();
         if (context.playerContext().minecraft().screen instanceof ContainerScreen) {
+            context.noteContainerOpened();
             context.transitionTo(context.stashingShulker()
                     ? HighwayState.DepositingStashShulker
                     : HighwayState.DepositingLootEnderChestDepletedShulkers);
             return;
         }
-        // One click per server round trip: a second one landing before this screen does opens it twice
-        if (!context.openClickPending(context.placeLoc())) {
+        // A refused open earned one sneak tap, which needs a few ticks without clicks
+        if (context.runSneakTap(context.placeLoc())) {
+            return;
+        }
+        // One click per server round trip: a second one landing before this screen does opens it twice.
+        // And only with the crosshair on it: the click lands on whatever that is, and with a block in
+        // hand anything else gets the block placed against it.
+        if (context.playerContext().isLookingAt(context.placeLoc()) && !context.openClickPending(context.placeLoc())) {
             context.baritone().getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
         }
     }

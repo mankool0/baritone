@@ -40,9 +40,7 @@ public class OpeningEnderShulker extends State {
         shulkerReachable.ifPresent(rotation -> context.baritone().getLookBehavior().updateTarget(rotation, true));
 
         if (context.playerContext().world().getBlockState(context.placeLoc()).getBlock() instanceof ShulkerBoxBlock && shulkerReachable.isEmpty()) {
-            Helper.HELPER.logDirect("Shulker has been placed, but can't be reached, pathing closer.");
-            context.transitionTo(HighwayState.GoingToPlaceLocEnderShulker);
-            context.resetTimer();
+            context.handleContainerOutOfReach(context.placeLoc(), context.placeLocStand(-2), HighwayState.PlacingEnderShulker, null);
             return;
         }
 
@@ -51,6 +49,9 @@ public class OpeningEnderShulker extends State {
         boolean gone = !(context.playerContext().world().getBlockState(context.placeLoc()).getBlock() instanceof ShulkerBoxBlock);
         if (gone || ticksInState() > context.settings().highwayPlaceConfirmTimeout.value) {
             context.baritone().getInputOverrideHandler().clearAllKeys();
+            if (!gone && context.handleOpenRefused(context.placeLoc())) {
+                return;
+            }
             // A box that is still standing and still won't open is usually facing something solid,
             // which re-placing into the same spot can never fix on its own
             if (!gone && context.handleShulkerWouldNotOpen(context.placeLoc())) {
@@ -66,12 +67,18 @@ public class OpeningEnderShulker extends State {
 
         context.baritone().getInputOverrideHandler().clearAllKeys();
         if (context.playerContext().minecraft().screen instanceof ShulkerBoxScreen) {
-            context.noteShulkerOpened();
+            context.noteContainerOpened();
             context.transitionTo(HighwayState.LootingEnderShulker);
             return;
         }
-        // One click per server round trip: a second one landing before this screen does opens it twice
-        if (!context.openClickPending(context.placeLoc())) {
+        // A refused open earned one sneak tap, which needs a few ticks without clicks
+        if (context.runSneakTap(context.placeLoc())) {
+            return;
+        }
+        // One click per server round trip: a second one landing before this screen does opens it twice.
+        // And only with the crosshair on it: the click lands on whatever that is, and with a block in
+        // hand anything else gets the block placed against it.
+        if (context.playerContext().isLookingAt(context.placeLoc()) && !context.openClickPending(context.placeLoc())) {
             context.baritone().getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
         }
     }
