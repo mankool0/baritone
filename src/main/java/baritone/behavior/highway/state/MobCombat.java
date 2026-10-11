@@ -19,18 +19,28 @@ package baritone.behavior.highway.state;
 
 import baritone.api.pathing.goals.Goal;
 import baritone.api.pathing.goals.GoalBlock;
+import baritone.api.utils.Helper;
 import baritone.api.utils.interfaces.IGoalRenderPos;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.monster.Ghast;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.phys.AABB;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 public class MobCombat extends State {
+
+    private static final int STALL_TIMEOUT_TICKS = 200; // give up on a mob after 10s of chasing without getting any closer
+    private static final int IGNORE_TICKS = 1200; // how long a mob we gave up on stays ignored, unless it comes within reach
+
+    private final Map<UUID, Double> closestReach = new HashMap<>(); // closest we've been to each mob this fight
+    private int stallTicks = 0;
 
     public MobCombat(HighwayState state) {
         super(state);
@@ -65,7 +75,9 @@ public class MobCombat extends State {
         }
 
         double approach = context.settings().highwayMobCombatApproachDistance.value;
-        if (reachDistance(player, target) <= approach) {
+        double reach = context.mobReachDistance(target);
+        if (reach <= approach) {
+            stallTicks = 0; // fighting, not stalled
             // Close enough for the killaura: stand still instead of walking into the mob. This also
             // drops a builder still running when combat began with the mob already this close
             if (context.baritone().getPathingControlManager().mostRecentInControl().isPresent()
@@ -75,6 +87,20 @@ public class MobCombat extends State {
             return;
         }
 
+        // A mob we can't get closer to (no path, across lava or a gap, up on a ledge) would hold us
+        // here for as long as it stays angry. Ghasts are left out: findMobTargetingPlayer keeps a
+        // ghast engaged on purpose while it's within 40 blocks, and this shouldn't undercut that.
+        if (!(target instanceof Ghast)) {
+            if (gainedOn(target, reach)) {
+                stallTicks = 0;
+            } else if (++stallTicks > STALL_TIMEOUT_TICKS) {
+                Helper.HELPER.logDirect("Can't get to the " + target.getName().getString() + ", ignoring it for a while.");
+                context.ignoreMob(target, IGNORE_TICKS);
+                stallTicks = 0;
+                return;
+            }
+        }
+
         BlockPos mobPos = target.blockPosition();
         Goal goal = new GoalInReach(mobPos.getX(), mobPos.getY(), mobPos.getZ(),
                 target.getBbWidth() / 2, target.getBbHeight(), player.getEyeHeight(), approach);
@@ -82,21 +108,24 @@ public class MobCombat extends State {
     }
 
     /**
-     * Distance to the nearest point of the mob's hitbox from whichever of our feet and eyes is
-     * farther from it. The killaura checks its range from our feet, the server and anticheat check
-     * reach from our eyes, and a hit has to pass both.
+     * Whether we're half a block closer to this mob than we've ever been this fight. Kept per mob,
+     * so switching between several out-of-reach mobs as each wanders nearest can't keep resetting
+     * the stall clock.
      */
-    private static double reachDistance(Player player, Entity target) {
-        AABB hitbox = target.getBoundingBox();
-        return Math.sqrt(Math.max(hitbox.distanceToSqr(player.position()),
-                hitbox.distanceToSqr(player.getEyePosition())));
+    private boolean gainedOn(Entity target, double reach) {
+        Double closest = closestReach.get(target.getUUID());
+        if (closest != null && reach >= closest - 0.5) {
+            return false;
+        }
+        closestReach.put(target.getUUID(), reach);
+        return true;
     }
 
     /**
-     * Standing spots from anywhere inside which {@link #reachDistance} is at most {@code distance},
-     * wherever in its own block the mob stands (both of us on full-block floors). Every spot outside
-     * reach is outside the goal, so the chase can't settle short of reach the way a plain
-     * {@code GoalNear} did. Built only from block positions and sizes, so it stays equal to last
+     * Standing spots from anywhere inside which {@link HighwayContext#mobReachDistance} is at most
+     * {@code distance}, wherever in its own block the mob stands (both of us on full-block floors).
+     * Every spot outside reach is outside the goal, so the chase can't settle short of reach the way
+     * a plain {@code GoalNear} did. Built only from block positions and sizes, so it stays equal to last
      * tick's goal until the mob changes block, and a moving mob doesn't force a repath every tick.
      */
     private record GoalInReach(int mobX, int mobY, int mobZ, double halfWidth, double height,

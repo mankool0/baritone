@@ -159,6 +159,7 @@ public class HighwayContext {
     private HighwayState previousState = HighwayState.Nothing;
     private HighwayState emergencyEatReturnState = HighwayState.Nothing;
     private Entity currentMobTarget = null;
+    private final Map<java.util.UUID, Long> ignoredMobs = new HashMap<>(); // mobs a stalled chase gave up on, to the game time they stay ignored until
     private BetterBlockPos combatReturnPos = null;
     private Entity thiefTarget = null;
     private HighwayState thiefHuntReturnState = null;
@@ -984,6 +985,33 @@ public class HighwayContext {
         this.currentMobTarget = entity;
     }
 
+    public void ignoreMob(Entity mob, int ticks) {
+        long now = playerContext.world().getGameTime();
+        ignoredMobs.values().removeIf(until -> until <= now);
+        ignoredMobs.put(mob.getUUID(), now + ticks);
+    }
+
+    private boolean isMobIgnored(Entity mob) {
+        Long until = ignoredMobs.get(mob.getUUID());
+        return until != null && until > playerContext.world().getGameTime();
+    }
+
+    public void clearIgnoredMobs() {
+        ignoredMobs.clear();
+    }
+
+    /**
+     * Distance to the nearest point of the mob's hitbox from whichever of our feet and eyes is
+     * farther from it. The killaura checks its range from our feet, the server and anticheat check
+     * reach from our eyes, and a hit has to pass both.
+     */
+    public double mobReachDistance(Entity mob) {
+        net.minecraft.world.entity.player.Player player = playerContext.player();
+        AABB hitbox = mob.getBoundingBox();
+        return Math.sqrt(Math.max(hitbox.distanceToSqr(player.position()),
+                hitbox.distanceToSqr(player.getEyePosition())));
+    }
+
     public Entity thiefTarget() {
         return thiefTarget;
     }
@@ -1352,6 +1380,45 @@ public class HighwayContext {
         return xOk && yOk && zOk;
     }
 
+    /**
+     * Height of the floor an entity stands on. A jump lifts its feet about 1.25 blocks for a few
+     * ticks, which would otherwise flicker a mob below us in and out of reach.
+     */
+    private double standingY(Entity entity) {
+        if (entity.onGround()) {
+            return entity.getY();
+        }
+        BlockPos.MutableBlockPos pos = BlockPos.containing(entity.position()).mutable();
+        for (int i = 0; i < 3; i++, pos.move(Direction.DOWN)) {
+            VoxelShape shape = playerContext.world().getBlockState(pos).getCollisionShape(playerContext.world(), pos);
+            if (!shape.isEmpty()) {
+                return Math.min(pos.getY() + shape.max(Direction.Axis.Y), entity.getY());
+            }
+        }
+        return entity.getY();
+    }
+
+    /**
+     * A walking mob standing more than a jump below us can neither hit us nor step up to us from
+     * where it is. It has to find its own way up, and if it does it's back at our level and gets
+     * engaged then. Going after it instead walks us off the highway, or digs us down through it,
+     * after a mob that was never coming: an angry mob with no way up just paths to the spot under
+     * us and waits there. Shooters below still count while they can see us.
+     */
+    private boolean stuckBelowUs(Entity mob, double ourStandingY) {
+        // Ghasts fly and magma cubes jump several blocks high, so being lower doesn't keep them away
+        if (mob instanceof net.minecraft.world.entity.monster.Ghast || mob instanceof net.minecraft.world.entity.monster.Slime) {
+            return false;
+        }
+        boolean blaze = mob instanceof net.minecraft.world.entity.monster.Blaze;
+        if (ourStandingY - (blaze ? mob.getY() : standingY(mob)) < 1.5) {
+            return false;
+        }
+        net.minecraft.world.entity.LivingEntity living = (net.minecraft.world.entity.LivingEntity) mob;
+        boolean shooter = blaze || living.isHolding(stack -> stack.getItem() instanceof ProjectileWeaponItem);
+        return !shooter || !living.hasLineOfSight(playerContext.player());
+    }
+
     public java.util.Optional<Entity> findMobTargetingPlayer() {
         net.minecraft.world.entity.player.Player player = playerContext.player();
         boolean wearingGold = isPlayerWearingGoldArmor(player);
@@ -1377,6 +1444,7 @@ public class HighwayContext {
         double aggroRangeSq = settings.highwayMobAggroRange.value * settings.highwayMobAggroRange.value;
         double magmaRangeSq = settings.highwayMagmaCubeAggroRange.value * settings.highwayMagmaCubeAggroRange.value;
         double maxRangeSq = settings.highwayMobMaxAggroRange.value * settings.highwayMobMaxAggroRange.value;
+        double ourStandingY = standingY(player);
 
         return playerContext.entitiesStream()
                 .filter(e -> e instanceof net.minecraft.world.entity.LivingEntity && e.isAlive())
@@ -1408,6 +1476,9 @@ public class HighwayContext {
                         || (e instanceof net.minecraft.world.entity.Mob && ((net.minecraft.world.entity.Mob) e).isAggressive())
                         || ghastsThreatening.contains(e)
                         || isEntityInHighwayCorridor(e))
+                .filter(e -> !stuckBelowUs(e, ourStandingY))
+                // a mob a stalled chase gave up on stays ignored unless it gets within reach after all
+                .filter(e -> !isMobIgnored(e) || mobReachDistance(e) <= settings.highwayMobCombatApproachDistance.value)
                 .min(java.util.Comparator.comparingDouble(e -> e.distanceToSqr(player)));
     }
 
