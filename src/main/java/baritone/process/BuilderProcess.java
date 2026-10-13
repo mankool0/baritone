@@ -39,6 +39,7 @@ import baritone.pathing.movement.MovementHelper;
 import baritone.pathing.path.PathExecutor;
 import baritone.utils.BaritoneProcessHelper;
 import baritone.utils.BlockStateInterface;
+import baritone.utils.DoubleMine;
 import baritone.utils.EntityHole;
 import baritone.utils.PathingCommandContext;
 import baritone.utils.schematic.MapArtSchematic;
@@ -195,6 +196,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
      */
     private boolean legitSlowBreakLastTick;
     private BetterBlockPos legitAimTargetLastTick;
+    private final DoubleMine doubleMine;
     private int printerBreakStarvation;
     /**
      * Snapshot of {@link LookBehavior#isMovementInputForced()} taken before the forced inputs are
@@ -241,6 +243,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
 
     public BuilderProcess(Baritone baritone) {
         super(baritone);
+        doubleMine = new DoubleMine(ctx);
+        baritone.getGameEventHandler().registerEventListener(doubleMine);
     }
 
     /** The substitute/mirror/rotate/skip-blocks wrappers every schematic handed to the builder gets. */
@@ -907,7 +911,12 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         // clickBlock doesn't sync the hotbar the way the use path does, so the tool we just
         // picked would otherwise reach the server a tick after the dig it applies to
         ctx.playerController().syncHeldItem();
-        if (!ctx.playerController().clickBlock(clicked, bhr.getDirection())) {
+        // plain BlockPos on purpose: the position flows into vanilla world mutation
+        BlockPos pos = new BlockPos(clicked.x, clicked.y, clicked.z);
+        boolean dug = state.getDestroyProgress(ctx.player(), ctx.world(), pos) >= 1.0f
+                ? ctx.playerController().clickBlock(pos, bhr.getDirection())
+                : ctx.playerController().clickBlockFinishing(pos, bhr.getDirection());
+        if (!dug) {
             return false;
         }
         ctx.player().swing(InteractionHand.MAIN_HAND);
@@ -1144,17 +1153,47 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     }
 
     /**
-     * @return whether the tool {@link MovementHelper#switchToBestToolFor} would pick breaks this
-     * block within a single tick. Probes with the same switch the dig itself performs, so aiming
-     * and firing can never disagree about what is instant.
+     * @return whether the printer can break this block within a single tick with the tool
+     * {@link MovementHelper#switchToBestToolFor} would pick, including the near-instant blocks
+     * {@link baritone.api.Settings#printerBreakNearInstant} adds
      */
     private boolean printerCanInstaBreak(BlockState state, BlockPos pos) {
+        float progress = printerBreakProgress(state, pos);
+        return progress >= 1.0f
+                || Baritone.settings().printerBreakNearInstant.value && progress >= IPlayerController.SERVER_FINISH_DIG_PROGRESS;
+    }
+
+    /**
+     * The break targets {@link DoubleMine} takes: everything that needs more than one tick, minus
+     * the near-instant blocks a single finishing dig already handles.
+     */
+    private List<Tuple<BetterBlockPos, Rotation>> doubleMineCandidates(BuilderCalculationContext bcc, List<Optional<Tuple<BetterBlockPos, Rotation>>> toBreak) {
+        List<Tuple<BetterBlockPos, Rotation>> slow = new ArrayList<>();
+        for (Optional<Tuple<BetterBlockPos, Rotation>> info : toBreak) {
+            if (info.isEmpty()) {
+                continue;
+            }
+            BetterBlockPos pos = info.get().getA();
+            float progress = printerBreakProgress(bcc.get(pos), pos);
+            if (progress > 0 && progress < IPlayerController.SERVER_FINISH_DIG_PROGRESS) {
+                slow.add(info.get());
+            }
+        }
+        return slow;
+    }
+
+    /**
+     * Per-tick break progress with the tool {@link MovementHelper#switchToBestToolFor} would pick.
+     * Probes with the same switch the dig itself performs, so aiming and firing can never disagree
+     * about what is instant.
+     */
+    private float printerBreakProgress(BlockState state, BlockPos pos) {
         var inventory = ctx.player().getInventory();
         int previous = inventory.getSelectedSlot();
         MovementHelper.switchToBestToolFor(ctx, state);
-        boolean instant = state.getDestroyProgress(ctx.player(), ctx.world(), pos) >= 1.0f;
+        float progress = state.getDestroyProgress(ctx.player(), ctx.world(), pos);
         inventory.setSelectedSlot(previous);
-        return instant;
+        return progress;
     }
 
     /**
@@ -1336,6 +1375,28 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
 
         if (!toBreak.isEmpty() && isSafeToCancel && ctx.player().onGround() && !printerAction.acted()) {
             legitBreakSessionLastTick = true;
+            if (Baritone.settings().builderDoubleMine.value) {
+                BlockPos mining = doubleMine.tick(doubleMineCandidates(bcc, toBreak));
+                if (mining != null) {
+                    Optional<Rotation> aim = toBreak.stream().filter(info -> info.isPresent() && info.get().getA().equals(mining))
+                            .map(info -> info.get().getB()).findFirst();
+                    // what the slots hold is theirs; a vanilla dig below only gets the rest
+                    toBreak.removeIf(info -> info.isPresent() && doubleMine.isMining(info.get().getA()));
+                    if (doubleMine.digging() || toBreak.stream().noneMatch(Optional::isPresent)) {
+                        // stay in reach of the regular dig, and look at it the way a player digging would
+                        legitAimTargetLastTick = BetterBlockPos.from(mining);
+                        legitSlowBreakLastTick = true;
+                        aim.ifPresent(rot -> baritone.getLookBehavior().updateTarget(rot, true));
+                        if (doubleMine.digging()) {
+                            // any other dig packet would restart or move the server's regular dig
+                            printerBreakGrace = Math.max(printerBreakGrace, Math.max(1, Baritone.settings().blockBreakSpeed.value));
+                        }
+                        return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
+                    }
+                    // only a parked block is left digging and it finishes on its own: carry on
+                    // with the quicker blocks
+                }
+            }
             // we'd like to pause to break this block
             // only change look direction if it's safe (don't want to fuck up an in progress parkour for example
             // prefer a candidate that is already in the crosshair so we don't thrash the aim between targets
@@ -1364,9 +1425,10 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                 if (ctx.isLookingAt(pos)) {
                     baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_LEFT, true);
                 }
-                if (!printerCanInstaBreak(bcc.get(pos), pos)) {
+                if (printerBreakProgress(bcc.get(pos), pos) < 1.0f) {
                     // a dig that spans ticks only lands if the crosshair stays on the block, so
-                    // anything moving the player has to let go until it's done
+                    // anything moving the player has to let go until it's done. Near-instant
+                    // blocks count too: the left click digs them the vanilla way
                     legitSlowBreakLastTick = true;
                     printerBreakGrace = Math.max(printerBreakGrace, Math.max(1, Baritone.settings().blockBreakSpeed.value));
                 }
@@ -2067,6 +2129,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         legitBreakSessionLastTick = false;
         legitSlowBreakLastTick = false;
         legitAimTargetLastTick = null;
+        doubleMine.reset();
         printerBreakStarvation = 0;
         printerMovementForced = false;
         clearCompletedWatch();

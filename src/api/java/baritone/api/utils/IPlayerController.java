@@ -53,6 +53,19 @@ public interface IPlayerController {
 
     boolean clickBlock(BlockPos loc, Direction face);
 
+    /**
+     * Starts and finishes digging a block in the same tick. The server accepts a finished dig once
+     * {@link #SERVER_FINISH_DIG_PROGRESS} of the break time has passed, so this breaks any block
+     * that mines at least that much per tick, not just the ones {@link #clickBlock} breaks
+     * instantly.
+     */
+    boolean clickBlockFinishing(BlockPos loc, Direction face);
+
+    /**
+     * Fraction of a block's break time after which the vanilla server accepts a finished dig.
+     */
+    float SERVER_FINISH_DIG_PROGRESS = 0.7f;
+
     void setHittingBlock(boolean hittingBlock);
 
     default double getBlockReachDistance() {

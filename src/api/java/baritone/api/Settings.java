@@ -2232,6 +2232,25 @@ public final class Settings {
     public final Setting<Boolean> printerBreak = new Setting<>(true);
 
     /**
+     * Let the printer also break blocks that take two ticks with the best hotbar tool but mine at
+     * least 70% per tick, by starting and finishing the dig in the same tick (the server accepts a
+     * finished dig after 70% of the break time). With an Efficiency V pickaxe that covers stone,
+     * blackstone and basalt. Counts against {@link #multiBreak} like any other printer break.
+     * Anticheats that time digs, such as Grim's FastBreak check, cancel these breaks.
+     */
+    public final Setting<Boolean> printerBreakNearInstant = new Setting<>(false);
+
+    /**
+     * When the builder stops to mine blocks that take more than a tick, like obsidian, dig two at
+     * once: one is left for the server to finish on its own while the next is dug normally, and
+     * each normal dig is finished at 70% of its break time (the server accepts that). Digs are sent
+     * as packets, so the crosshair doesn't have to stay on the block. About twice as fast as
+     * vanilla through a wall of obsidian. Anticheats that time digs, such as Grim's FastBreak
+     * check, cancel these breaks.
+     */
+    public final Setting<Boolean> builderDoubleMine = new Setting<>(false);
+
+    /**
      * How many repetitions of the highway cross-section the builder works on at once when the
      * printer is enabled.
      */

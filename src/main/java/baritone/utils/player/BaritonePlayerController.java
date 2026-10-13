@@ -20,9 +20,11 @@ package baritone.utils.player;
 import baritone.api.utils.IPlayerController;
 import baritone.utils.accessor.IPlayerControllerMP;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.MultiPlayerGameMode;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
@@ -90,6 +92,29 @@ public final class BaritonePlayerController implements IPlayerController {
     @Override
     public boolean clickBlock(BlockPos loc, Direction face) {
         return mc.gameMode.startDestroyBlock(loc, face);
+    }
+
+    @Override
+    public boolean clickBlockFinishing(BlockPos loc, Direction face) {
+        MultiPlayerGameMode gameMode = mc.gameMode;
+        IPlayerControllerMP accessor = (IPlayerControllerMP) gameMode;
+        if (mc.player.blockActionRestricted(mc.level, loc, gameMode.getPlayerMode()) || !mc.level.getWorldBorder().isWithinBounds(loc)) {
+            return false;
+        }
+        if (accessor.isHittingBlock()) {
+            // a dig in progress elsewhere is over once the server's dig target moves; abort it the
+            // way startDestroyBlock does so the client doesn't finish it into a mismatch later
+            mc.getConnection().send(new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.ABORT_DESTROY_BLOCK, accessor.getCurrentBlock(), face));
+            accessor.setIsHittingBlock(false);
+        }
+        accessor.callStartPrediction(mc.level, sequence -> new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, loc, face, sequence));
+        // predicted under the finishing packet's sequence like a vanilla finished dig, so a refused
+        // break is restored by the server's ack instead of leaving ghost air
+        accessor.callStartPrediction(mc.level, sequence -> {
+            gameMode.destroyBlock(loc);
+            return new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, loc, face, sequence);
+        });
+        return true;
     }
 
     @Override
