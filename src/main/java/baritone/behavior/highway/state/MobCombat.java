@@ -29,18 +29,12 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.monster.Ghast;
 import net.minecraft.world.entity.player.Player;
 
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 
 public class MobCombat extends State {
 
     private static final int STALL_TIMEOUT_TICKS = 200; // give up on a mob after 10s of chasing without getting any closer
     private static final int IGNORE_TICKS = 1200; // how long a mob we gave up on stays ignored, unless it comes within reach
-
-    private final Map<UUID, Double> closestReach = new HashMap<>(); // closest we've been to each mob this fight
-    private int stallTicks = 0;
 
     public MobCombat(HighwayState state) {
         super(state);
@@ -77,7 +71,7 @@ public class MobCombat extends State {
         double approach = context.settings().highwayMobCombatApproachDistance.value;
         double reach = context.mobReachDistance(target);
         if (reach <= approach) {
-            stallTicks = 0; // fighting, not stalled
+            context.resetChaseStall(); // fighting, not stalled
             // Close enough for the killaura: stand still instead of walking into the mob. This also
             // drops a builder still running when combat began with the mob already this close
             if (context.baritone().getPathingControlManager().mostRecentInControl().isPresent()
@@ -88,37 +82,19 @@ public class MobCombat extends State {
         }
 
         // A mob we can't get closer to (no path, across lava or a gap, up on a ledge) would hold us
-        // here for as long as it stays angry. Ghasts are left out: findMobTargetingPlayer keeps a
-        // ghast engaged on purpose while it's within 40 blocks, and this shouldn't undercut that.
-        if (!(target instanceof Ghast)) {
-            if (gainedOn(target, reach)) {
-                stallTicks = 0;
-            } else if (++stallTicks > STALL_TIMEOUT_TICKS) {
-                Helper.HELPER.logDirect("Can't get to the " + target.getName().getString() + ", ignoring it for a while.");
-                context.ignoreMob(target, IGNORE_TICKS);
-                stallTicks = 0;
-                return;
-            }
+        // here, or keep pulling us back to it, for as long as it stays angry. Ghasts are left out:
+        // findMobTargetingPlayer keeps a ghast engaged on purpose while it's within 40 blocks, and
+        // this shouldn't undercut that.
+        if (!(target instanceof Ghast) && context.chaseStalled(target, reach, STALL_TIMEOUT_TICKS)) {
+            Helper.HELPER.logDirect("Can't get to the " + target.getName().getString() + ", ignoring it for a while.");
+            context.ignoreMob(target, IGNORE_TICKS);
+            return;
         }
 
         BlockPos mobPos = target.blockPosition();
         Goal goal = new GoalInReach(mobPos.getX(), mobPos.getY(), mobPos.getZ(),
                 target.getBbWidth() / 2, target.getBbHeight(), player.getEyeHeight(), approach);
         context.baritone().getCustomGoalProcess().setGoalAndPath(goal);
-    }
-
-    /**
-     * Whether we're half a block closer to this mob than we've ever been this fight. Kept per mob,
-     * so switching between several out-of-reach mobs as each wanders nearest can't keep resetting
-     * the stall clock.
-     */
-    private boolean gainedOn(Entity target, double reach) {
-        Double closest = closestReach.get(target.getUUID());
-        if (closest != null && reach >= closest - 0.5) {
-            return false;
-        }
-        closestReach.put(target.getUUID(), reach);
-        return true;
     }
 
     /**

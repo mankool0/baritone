@@ -31,6 +31,12 @@ import net.minecraft.world.phys.Vec3;
 
 
 public class Nothing extends State {
+    // Bounds the wait for the stretch behind us to load, so a stretch that never does can't hold
+    // the restart forever
+    private static final int LOAD_WAIT_TICKS = 200;
+
+    private int loadWaitTicks = 0;
+
     public Nothing(HighwayState state) {
         super(state);
     }
@@ -53,11 +59,6 @@ public class Nothing extends State {
                 return;
             }
         }
-        context.resetTimer();
-        Helper.HELPER.logDirect("Starting highway build");
-
-        context.settings().buildRepeat.value = new Vec3i(context.highwayDirection().getX(), 0, context.highwayDirection().getZ());
-
         Vec3 curPos = new Vec3(context.playerContext().playerFeet().getX(), context.playerContext().playerFeet().getY(), context.playerContext().playerFeet().getZ());
         // Start a bit behind us to clear up our own mess, counted in slices so the restart point
         // lands where the correctness scan starts on an angled pattern too
@@ -66,6 +67,26 @@ public class Nothing extends State {
         if (context.invalidBlockFixActive() && fixStart != null && context.stepsAlongHighway(fixStart, buildStart) > 0) {
             buildStart = new BetterBlockPos(fixStart);
         }
+
+        // A join hands us the inventory well before the chunks around us. Started then, the builder
+        // reads the not-yet-received stretch between the restart point and us as unbuilt and walks
+        // back to it, only to walk forward again once it sees from up close that it was done.
+        if (!context.isLoadedUpToFeet(buildStart)) {
+            if (loadWaitTicks == 0) {
+                Helper.HELPER.logDirect("Waiting for the highway behind us to load before restarting the builder.");
+            }
+            if (loadWaitTicks < LOAD_WAIT_TICKS) {
+                loadWaitTicks++;
+                return;
+            }
+            Helper.HELPER.logDirect("The highway behind us still isn't loaded after " + LOAD_WAIT_TICKS + " ticks, restarting the builder anyway.");
+        }
+
+        context.resetTimer();
+        Helper.HELPER.logDirect("Starting highway build");
+
+        context.settings().buildRepeat.value = new Vec3i(context.highwayDirection().getX(), 0, context.highwayDirection().getZ());
+
         context.setOriginBuild(buildStart);
 
         if (context.endPos() != null) {

@@ -161,6 +161,10 @@ public class HighwayContext {
     private HighwayState emergencyEatReturnState = HighwayState.Nothing;
     private Entity currentMobTarget = null;
     private final Map<java.util.UUID, Long> ignoredMobs = new HashMap<>(); // mobs a stalled chase gave up on, to the game time they stay ignored until
+    // MobCombat's chase-stall clock, kept here because every engagement starts a new MobCombat, see chaseStalled
+    private final Map<java.util.UUID, Double> chaseClosestReach = new HashMap<>();
+    private int chaseStallTicks = 0;
+    private long lastChaseTick = 0;
     private BetterBlockPos combatReturnPos = null;
     private Entity thiefTarget = null;
     private HighwayState thiefHuntReturnState = null;
@@ -1019,6 +1023,38 @@ public class HighwayContext {
 
     public void clearIgnoredMobs() {
         ignoredMobs.clear();
+    }
+
+    /**
+     * Counts a tick of chasing {@code mob} from {@code reach} away and returns true, restarting the
+     * clock, once the chase has gone {@code timeoutTicks} without getting half a block closer to any
+     * mob than we'd already been. The closest reach is kept per mob, so switching between several
+     * out-of-reach mobs as each wanders nearest can't keep resetting the clock. Fights that follow
+     * each other within the timeout share both: a mob with no way to us calms down whenever we stop
+     * short of it and turns angry again as we walk back, starting a new fight every few seconds.
+     */
+    public boolean chaseStalled(Entity mob, double reach, int timeoutTicks) {
+        long now = playerContext.world().getGameTime();
+        if (now - lastChaseTick > timeoutTicks) {
+            chaseClosestReach.clear();
+            chaseStallTicks = 0;
+        }
+        lastChaseTick = now;
+        Double closest = chaseClosestReach.get(mob.getUUID());
+        if (closest == null || reach < closest - 0.5) {
+            chaseClosestReach.put(mob.getUUID(), reach);
+            chaseStallTicks = 0;
+            return false;
+        }
+        if (++chaseStallTicks > timeoutTicks) {
+            chaseStallTicks = 0;
+            return true;
+        }
+        return false;
+    }
+
+    public void resetChaseStall() {
+        chaseStallTicks = 0;
     }
 
     /**
@@ -5043,9 +5079,29 @@ public class HighwayContext {
         return isHighwayCorrect(startCheckPos, startCheckPosLiq, scanDist, false) == HighwayBlockState.Air;
     }
 
+    /**
+     * Whether every chunk under the slices from {@code from} up to the slice we stand on is loaded.
+     * The builder reads a cell in a chunk we haven't received as unbuilt and only looks at it again
+     * once we stand within builderTickScanRadius of it, so a build started behind us before the world
+     * has streamed in walks all the way back to cells that are already built.
+     */
+    public boolean isLoadedUpToFeet(BlockPos from) {
+        Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
+        Vec3 curPosPlayer = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
+        BetterBlockPos feetClosest = getClosestPoint(new Vec3(originVector.x, originVector.y, originVector.z), direction, curPosPlayer, LocationType.HighwayBuild);
+        int steps = stepsAlongHighway(from, feetClosest);
+        // a start level with or ahead of us leaves nothing behind to wait for
+        return steps <= 0 || isStretchLoaded(from, originVector, schematic.widthX(), schematic.lengthZ(), 0, steps + 1);
+    }
+
     private boolean isStretchLoaded(BlockPos startPos, Vec3 lineOrigin, int widthX, int lengthZ, int distanceToCheck) {
+        // the correctness scans start one slice past their start, and so does what they need loaded
+        return isStretchLoaded(startPos, lineOrigin, widthX, lengthZ, 1, distanceToCheck);
+    }
+
+    private boolean isStretchLoaded(BlockPos startPos, Vec3 lineOrigin, int widthX, int lengthZ, int firstSlice, int distanceToCheck) {
         int scanT0 = pattern.isCustom() ? sliceIndexOf(startPos, lineOrigin) : 0;
-        for (int i = distanceToCheck - 1; i >= 1; i--) {
+        for (int i = distanceToCheck - 1; i >= firstSlice; i--) {
             BlockPos curPos = pattern.isCustom()
                     ? startPos.offset(sliceDelta(scanT0, i))
                     : startPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
