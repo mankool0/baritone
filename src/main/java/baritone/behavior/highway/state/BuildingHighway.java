@@ -120,23 +120,28 @@ public class BuildingHighway extends State {
 
         // TODO: Change shulker threshold from 0 to a customizable value
         int obsidian = getObsidianCountInventory(context);
-        int runNeed = obsidian <= context.settings().highwayObsidianThreshold.value && context.paving() ? context.runObsidianNeed() : -1;
+        int runNeed = obsidian <= context.settings().highwayObsidianThreshold.value && context.paving() ? context.runObsidianNeed(obsidian) : -1;
         if (obsidian <= context.settings().highwayObsidianThreshold.value && context.paving() && (runNeed < 0 || obsidian < runNeed)) {
+            int runChests = runNeed < 0 ? -1 : HighwayContext.chestsForObsidian(runNeed, obsidian);
+            boolean looseChests = context.looseChestsCoverRun(runChests);
+            boolean fetchShulker = !looseChests && context.getShulkerCountInventory(ShulkerType.EnderChest) == 0;
+            // The count reads near zero for a tick or two while our last stack is swapped onto the
+            // hotbar, and a fetch has the shulker count to trust as well. One confirm covers the whole
+            // decision: two in a row would keep resetting each other's key.
+            if (!context.thresholdConfirmed(fetchShulker ? "Ender chest shulker count" : "Obsidian count")) {
+                return;
+            }
             // A farm with nowhere to put its drops would cycle the box forever: place, loot nothing, mine, repeat.
             if (!context.enderChestFarmCanProgress()) {
                 context.baritone().getPathingBehavior().cancelEverything();
                 context.pause("Obsidian is under the threshold but the inventory has no room for more, clear some slots and restart.");
                 return;
             }
-            int runChests = runNeed < 0 ? -1 : HighwayContext.chestsForObsidian(runNeed, obsidian);
             context.setFarmRunChests(runChests);
-            context.setFarmLooseChests(context.looseChestsCoverRun(runChests));
+            context.setFarmLooseChests(looseChests);
             if (context.farmLooseChests()) {
                 Helper.HELPER.logDirect("The rest of the run needs " + runNeed + " obsidian and we have " + obsidian + ", farming " + runChests + " loose ender chests");
-            } else if (context.getShulkerCountInventory(ShulkerType.EnderChest) == 0) {
-                if (!context.thresholdConfirmed("Ender chest shulker count")) {
-                    return;
-                }
+            } else if (fetchShulker) {
                 if (!context.enderChestHasEnderShulks()) {
                     context.baritone().getPathingBehavior().cancelEverything();
                     context.pause("Out of ender chests, refill ender chest and inventory and restart.");
@@ -151,6 +156,8 @@ public class BuildingHighway extends State {
             context.resetTimer();
             return;
         }
+        context.clearThresholdConfirm("Obsidian count");
+        context.clearThresholdConfirm("Ender chest shulker count");
 
         // Digging: keep loose ender chests topped up for storage access (paving refills them via the obsidian farm above).
         // Cap the threshold below a full stack: a refill tops us up to ~64, and topping fits a single slot (<=64), so a

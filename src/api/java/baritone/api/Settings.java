@@ -2190,7 +2190,9 @@ public final class Settings {
     public final Setting<Boolean> highwayQueueDisconnect = new Setting<>(true);
 
     /**
-     * Number of blocks the builder can break per tick
+     * Number of blocks the builder can break per tick. For the printer this is a budget of dig
+     * packets: a {@link #printerBreakNearInstant} break sends two and counts as two, but the first
+     * break of a tick always goes through.
      */
     public final Setting<Integer> multiBreak = new Setting<>(-1);
 
@@ -2235,7 +2237,7 @@ public final class Settings {
      * Let the printer also break blocks that take two ticks with the best hotbar tool but mine at
      * least 70% per tick, by starting and finishing the dig in the same tick (the server accepts a
      * finished dig after 70% of the break time). With an Efficiency V pickaxe that covers stone,
-     * blackstone and basalt. Counts against {@link #multiBreak} like any other printer break.
+     * blackstone and basalt. Counts as two against {@link #multiBreak}, since it sends two dig packets.
      * Anticheats that time digs, such as Grim's FastBreak check, cancel these breaks.
      */
     public final Setting<Boolean> printerBreakNearInstant = new Setting<>(false);

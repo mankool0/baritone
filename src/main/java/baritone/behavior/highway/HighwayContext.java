@@ -538,6 +538,16 @@ public class HighwayContext {
         pendingThresholdKey = null;
     }
 
+    /**
+     * Drop a pending confirm for {@code what} once its threshold is no longer tripped, so a count
+     * that dipped for a tick and recovered doesn't leave a head start for the next dip.
+     */
+    public void clearThresholdConfirm(String what) {
+        if (what.equals(pendingThresholdKey)) {
+            clearThresholdConfirm();
+        }
+    }
+
     public int walkBackTimer() {
         return walkBackTimer;
     }
@@ -3178,6 +3188,7 @@ public class HighwayContext {
 
     private int runObsidianNeed = -1;
     private int runObsidianNeedTick = -1;
+    private int runObsidianNeedHave = 0;
     private int farmRunChests = -1;
     private boolean farmLooseChests = false;
 
@@ -3194,14 +3205,20 @@ public class HighwayContext {
     /**
      * Obsidian still to place from the check-back slice to the end, or -1 when the run has no end,
      * any of it is out of view, or it needs more than highwayFarmForRunMaxObsidian. Rescanned at
-     * most once a second.
+     * most once a second. In between, what we spent of {@code have} since the scan went into cells
+     * the scan counted, so the need drops with it: held against a live count, the scan's own need
+     * comes up short as soon as the printer spends the few spare blocks a farm rounds up to.
      */
-    public int runObsidianNeed() {
+    public int runObsidianNeed(int have) {
         int tick = playerContext.player().tickCount;
         if (runObsidianNeedTick >= 0 && tick >= runObsidianNeedTick && tick - runObsidianNeedTick < 20) {
-            return runObsidianNeed;
+            if (runObsidianNeed < 0) {
+                return -1;
+            }
+            return Math.max(0, runObsidianNeed - Math.max(0, runObsidianNeedHave - have));
         }
         runObsidianNeedTick = tick;
+        runObsidianNeedHave = have;
         runObsidianNeed = scanRunObsidianNeed();
         return runObsidianNeed;
     }

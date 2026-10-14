@@ -729,10 +729,11 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             if (!printerRayIntersectsCell(predictedEye, rot, clicked, reach)) {
                 break;
             }
-            if (breaksLeft > 0 && !placed && printerTryBreak(bcc, bhr, clicked)) {
+            int spent = breaksLeft > 0 && !placed ? printerTryBreak(bcc, bhr, clicked, breaksLeft, !broke) : 0;
+            if (spent > 0) {
                 // the block is gone client-side, the same ray now continues to whatever is behind it
                 broke = true;
-                breaksLeft--;
+                breaksLeft -= spent;
                 continue;
             }
             int usedSlot = placesLeft > 0 ? printerTryPlace(bcc, bhr, clicked, rot, placed ? placeSlot : -1) : -1;
@@ -796,9 +797,10 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             }
             Vec3 hitVec = center.add(face.getStepX() * 0.5, face.getStepY() * 0.5, face.getStepZ() * 0.5);
             BlockHitResult bhr = new BlockHitResult(hitVec, face, new BlockPos(pos.x, pos.y, pos.z), false);
-            if (printerTryBreak(bcc, bhr, pos)) {
+            int spent = printerTryBreak(bcc, bhr, pos, breaksLeft, !broke);
+            if (spent > 0) {
                 broke = true;
-                breaksLeft--;
+                breaksLeft -= spent;
                 // candidate stays: the place pass may fill this same cell this tick
             }
         }
@@ -892,36 +894,58 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         return desired == null || valid(curr, desired, false) ? null : desired;
     }
 
-    private boolean printerTryBreak(BuilderCalculationContext bcc, BlockHitResult bhr, BetterBlockPos clicked) {
+    /**
+     * @param breaksLeft dig packets {@link baritone.api.Settings#multiBreak} still allows this tick
+     * @param first      whether nothing was broken yet this tick; the first break always goes
+     *                   through, even a near-instant one over a budget of 1
+     * @return the dig packets the break spent, including aborting a vanilla dig in progress, or 0
+     * if nothing was broken
+     */
+    private int printerTryBreak(BuilderCalculationContext bcc, BlockHitResult bhr, BetterBlockPos clicked, int breaksLeft, boolean first) {
         if (!printerBreakAllowed() || !printerBreakSafe(clicked)) {
-            return false;
+            return 0;
         }
         BlockState state = bcc.bsi.get0(clicked);
         if (state.getBlock() instanceof AirBlock || state.getBlock() instanceof LiquidBlock
                 || MovementHelper.isReplaceable(clicked.x, clicked.y, clicked.z, state, bcc.bsi)) {
-            return false;
+            return 0;
         }
         if (printerDesired(bcc, clicked, state) == null) {
-            return false;
+            return 0;
         }
-        if (!printerCanInstaBreak(state, clicked)) {
-            return false; // only single-tick breaks can be done without stopping
+        int packets = printerBreakPackets(printerBreakProgress(state, clicked));
+        if (packets == 0) {
+            return 0; // only single-tick breaks can be done without stopping
+        }
+        if (packets > breaksLeft && !first) {
+            return 0;
         }
         MovementHelper.switchToBestToolFor(ctx, state);
         // clickBlock doesn't sync the hotbar the way the use path does, so the tool we just
         // picked would otherwise reach the server a tick after the dig it applies to
         ctx.playerController().syncHeldItem();
+        int spent = packets;
+        if (!ctx.playerController().hasBrokenBlock()) {
+            // the stationary path left a vanilla dig going. Abort it once here: an instant START
+            // leaves vanilla's dig state set, so every later break this tick would abort it again
+            ctx.playerController().resetBlockRemoving();
+            spent++;
+        }
         // plain BlockPos on purpose: the position flows into vanilla world mutation
         BlockPos pos = new BlockPos(clicked.x, clicked.y, clicked.z);
-        boolean dug = state.getDestroyProgress(ctx.player(), ctx.world(), pos) >= 1.0f
+        boolean dug = packets == 1
                 ? ctx.playerController().clickBlock(pos, bhr.getDirection())
                 : ctx.playerController().clickBlockFinishing(pos, bhr.getDirection());
         if (!dug) {
-            return false;
+            return 0;
         }
-        ctx.player().swing(InteractionHand.MAIN_HAND);
+        if (first) {
+            // one swing covers every break this tick, like a held attack, and keeps the packet
+            // count down
+            ctx.player().swing(InteractionHand.MAIN_HAND);
+        }
         ctx.playerController().setDestroyDelay(0);
-        return true;
+        return spent;
     }
 
     /**
@@ -1158,9 +1182,19 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
      * {@link baritone.api.Settings#printerBreakNearInstant} adds
      */
     private boolean printerCanInstaBreak(BlockState state, BlockPos pos) {
-        float progress = printerBreakProgress(state, pos);
-        return progress >= 1.0f
-                || Baritone.settings().printerBreakNearInstant.value && progress >= IPlayerController.SERVER_FINISH_DIG_PROGRESS;
+        return printerBreakPackets(printerBreakProgress(state, pos)) > 0;
+    }
+
+    /**
+     * @return the dig packets the printer sends to break a block with this per-tick progress: a
+     * START for an instant break, START and STOP for a near-instant one, or 0 if it can't break it
+     * within a tick
+     */
+    private static int printerBreakPackets(float progress) {
+        if (progress >= 1.0f) {
+            return 1;
+        }
+        return Baritone.settings().printerBreakNearInstant.value && progress >= IPlayerController.SERVER_FINISH_DIG_PROGRESS ? 2 : 0;
     }
 
     /**
@@ -1425,10 +1459,16 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                 if (ctx.isLookingAt(pos)) {
                     baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_LEFT, true);
                 }
-                if (printerBreakProgress(bcc.get(pos), pos) < 1.0f) {
+                BlockState state = bcc.get(pos);
+                float progress = printerBreakProgress(state, pos);
+                // We aim at the block now, so the printer breaks it next tick. Holding the printer
+                // off for this dig would also hold it off for the next one: we'd stay here and
+                // dig near-instant blocks one at a time with the vanilla click
+                boolean printerTakesIt = printerReady && Baritone.settings().printerBreak.value
+                        && printerBreakSafe(pos) && printerBreakPackets(progress) > 0;
+                if (progress < 1.0f && !printerTakesIt) {
                     // a dig that spans ticks only lands if the crosshair stays on the block, so
-                    // anything moving the player has to let go until it's done. Near-instant
-                    // blocks count too: the left click digs them the vanilla way
+                    // anything moving the player has to let go until it's done
                     legitSlowBreakLastTick = true;
                     printerBreakGrace = Math.max(printerBreakGrace, Math.max(1, Baritone.settings().blockBreakSpeed.value));
                 }
