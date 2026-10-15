@@ -24,10 +24,16 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.MultiPlayerGameMode;
 import net.minecraft.client.multiplayer.prediction.BlockStatePredictionHandler;
 import net.minecraft.client.multiplayer.prediction.PredictiveAction;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.BlockHitResult;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.gen.Accessor;
 import org.spongepowered.asm.mixin.gen.Invoker;
 import org.spongepowered.asm.mixin.injection.At;
@@ -40,6 +46,18 @@ public abstract class MixinPlayerController implements IPlayerControllerMP {
     @Shadow
     @Final
     private Minecraft minecraft;
+
+    @Unique
+    private int useSlot = -1;
+
+    @Unique
+    private ItemStack useStack;
+
+    @Unique
+    private int useCount;
+
+    @Unique
+    private int useSequenceBefore;
 
     @Accessor("isDestroying")
     @Override
@@ -80,5 +98,39 @@ public abstract class MixinPlayerController implements IPlayerControllerMP {
         if (predictions.isPredicting()) {
             ((IClientLevel) level).getPendingToolDamage().onDestroyBlock(minecraft.player, level, pos, predictions.currentSequence());
         }
+    }
+
+    // Main hand only: the server takes what it places from the selected hotbar slot.
+    @Inject(
+            method = "useItemOn",
+            at = @At("HEAD")
+    )
+    private void onUseItemOnHead(LocalPlayer player, InteractionHand hand, BlockHitResult result, CallbackInfoReturnable<InteractionResult> cir) {
+        useSlot = -1;
+        ClientLevel level = minecraft.level;
+        if (level == null || hand != InteractionHand.MAIN_HAND) {
+            return;
+        }
+        useSlot = player.getInventory().getSelectedSlot();
+        useStack = player.getMainHandItem();
+        useCount = useStack.getCount();
+        useSequenceBefore = ((IClientLevel) level).getPredictionHandler().currentSequence();
+    }
+
+    @Inject(
+            method = "useItemOn",
+            at = @At("RETURN")
+    )
+    private void onUseItemOnReturn(LocalPlayer player, InteractionHand hand, BlockHitResult result, CallbackInfoReturnable<InteractionResult> cir) {
+        ClientLevel level = minecraft.level;
+        if (useSlot != -1 && level != null) {
+            int sequence = ((IClientLevel) level).getPredictionHandler().currentSequence();
+            // unchanged when the click was refused before anything went out
+            if (sequence != useSequenceBefore) {
+                ((IClientLevel) level).getPendingPlaces().onUse(useSlot, sequence, useStack, useCount);
+            }
+        }
+        useSlot = -1;
+        useStack = null;
     }
 }

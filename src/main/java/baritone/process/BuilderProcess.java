@@ -66,6 +66,7 @@ import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.vehicle.boat.AbstractBoat;
 import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.item.context.UseOnContext;
@@ -131,6 +132,12 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private int layer;
     private int numRepeats;
     private List<BlockState> approxPlaceable;
+    /**
+     * The block last placed from each hotbar slot. When a slot runs dry, the server puts the next
+     * pickup in it, since it's the first empty one. Refilling it anyway, rather than the next empty
+     * slot, keeps each block where it was instead of moving one slot along every stack.
+     */
+    private final Item[] placedFrom = new Item[9];
     /** Cells of {@link #entityHole} still to dig. */
     private Set<BetterBlockPos> toBreakEntity = new LinkedHashSet<>();
     /**
@@ -609,7 +616,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private OptionalInt hasAnyItemThatWouldPlace(BlockState desired, HitResult result, Rotation rot) {
         for (int i = 0; i < 9; i++) {
             ItemStack stack = ctx.player().getInventory().getNonEquipmentItems().get(i);
-            if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem)) {
+            if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem) || !baritone.getInventoryBehavior().hotbarStackLasts(i, stack)) {
                 continue;
             }
             float originalYaw = ctx.player().getYRot();
@@ -982,6 +989,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             return -1;
         }
         ctx.player().getInventory().setSelectedSlot(slot.getAsInt());
+        placedFrom[slot.getAsInt()] = ctx.player().getMainHandItem().getItem();
         InteractionResult result = ctx.playerController().processRightClickBlock(ctx.player(), ctx.world(), InteractionHand.MAIN_HAND, bhr);
         if (!result.consumesAction()) {
             return -1;
@@ -1492,6 +1500,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                 legitAimTargetLastTick = new BetterBlockPos(toPlace.get().placeAgainst);
                 baritone.getLookBehavior().updateTarget(rot, true);
                 ctx.player().getInventory().setSelectedSlot(toPlace.get().hotbarSelection);
+                placedFrom[toPlace.get().hotbarSelection] = ctx.player().getMainHandItem().getItem();
                 baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
                 if (ctx.isLookingAt(toPlace.get().placeAgainst) && ((BlockHitResult) ctx.objectMouseOver()).getDirection().equals(toPlace.get().side)) {
                     baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
@@ -1524,6 +1533,13 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                             // a move is already in flight; hold instead of clicking again
                             return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
                         }
+                        Item item = ctx.player().getInventory().getNonEquipmentItems().get(i).getItem();
+                        List<Integer> homes = new ArrayList<>();
+                        for (int h = 0; h < 9; h++) {
+                            if (placedFrom[h] == item) {
+                                homes.add(h);
+                            }
+                        }
                         boolean requested;
                         if (Baritone.settings().fillEmptyHotbarSlots.value) {
                             // pull every matching stack the empty slots have room for, not just this one
@@ -1533,9 +1549,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                                     sources.add(j);
                                 }
                             }
-                            requested = baritone.getInventoryBehavior().attemptToFillHotbarFrom(sources, usefulSlots::contains);
+                            requested = baritone.getInventoryBehavior().attemptToFillHotbarFrom(sources, homes, usefulSlots::contains);
                         } else {
-                            requested = baritone.getInventoryBehavior().attemptToPutOnHotbar(i, usefulSlots::contains);
+                            requested = baritone.getInventoryBehavior().attemptToPutOnHotbar(i, homes, usefulSlots::contains);
                         }
                         if (!requested) {
                             // awaiting inventory move, so pause
@@ -2209,7 +2225,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         List<BlockState> result = new ArrayList<>();
         for (int i = 0; i < size; i++) {
             ItemStack stack = ctx.player().getInventory().getNonEquipmentItems().get(i);
-            if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem)) {
+            if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem) || (i < 9 && !baritone.getInventoryBehavior().hotbarStackLasts(i, stack))) {
                 result.add(Blocks.AIR.defaultBlockState());
                 continue;
             }

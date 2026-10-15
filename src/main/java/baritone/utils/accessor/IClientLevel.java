@@ -17,6 +17,7 @@
 
 package baritone.utils.accessor;
 
+import baritone.utils.PendingPlaces;
 import baritone.utils.PendingToolDamage;
 import net.minecraft.client.multiplayer.prediction.BlockStatePredictionHandler;
 
@@ -33,4 +34,9 @@ public interface IClientLevel {
      * Tool damage for breaks the server hasn't acked yet
      */
     PendingToolDamage getPendingToolDamage();
+
+    /**
+     * Main hand uses on blocks the server hasn't acked yet
+     */
+    PendingPlaces getPendingPlaces();
 }

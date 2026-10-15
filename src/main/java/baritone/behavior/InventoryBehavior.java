@@ -215,10 +215,10 @@ public final class InventoryBehavior extends Behavior implements Helper {
     }
 
     /**
-     * Whether swapping this hotbar slot now would go wrong. A dig with its tool that the server
-     * hasn't acked yet still sends the tool's durability back, and that overwrites the swap
-     * client-side until the server resends the whole inventory a round trip later. And swapping
-     * out an item in use, like food being eaten, stops the use.
+     * Whether swapping this hotbar slot now would go wrong. A dig with its tool or a place from it
+     * that the server hasn't acked yet still sends the tool's durability or the stack's count back,
+     * and that overwrites the swap client-side until the server resends the whole inventory a round
+     * trip later. And swapping out an item in use, like food being eaten, stops the use.
      */
     private boolean hotbarSlotBusy(int slot) {
         if (slot < 0 || slot >= 9) {
@@ -229,7 +229,17 @@ public final class InventoryBehavior extends Behavior implements Helper {
                 && player.getInventory().getSelectedSlot() == slot) {
             return true;
         }
-        return ((IClientLevel) ctx.world()).getPendingToolDamage().worst(slot) > 0;
+        IClientLevel level = (IClientLevel) ctx.world();
+        return level.getPendingToolDamage().worst(slot) > 0 || level.getPendingPlaces().inFlight(slot) > 0;
+    }
+
+    /**
+     * Whether the server still holds some of this hotbar stack once the places already sent from it
+     * land. The client's count runs high while places are in flight, and a place sent on it after
+     * the server has run the slot dry goes out with whatever got picked up into the slot since.
+     */
+    public boolean hotbarStackLasts(int slot, ItemStack stack) {
+        return ((IClientLevel) ctx.world()).getPendingPlaces().countAfterInFlight(slot, stack) > 0;
     }
 
     private static boolean itemSaverRetired(ItemStack stack) {
@@ -318,6 +328,21 @@ public final class InventoryBehavior extends Behavior implements Helper {
         return bonus;
     }
 
+    /**
+     * @param homes hotbar slots this item was in, refilled first even if a throwaway block has
+     *              landed there since
+     */
+    public boolean attemptToPutOnHotbar(int inMainInvy, List<Integer> homes, Predicate<Integer> disallowedHotbar) {
+        List<Integer> refillable = refillableHomes(homes, disallowedHotbar);
+        if (refillable == null) {
+            return false;
+        }
+        if (!refillable.isEmpty()) {
+            return requestSwapWithHotBar(inMainInvy, refillable.get(0));
+        }
+        return attemptToPutOnHotbar(inMainInvy, disallowedHotbar);
+    }
+
     public boolean attemptToPutOnHotbar(int inMainInvy, Predicate<Integer> disallowedHotbar) {
         OptionalInt destination = getTempHotbarSlot(disallowedHotbar);
         if (destination.isPresent()) {
@@ -328,29 +353,59 @@ public final class InventoryBehavior extends Behavior implements Helper {
         return true;
     }
 
-    public boolean attemptToFillHotbarFrom(List<Integer> inMainInvy, Predicate<Integer> disallowedHotbar) {
+    /**
+     * @param homes hotbar slots these items were in, refilled first even if a throwaway block has
+     *              landed there since
+     */
+    public boolean attemptToFillHotbarFrom(List<Integer> inMainInvy, List<Integer> homes, Predicate<Integer> disallowedHotbar) {
         if (inMainInvy.isEmpty()) {
             return true;
         }
-        List<Integer> empties = new ArrayList<>();
+        List<Integer> targets = refillableHomes(homes, disallowedHotbar);
+        if (targets == null) {
+            return false;
+        }
         for (int i = 1; i < 8; i++) { // 0 and 8 stay reserved for the sword/pickaxe and throwaway
-            if (ctx.player().getInventory().getNonEquipmentItems().get(i).isEmpty() && !reservedForTool(i) && !disallowedHotbar.test(i) && !hotbarSlotBusy(i)) {
-                empties.add(i);
+            if (!targets.contains(i) && ctx.player().getInventory().getNonEquipmentItems().get(i).isEmpty() && !reservedForTool(i) && !disallowedHotbar.test(i) && !hotbarSlotBusy(i)) {
+                targets.add(i);
             }
         }
-        if (empties.isEmpty()) {
+        if (targets.isEmpty()) {
             return attemptToPutOnHotbar(inMainInvy.get(0), disallowedHotbar);
         }
         if (!inventoryMoveAllowedNow()) {
             return false;
         }
-        int moves = Math.min(empties.size(), inMainInvy.size());
+        int moves = Math.min(targets.size(), inMainInvy.size());
         for (int m = 0; m < moves; m++) {
-            clickSwap(inMainInvy.get(m), empties.get(m));
+            clickSwap(inMainInvy.get(m), targets.get(m));
         }
         ticksSinceLastInventoryMove = 0;
         lastTickRequestedMove = null;
         return true;
+    }
+
+    /**
+     * The homes that can be refilled, in order: empty, or holding a throwaway block, which is what a
+     * pickup puts in a slot the moment it runs dry. Null while one is busy, since what it holds isn't
+     * settled yet, and moving on to another slot is how an item ends up wandering along the hotbar.
+     */
+    private List<Integer> refillableHomes(List<Integer> homes, Predicate<Integer> disallowedHotbar) {
+        List<Integer> refillable = new ArrayList<>();
+        for (int slot : homes) {
+            if (slot < 1 || slot >= 8 || reservedForTool(slot) || disallowedHotbar.test(slot)) {
+                continue;
+            }
+            if (hotbarSlotBusy(slot)) {
+                logDebug("Inventory move requested but waiting for hotbar slot " + slot + " to be done with");
+                return null;
+            }
+            ItemStack stack = ctx.player().getInventory().getNonEquipmentItems().get(slot);
+            if (stack.isEmpty() || Baritone.settings().acceptableThrowawayItems.value.contains(stack.getItem())) {
+                refillable.add(slot);
+            }
+        }
+        return refillable;
     }
 
     public OptionalInt getTempHotbarSlot(Predicate<Integer> disallowedHotbar) {
@@ -486,7 +541,7 @@ public final class InventoryBehavior extends Behavior implements Helper {
             // and then it's called during execution
             // since this function is never called during cost calculation, we don't need to migrate
             // acceptableThrowawayItems to the CalculationContext
-            if (desired.test(item)) {
+            if (desired.test(item) && hotbarStackLasts(i, item)) {
                 if (select) {
                     p.getInventory().setSelectedSlot(i);
                 }
