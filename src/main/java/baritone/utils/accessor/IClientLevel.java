@@ -17,6 +17,7 @@
 
 package baritone.utils.accessor;
 
+import baritone.utils.PendingToolDamage;
 import net.minecraft.client.multiplayer.prediction.BlockStatePredictionHandler;
 
 public interface IClientLevel {
@@ -27,4 +28,9 @@ public interface IClientLevel {
      * Highest block change sequence the server has acked, as applied on the main thread
      */
     int getLastAckedSequence();
+
+    /**
+     * Tool damage for breaks the server hasn't acked yet
+     */
+    PendingToolDamage getPendingToolDamage();
 }

@@ -20,7 +20,9 @@ package baritone.behavior;
 import baritone.Baritone;
 import baritone.api.event.events.TickEvent;
 import baritone.api.utils.Helper;
+import baritone.utils.PendingToolDamage;
 import baritone.utils.ToolSet;
+import baritone.utils.accessor.IClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Holder;
@@ -60,8 +62,11 @@ public final class InventoryBehavior extends Behavior implements Helper {
     public static final int PICKAXE_SLOT = 1;
     public static final int SHOVEL_SLOT = 2;
     public static final int AXE_SLOT = 3;
+    public static final int SPARE_PICKAXE_SLOT = 4;
+    private static final int[] PICKAXE_SLOTS = {PICKAXE_SLOT, SPARE_PICKAXE_SLOT};
 
     int ticksSinceLastInventoryMove;
+    private final int[] ticksSinceHotbarMove = new int[9];
     int[] lastTickRequestedMove; // not everything asks every tick, so remember the request while coming to a halt
 
     public InventoryBehavior(Baritone baritone) {
@@ -74,6 +79,14 @@ public final class InventoryBehavior extends Behavior implements Helper {
      */
     public int ticksSinceLastInventoryMove() {
         return ticksSinceLastInventoryMove;
+    }
+
+    /**
+     * @return ticks since a swap last changed this hotbar slot, counted like
+     * {@link #ticksSinceLastInventoryMove()}
+     */
+    public int ticksSinceHotbarMove(int slot) {
+        return ticksSinceHotbarMove[slot];
     }
 
     @Override
@@ -89,6 +102,9 @@ public final class InventoryBehavior extends Behavior implements Helper {
             return;
         }
         ticksSinceLastInventoryMove++;
+        for (int i = 0; i < ticksSinceHotbarMove.length; i++) {
+            ticksSinceHotbarMove[i]++;
+        }
         boolean pathing = baritone.getPathingBehavior().isPathing();
         if (pathing && firstValidThrowaway() >= 9) { // aka there are none on the hotbar, but there are some in main inventory
             requestSwapWithHotBar(firstValidThrowaway(), 8);
@@ -96,7 +112,7 @@ public final class InventoryBehavior extends Behavior implements Helper {
         if (Baritone.settings().keepToolsOnHotbar.value) {
             // not gated on pathing: walk-creep and the printer don't path, and switchToBestToolFor only looks at the hotbar
             keepToolAt(bestSwordSlot(), SWORD_SLOT);
-            keepToolAt(bestToolAgainst(Blocks.STONE, ItemTags.PICKAXES), PICKAXE_SLOT);
+            keepPickaxes();
             keepToolAt(bestToolAgainst(Blocks.DIRT, ItemTags.SHOVELS), SHOVEL_SLOT);
             keepToolAt(bestToolAgainst(Blocks.OAK_LOG, ItemTags.AXES), AXE_SLOT);
         } else if (pathing) {
@@ -117,6 +133,110 @@ public final class InventoryBehavior extends Behavior implements Helper {
         }
     }
 
+    /**
+     * Pickaxes live on slots 1 and 4. The one in use stays where it is until it's spent, and once
+     * the hotbar ones run low the next one from the main inventory comes to whichever of the two
+     * doesn't hold a working one, so ToolSet goes on to it without a swap in between.
+     */
+    private void keepPickaxes() {
+        int threshold = Baritone.settings().sparePickaxeThreshold.value;
+        if (threshold <= 0) {
+            keepToolAt(bestToolAgainst(Blocks.STONE, ItemTags.PICKAXES), PICKAXE_SLOT);
+            return;
+        }
+        int next = nextPickaxe();
+        if (next == -1) {
+            return;
+        }
+        // a better pickaxe than any on the hotbar leaves nothing working there, so it comes over at once
+        double minSpeed = pickaxeSpeed(next);
+        PendingToolDamage pending = ((IClientLevel) ctx.world()).getPendingToolDamage();
+        double lifeLeft = 0;
+        for (int i = 0; i < 9; i++) {
+            if (holdsWorkingPickaxe(i, minSpeed)) {
+                double left = ToolSet.lifeLeft(ctx.player().getInventory().getItem(i), pending, i)
+                        - (Baritone.settings().itemSaver.value ? Baritone.settings().itemSaverThreshold.value : 0);
+                lifeLeft += Math.max(0, left);
+            }
+        }
+        if (lifeLeft > threshold) {
+            return;
+        }
+        for (int slot : PICKAXE_SLOTS) {
+            if (!holdsWorkingPickaxe(slot, minSpeed) && !hotbarSlotBusy(slot)) {
+                requestSwapWithHotBar(next, slot);
+                return;
+            }
+        }
+    }
+
+    /**
+     * @return the main inventory slot of the best pickaxe off the hotbar, of equally good ones the
+     * one with the most left so it outlasts the one in use, or -1 if there is none
+     */
+    private int nextPickaxe() {
+        NonNullList<ItemStack> invy = ctx.player().getInventory().getNonEquipmentItems();
+        int bestInd = -1;
+        double bestSpeed = -1;
+        int bestLeft = -1;
+        for (int i = 9; i < invy.size(); i++) {
+            ItemStack stack = invy.get(i);
+            if (!stack.is(ItemTags.PICKAXES) || itemSaverRetired(stack)) {
+                continue;
+            }
+            double speed = pickaxeSpeed(i);
+            int left = stack.getMaxDamage() - stack.getDamageValue();
+            if (speed > bestSpeed || (speed == bestSpeed && left > bestLeft)) {
+                bestInd = i;
+                bestSpeed = speed;
+                bestLeft = left;
+            }
+        }
+        return bestInd;
+    }
+
+    private double nextPickaxeSpeed() {
+        int next = nextPickaxe();
+        return next == -1 ? -1 : pickaxeSpeed(next);
+    }
+
+    /**
+     * @param minSpeed the speed of the best pickaxe off the hotbar, -1 if there is none
+     * @return whether the slot holds a pickaxe item saver hasn't retired that nothing off the
+     * hotbar beats
+     */
+    private boolean holdsWorkingPickaxe(int slot, double minSpeed) {
+        ItemStack stack = ctx.player().getInventory().getNonEquipmentItems().get(slot);
+        return stack.is(ItemTags.PICKAXES) && !itemSaverRetired(stack) && pickaxeSpeed(slot) >= minSpeed;
+    }
+
+    private double pickaxeSpeed(int slot) {
+        return ToolSet.calculateSpeedVsBlock(ctx.player().getInventory().getNonEquipmentItems().get(slot), Blocks.STONE.defaultBlockState());
+    }
+
+    /**
+     * Whether swapping this hotbar slot now would go wrong. A dig with its tool that the server
+     * hasn't acked yet still sends the tool's durability back, and that overwrites the swap
+     * client-side until the server resends the whole inventory a round trip later. And swapping
+     * out an item in use, like food being eaten, stops the use.
+     */
+    private boolean hotbarSlotBusy(int slot) {
+        if (slot < 0 || slot >= 9) {
+            return false;
+        }
+        LocalPlayer player = ctx.player();
+        if (player.isUsingItem() && player.getUsedItemHand() == InteractionHand.MAIN_HAND
+                && player.getInventory().getSelectedSlot() == slot) {
+            return true;
+        }
+        return ((IClientLevel) ctx.world()).getPendingToolDamage().worst(slot) > 0;
+    }
+
+    private static boolean itemSaverRetired(ItemStack stack) {
+        return Baritone.settings().itemSaver.value && stack.getMaxDamage() > 1
+                && stack.getDamageValue() + Baritone.settings().itemSaverThreshold.value >= stack.getMaxDamage();
+    }
+
     private boolean reservedForTool(int slot) {
         if (!Baritone.settings().keepToolsOnHotbar.value) {
             return false;
@@ -134,6 +254,9 @@ public final class InventoryBehavior extends Behavior implements Helper {
                 return bestToolAgainst(Blocks.DIRT, ItemTags.SHOVELS) != -1;
             case AXE_SLOT:
                 return bestToolAgainst(Blocks.OAK_LOG, ItemTags.AXES) != -1;
+            case SPARE_PICKAXE_SLOT:
+                // only while it holds one, otherwise it's free for anything else
+                return Baritone.settings().sparePickaxeThreshold.value > 0 && holdsWorkingPickaxe(slot, nextPickaxeSpeed());
             default:
                 return false;
         }
@@ -211,7 +334,7 @@ public final class InventoryBehavior extends Behavior implements Helper {
         }
         List<Integer> empties = new ArrayList<>();
         for (int i = 1; i < 8; i++) { // 0 and 8 stay reserved for the sword/pickaxe and throwaway
-            if (ctx.player().getInventory().getNonEquipmentItems().get(i).isEmpty() && !reservedForTool(i) && !disallowedHotbar.test(i)) {
+            if (ctx.player().getInventory().getNonEquipmentItems().get(i).isEmpty() && !reservedForTool(i) && !disallowedHotbar.test(i) && !hotbarSlotBusy(i)) {
                 empties.add(i);
             }
         }
@@ -253,6 +376,11 @@ public final class InventoryBehavior extends Behavior implements Helper {
 
     private boolean requestSwapWithHotBar(int inInventory, int inHotbar) {
         lastTickRequestedMove = new int[]{inInventory, inHotbar};
+        // ahead of the movement gates, so waiting this out doesn't pause anything
+        if (hotbarSlotBusy(inHotbar) || hotbarSlotBusy(inInventory)) {
+            logDebug("Inventory move requested but waiting for hotbar slot to be done with");
+            return false;
+        }
         if (!inventoryMoveAllowedNow()) {
             return false;
         }
@@ -280,6 +408,10 @@ public final class InventoryBehavior extends Behavior implements Helper {
 
     private void clickSwap(int inInventory, int inHotbar) {
         ctx.playerController().windowClick(ctx.player().inventoryMenu.containerId, inInventory < 9 ? inInventory + 36 : inInventory, inHotbar, ClickType.SWAP, ctx.player());
+        ticksSinceHotbarMove[inHotbar] = 0;
+        if (inInventory < 9) {
+            ticksSinceHotbarMove[inInventory] = 0;
+        }
     }
 
     private int firstValidThrowaway() { // TODO offhand idk
@@ -301,7 +433,7 @@ public final class InventoryBehavior extends Behavior implements Helper {
             if (stack.isEmpty()) {
                 continue;
             }
-            if (Baritone.settings().itemSaver.value && (stack.getDamageValue() + Baritone.settings().itemSaverThreshold.value) >= stack.getMaxDamage() && stack.getMaxDamage() > 1) {
+            if (itemSaverRetired(stack)) {
                 continue;
             }
             if (stack.is(kind)) {

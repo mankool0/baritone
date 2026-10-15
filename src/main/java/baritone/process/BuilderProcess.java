@@ -704,9 +704,6 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     }
 
     private PrinterAction printerFire(BuilderCalculationContext bcc, boolean mayPlace) {
-        if (printerInventoryUnsettled()) {
-            return PrinterAction.NONE; // hotbar contents not confirmed by the server yet
-        }
         Rotation rot = baritone.getLookBehavior().getServerRotation().orElse(null);
         if (rot == null) {
             return PrinterAction.NONE;
@@ -762,9 +759,6 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     }
 
     private PrinterAction printerFireNoRotate(BuilderCalculationContext bcc, boolean mayPlace) {
-        if (printerInventoryUnsettled()) {
-            return PrinterAction.NONE;
-        }
         double reach = ctx.playerController().getBlockReachDistance();
         double reachSq = reach * reach;
         Vec3 eye = ctx.player().getEyePosition(1.0f);
@@ -920,7 +914,12 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         if (packets > breaksLeft && !first) {
             return 0;
         }
+        int previous = ctx.player().getInventory().getSelectedSlot();
         MovementHelper.switchToBestToolFor(ctx, state);
+        if (printerSlotUnsettled(ctx.player().getInventory().getSelectedSlot())) {
+            ctx.player().getInventory().setSelectedSlot(previous);
+            return 0;
+        }
         // clickBlock doesn't sync the hotbar the way the use path does, so the tool we just
         // picked would otherwise reach the server a tick after the dig it applies to
         ctx.playerController().syncHeldItem();
@@ -979,7 +978,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             return -1;
         }
         OptionalInt slot = hasAnyItemThatWouldPlace(desired, bhr, rot);
-        if (!slot.isPresent() || (requiredSlot >= 0 && slot.getAsInt() != requiredSlot)) {
+        if (!slot.isPresent() || (requiredSlot >= 0 && slot.getAsInt() != requiredSlot) || printerSlotUnsettled(slot.getAsInt())) {
             return -1;
         }
         ctx.player().getInventory().setSelectedSlot(slot.getAsInt());
@@ -1122,6 +1121,15 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private boolean printerInventoryUnsettled() {
         return Baritone.settings().allowInventory.value
                 && baritone.getInventoryBehavior().ticksSinceLastInventoryMove() < Baritone.settings().printerInventorySettleTicks.value;
+    }
+
+    /**
+     * @return whether a swap that changed this hotbar slot is still unconfirmed, so the server may
+     * hold something else there. Swaps that leave the slot alone don't hold it up.
+     */
+    private boolean printerSlotUnsettled(int slot) {
+        return Baritone.settings().allowInventory.value
+                && baritone.getInventoryBehavior().ticksSinceHotbarMove(slot) < Baritone.settings().printerInventorySettleTicks.value;
     }
 
     /**
@@ -1479,7 +1487,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         List<BlockState> desirableOnHotbar = new ArrayList<>();
         Optional<Placement> toPlace = searchForPlacables(bcc, desirableOnHotbar);
         if (!printerAction.acted() && toPlace.isPresent() && isSafeToCancel && ctx.player().onGround() && ticks <= 0) {
-            if (!printerInventoryUnsettled()) {
+            if (!printerSlotUnsettled(toPlace.get().hotbarSelection)) {
                 Rotation rot = toPlace.get().rot;
                 legitAimTargetLastTick = new BetterBlockPos(toPlace.get().placeAgainst);
                 baritone.getLookBehavior().updateTarget(rot, true);

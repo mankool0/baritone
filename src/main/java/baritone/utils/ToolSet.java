@@ -18,6 +18,7 @@
 package baritone.utils;
 
 import baritone.Baritone;
+import baritone.utils.accessor.IClientLevel;
 import it.unimi.dsi.fastutil.objects.Object2DoubleOpenHashMap;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.Holder;
@@ -149,13 +150,14 @@ public class ToolSet {
         int lowestCost = Integer.MIN_VALUE;
         boolean bestSilkTouch = false;
         BlockState blockState = b.defaultBlockState();
+        PendingToolDamage pendingDamage = player.level() instanceof IClientLevel level ? level.getPendingToolDamage() : null;
         for (int i = 0; i < 9; i++) {
             ItemStack itemStack = player.getInventory().getItem(i);
             if (!Baritone.settings().useSwordToMine.value && itemStack.is(ItemTags.SWORDS)) {
                 continue;
             }
 
-            if (Baritone.settings().itemSaver.value && (itemStack.getDamageValue() + Baritone.settings().itemSaverThreshold.value) >= itemStack.getMaxDamage() && itemStack.getMaxDamage() > 1) {
+            if (Baritone.settings().itemSaver.value && itemSaverRetires(itemStack, pendingDamage, i)) {
                 continue;
             }
             double speed = calculateSpeedVsBlock(itemStack, blockState);
@@ -173,10 +175,47 @@ public class ToolSet {
                     best = i;
                     lowestCost = cost;
                     bestSilkTouch = silkTouch;
+                } else if (cost == lowestCost && silkTouch == bestSilkTouch && wornFurther(itemStack, i, best, pendingDamage)) {
+                    // of two of the same tool, use up the one with less left first: a spare just
+                    // swapped onto the hotbar then waits until the one in use is spent, instead of
+                    // being taken up while the server may not have it there yet
+                    best = i;
                 }
             }
         }
         return best;
+    }
+
+    private boolean wornFurther(ItemStack stack, int slot, int than, PendingToolDamage pending) {
+        ItemStack other = player.getInventory().getItem(than);
+        return stack.isDamageableItem() && ItemStack.isSameItem(stack, other)
+                && lifeLeft(stack, pending, slot) < lifeLeft(other, pending, than);
+    }
+
+    /**
+     * @return durability the tool in this hotbar slot has left once the breaks still in flight
+     * land, at their expected cost
+     */
+    public static double lifeLeft(ItemStack stack, PendingToolDamage pending, int slot) {
+        return stack.getMaxDamage() - stack.getDamageValue() - (pending == null ? 0 : pending.expected(slot));
+    }
+
+    /**
+     * Breaks still in flight count too: the client only sees their damage a round trip later, and
+     * every break sent meanwhile (multiBreak of them a tick) would go through on the old
+     * durability. At their expected cost they keep the threshold on average without Unbreaking
+     * holding the tool back at every round trip; at their worst case, every one of them costing a
+     * point, they still never use up its last point unless the threshold is 0.
+     */
+    private static boolean itemSaverRetires(ItemStack stack, PendingToolDamage pending, int slot) {
+        int max = stack.getMaxDamage();
+        if (max <= 1) {
+            return false;
+        }
+        int threshold = Baritone.settings().itemSaverThreshold.value;
+        int worst = pending == null ? 0 : pending.worst(slot);
+        return lifeLeft(stack, pending, slot) <= threshold
+                || stack.getDamageValue() + worst + Math.min(threshold, 1) >= max;
     }
 
     /**

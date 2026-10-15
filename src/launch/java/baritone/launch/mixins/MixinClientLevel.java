@@ -17,6 +17,7 @@
 
 package baritone.launch.mixins;
 
+import baritone.utils.PendingToolDamage;
 import baritone.utils.accessor.IClientLevel;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.prediction.BlockStatePredictionHandler;
@@ -33,6 +34,9 @@ public abstract class MixinClientLevel implements IClientLevel {
     @Unique
     private int lastAckedSequence;
 
+    @Unique
+    private final PendingToolDamage pendingToolDamage = new PendingToolDamage();
+
     @Accessor("blockStatePredictionHandler")
     @Override
     public abstract BlockStatePredictionHandler getPredictionHandler();
@@ -45,10 +49,16 @@ public abstract class MixinClientLevel implements IClientLevel {
     )
     private void onBlockChangedAck(int sequence, CallbackInfo ci) {
         lastAckedSequence = Math.max(lastAckedSequence, sequence);
+        pendingToolDamage.onAck(sequence);
     }
 
     @Override
     public int getLastAckedSequence() {
         return lastAckedSequence;
+    }
+
+    @Override
+    public PendingToolDamage getPendingToolDamage() {
+        return pendingToolDamage;
     }
 }

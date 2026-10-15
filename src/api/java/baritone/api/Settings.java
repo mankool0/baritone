@@ -131,11 +131,25 @@ public final class Settings {
     /**
      * Keep the best sword, pickaxe, shovel, and axe from the inventory on fixed hotbar slots
      * (sword 0, pickaxe 1, shovel 2, axe 3), so every tool type is at hand for autotool and
-     * combat. When disabled, only the best pickaxe is kept, on slot 0, and only while pathing.
+     * combat. Slot 4 also takes the next pickaxe when the current one runs low, see
+     * {@link #sparePickaxeThreshold}. When disabled, only the best pickaxe is kept, on slot 0, and
+     * only while pathing.
      * <p>
      * Requires {@link #allowInventory}.
      */
     public final Setting<Boolean> keepToolsOnHotbar = new Setting<>(true);
+
+    /**
+     * With {@link #keepToolsOnHotbar}, once the pickaxes on the hotbar are down to this much
+     * durability (counted above {@link #itemSaverThreshold} with itemSaver on), the next pickaxe
+     * comes onto the hotbar: to slot 4 while the one in use is on slot 1, and to slot 1 while it's
+     * on slot 4. Digging then goes on to it without stopping for a swap. Until then the free slot
+     * holds whatever else needs the room.
+     * <p>
+     * 0 brings the next pickaxe to slot 1 only once the last one is used up, which stops digging
+     * while the swap goes through.
+     */
+    public final Setting<Integer> sparePickaxeThreshold = new Setting<>(64);
 
     /**
      * It doesn't actually take twenty ticks to place a block, this cost is so high
@@ -2220,9 +2234,9 @@ public final class Settings {
     public final Setting<Integer> printerBreakDelay = new Setting<>(1);
 
     /**
-     * Ticks the printer holds off after a hotbar swap. The swap is applied optimistically
-     * client-side and only a rejection comes back, so acting inside this window can use the item
-     * the server still thinks is selected. Raise it on a high ping connection.
+     * Ticks the printer leaves a hotbar slot alone after a swap changed it. The swap is applied
+     * optimistically client-side and only a rejection comes back, so using the slot inside this
+     * window can use the item the server still has there. Raise it on a high ping connection.
      */
     public final Setting<Integer> printerInventorySettleTicks = new Setting<>(5);
 
