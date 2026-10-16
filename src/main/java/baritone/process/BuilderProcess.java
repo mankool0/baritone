@@ -38,6 +38,7 @@ import baritone.pathing.movement.Movement;
 import baritone.pathing.movement.MovementHelper;
 import baritone.pathing.path.PathExecutor;
 import baritone.utils.BaritoneProcessHelper;
+import baritone.utils.BlockBreakHelper;
 import baritone.utils.BlockStateInterface;
 import baritone.utils.DoubleMine;
 import baritone.utils.EntityHole;
@@ -1482,7 +1483,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                 // dig near-instant blocks one at a time with the vanilla click
                 boolean printerTakesIt = printerReady && Baritone.settings().printerBreak.value
                         && printerBreakSafe(pos) && printerBreakPackets(progress) > 0;
-                if (progress < 1.0f && !printerTakesIt) {
+                if (progress < 1.0f && !printerTakesIt && !BlockBreakHelper.breaksNearInstant(progress)) {
                     // a dig that spans ticks only lands if the crosshair stays on the block, so
                     // anything moving the player has to let go until it's done
                     legitSlowBreakLastTick = true;

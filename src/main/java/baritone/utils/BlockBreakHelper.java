@@ -19,6 +19,7 @@ package baritone.utils;
 
 import baritone.api.BaritoneAPI;
 import baritone.api.utils.IPlayerContext;
+import baritone.api.utils.IPlayerController;
 import baritone.utils.accessor.IPlayerControllerMP;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
@@ -64,7 +65,13 @@ public final class BlockBreakHelper {
             BlockPos pos = ((BlockHitResult) trace).getBlockPos();
             BlockState before = ctx.world().getBlockState(pos);
             ctx.playerController().setHittingBlock(wasHitting);
-            if (ctx.playerController().hasBrokenBlock()) {
+            if (finishesInOneTick(pos, before)) {
+                // done within the tick like an instant break, so no break delay either
+                ctx.playerController().syncHeldItem();
+                if (ctx.playerController().clickBlockFinishing(pos, ((BlockHitResult) trace).getDirection())) {
+                    ctx.player().swing(InteractionHand.MAIN_HAND);
+                }
+            } else if (ctx.playerController().hasBrokenBlock()) {
                 ctx.playerController().syncHeldItem();
                 ctx.playerController().clickBlock(((BlockHitResult) trace).getBlockPos(), ((BlockHitResult) trace).getDirection());
                 ctx.player().swing(InteractionHand.MAIN_HAND);
@@ -91,6 +98,29 @@ public final class BlockBreakHelper {
         } else {
             wasHitting = false;
         }
+    }
+
+    /**
+     * Whether to break this block with {@link IPlayerController#clickBlockFinishing} instead of a
+     * dig that spans ticks
+     */
+    private boolean finishesInOneTick(BlockPos pos, BlockState state) {
+        if (ctx.playerController().getGameType().isCreative()
+                || !breaksNearInstant(state.getDestroyProgress(ctx.player(), ctx.world(), pos))) {
+            return false;
+        }
+        // a dig of this block already under way finishes this tick anyway
+        return ctx.playerController().hasBrokenBlock()
+                || !pos.equals(((IPlayerControllerMP) ctx.minecraft().gameMode).getCurrentBlock());
+    }
+
+    /**
+     * @return whether a left-click dig with this per-tick progress finishes in the tick it starts
+     * because of {@link baritone.api.Settings#breakNearInstant}
+     */
+    public static boolean breaksNearInstant(float progress) {
+        return BaritoneAPI.getSettings().breakNearInstant.value
+                && progress >= IPlayerController.SERVER_FINISH_DIG_PROGRESS && progress < 1.0f;
     }
 
     public BrokenBlocks broken() {

@@ -480,6 +480,17 @@ public final class Settings {
     public final Setting<Integer> blockBreakSpeed = new Setting<>(6);
 
     /**
+     * When mining by holding left click (digging through blocks on a path, #mine, the builder's
+     * stationary breaks), break blocks that mine at least 70% per tick with the held tool in a
+     * single tick, by starting and finishing the dig in the same tick (the server accepts a
+     * finished dig after 70% of the break time). With an Efficiency V pickaxe that covers stone,
+     * blackstone and basalt. Like instant breaks, these skip the {@link #blockBreakSpeed} delay.
+     * The printer has its own {@link #printerBreakNearInstant}. Anticheats that time digs, such as
+     * Grim's FastBreak check, cancel these breaks.
+     */
+    public final Setting<Boolean> breakNearInstant = new Setting<>(false);
+
+    /**
      * How many degrees to randomize the pitch and yaw every tick. Set to 0 to disable
      */
     public final Setting<Double> randomLooking = new Setting<>(0.01d);
