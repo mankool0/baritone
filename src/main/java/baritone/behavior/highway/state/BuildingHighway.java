@@ -320,8 +320,8 @@ public class BuildingHighway extends State {
 
             // Also check a few blocks in front of us, farther when through-wall filling is on: it
             // must detect sealed pockets before their cover comes into break reach
-            int scanAhead = context.scanAheadSlices(context.baritone().getBuilderProcess().isPaused());
-            HighwayBlockState curState = context.isHighwayCorrect(startCheckPos, startCheckPosLiq, tempCheckBackDist + scanAhead, context.settings().highwayRenderLiquidScanArea.value);
+            HighwayContext.ScanFront front = context.scanAheadFront(context.baritone().getBuilderProcess().isPaused());
+            HighwayBlockState curState = context.isHighwayCorrect(startCheckPos, startCheckPosLiq, tempCheckBackDist + front.slicesAhead(), front, context.settings().highwayRenderLiquidScanArea.value);
             if (curState == HighwayBlockState.Liquids) {
                 Helper.HELPER.logDirect("Removing liquids.");
                 context.transitionTo(HighwayState.LiquidRemovalPrep);

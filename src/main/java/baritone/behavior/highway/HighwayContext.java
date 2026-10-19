@@ -5813,25 +5813,85 @@ public class HighwayContext {
     /** Slices behind the bot {@code LiquidRemovalPrep} re-scans from, to catch what flowed in behind us. */
     public static final int LIQUID_SCAN_BACK_SLICES = 7;
     /**
-     * Slack on top of the detection scan's reach for the removal's own re-scan. The two scans
-     * project from different points and can land a slice apart at a jog, and the bot keeps moving
+     * Slack on top of the detection scan's reach for the removal's own re-scan. The bot keeps moving
      * between the tick that flags the lava and the tick that goes looking for it again. Too little
      * and the re-scan comes up empty and bounces straight back to Nothing.
      */
-    private static final int LIQUID_SCAN_MARGIN_SLICES = 3;
+    private static final int LIQUID_SCAN_MARGIN_BLOCKS = 3;
 
-    /** Slices ahead of the scan's own start that {@code BuildingHighway} looks for lava and mistakes. */
-    public int scanAheadSlices(boolean builderPaused) {
-        return slicesForBlocks(builderPaused || liquidThroughWalls()
+    /** How far ahead {@code BuildingHighway} looks for lava and boats. */
+    public ScanFront scanAheadFront(boolean builderPaused) {
+        return scanFront(builderPaused || liquidThroughWalls()
                 ? SCAN_AHEAD_BLOCKS_THROUGH_WALLS : SCAN_AHEAD_BLOCKS);
     }
 
+    /** How far ahead the removal's re-scan looks: far enough to always re-find whatever the detection scan flagged. */
+    public ScanFront liquidScanFront() {
+        return scanFront(SCAN_AHEAD_BLOCKS_THROUGH_WALLS + LIQUID_SCAN_MARGIN_BLOCKS);
+    }
+
     /**
-     * Window for the removal's re-scan: wide enough to always re-find whatever the detection scan
-     * flagged, from {@value #LIQUID_SCAN_BACK_SLICES} slices further back than the bot stands.
+     * Where a scan ahead of us ends: {@code blocks} in front of the block we stand in, cut square to
+     * the heading the way {@link LookaheadWindow} cuts the builder's window.
+     * <p>
+     * A scan of whole slices ends on a slant on a diagonal. A diagonal slice is sqrt(2) blocks long
+     * and runs at 45 degrees to travel, so with the scan counted in slices its far end reached 10 to
+     * 18 blocks ahead on the two +X diagonals, depending on the side of the road and the width,
+     * against 7 on a straight highway. Lava that far out started a removal that then had to dig all
+     * the way there through netherrack the builder had not reached yet. On the two -X diagonals the
+     * cross-section trails its slice instead, so one side of the road was only looked at 3.5 to 6
+     * blocks ahead, too close for through-wall filling to see a pocket before its cover is in break
+     * reach. With the cut every column ends between 7 and 8 blocks out, and a straight highway still
+     * scans exactly the slices it always has.
      */
-    public int liquidScanWindowSlices() {
-        return LIQUID_SCAN_BACK_SLICES + scanAheadSlices(true) + LIQUID_SCAN_MARGIN_SLICES;
+    public ScanFront scanFront(int blocks) {
+        boolean custom = pattern.isCustom();
+        // the heading, unnormalised, as in scanFrontDistance: a whole period's offset on a pattern
+        double headX = custom ? pattern.periodWorldX() : highwayDirection.getX();
+        double headZ = custom ? pattern.periodWorldZ() : highwayDirection.getZ();
+        double headLen = Math.sqrt(headX * headX + headZ * headZ);
+        // Enough slices to reach the front moving at the least a slice can advance along the
+        // heading - a whole step on a classic highway, a jog on a pattern - plus how far the widest
+        // cross-section spreads along it, twice over: once for the columns that trail its anchor and
+        // once for where the projection puts the anchor relative to our feet. The scans stop at the
+        // first slice that lies wholly past the front, so overshooting costs nothing.
+        double minAdvance = (custom ? Math.min(Math.abs(headX), Math.abs(headZ)) : headX * headX + headZ * headZ) / headLen;
+        double spread = Math.max(alongSpread(schematic, headX, headZ), alongSpread(liqCheckSchem, headX, headZ)) / headLen;
+        int slicesAhead = (int) Math.ceil((blocks + 2 * spread) / minAdvance) + 1;
+        BetterBlockPos feet = playerContext.playerFeet();
+        return new ScanFront(feet.getX(), feet.getZ(), headX / headLen, headZ / headLen, blocks, slicesAhead);
+    }
+
+    /** How far a cross-section's cells spread along an unnormalised heading, unnormalised. */
+    private static double alongSpread(ISchematic crossSection, double headX, double headZ) {
+        return (crossSection.widthX() - 1) * Math.abs(headX) + (crossSection.lengthZ() - 1) * Math.abs(headZ);
+    }
+
+    /**
+     * @param headingX    with {@code headingZ}, the heading as a unit vector
+     * @param slicesAhead slices past the one we stand on that a scan has to run to reach the front on
+     *                    every column
+     */
+    public record ScanFront(int feetX, int feetZ, double headingX, double headingZ, double blocks, int slicesAhead) {
+
+        /** Whether the block at x, z lies at or past the front. */
+        boolean excludes(int x, int z) {
+            return along(x, z) >= blocks;
+        }
+
+        /**
+         * Whether the cross-section laid out from {@code origin} lies wholly past the front. A scan's
+         * slices only ever move on along the heading, so every slice after it does as well.
+         */
+        boolean passed(BlockPos origin, ISchematic crossSection) {
+            // the least along-the-heading offset of any of its cells from the corner it is laid out from
+            double back = (crossSection.widthX() - 1) * Math.min(0, headingX) + (crossSection.lengthZ() - 1) * Math.min(0, headingZ);
+            return along(origin.getX(), origin.getZ()) + back >= blocks;
+        }
+
+        private double along(int x, int z) {
+            return (x - feetX) * headingX + (z - feetZ) * headingZ;
+        }
     }
 
     /**
@@ -5857,6 +5917,11 @@ public class HighwayContext {
     }
 
     public HighwayBlockState isHighwayCorrect(BlockPos startPos, BlockPos startPosLiq, int distanceToCheck, boolean renderLiquidScan) {
+        return isHighwayCorrect(startPos, startPosLiq, distanceToCheck, null, renderLiquidScan);
+    }
+
+    /** @param front where to stop looking ahead of us, or null to scan all {@code distanceToCheck} slices */
+    public HighwayBlockState isHighwayCorrect(BlockPos startPos, BlockPos startPosLiq, int distanceToCheck, ScanFront front, boolean renderLiquidScan) {
         // startPos needs to be in center of highway
         if (endPos != null) {
             // Terrain past the end stays unbuilt; scanning it would trigger endless fixes
@@ -5871,6 +5936,9 @@ public class HighwayContext {
             BlockPos curPos = pattern.isCustom()
                     ? startPos.offset(sliceDelta(scanT0, i))
                     : startPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
+            if (front != null && front.passed(curPos, schematic)) {
+                break;
+            }
             CompositeSchematic sliceSchem = schematicForSlice(scanT0 + i);
             for (int y = 0; y < schematic.heightY(); y++) {
                 for (int z = 0; z < schematic.lengthZ(); z++) {
@@ -5878,6 +5946,9 @@ public class HighwayContext {
                         int blockX = x + curPos.getX();
                         int blockY = y + curPos.getY();
                         int blockZ = z + curPos.getZ();
+                        if (front != null && front.excludes(blockX, blockZ)) {
+                            continue;
+                        }
                         BlockState current = playerContext.world().getBlockState(new BlockPos(blockX, blockY, blockZ));
 
                         if (!sliceSchem.inSchematic(x, y, z, current)) {
@@ -5950,7 +6021,7 @@ public class HighwayContext {
         }
         renderLockBuilding.unlock();
 
-        BlockPos liquidGround = findFirstLiquidGround(startPosLiq, distanceToCheck, renderLiquidScan);
+        BlockPos liquidGround = findFirstLiquidGround(startPosLiq, distanceToCheck, front, renderLiquidScan);
         if (liquidGround != null) {
             lastLiquid = liquidGround;
             return HighwayBlockState.Liquids;
@@ -5962,7 +6033,8 @@ public class HighwayContext {
         return HighwayBlockState.Air;
     }
 
-    public BlockPos findFirstLiquidGround(BlockPos startPos, int distanceToCheck, boolean renderCheckedBlocks) {
+    /** @param front where to stop looking ahead of us, or null to scan all {@code distanceToCheck} slices */
+    public BlockPos findFirstLiquidGround(BlockPos startPos, int distanceToCheck, ScanFront front, boolean renderCheckedBlocks) {
         if (endPos != null) {
             distanceToCheck = Math.min(distanceToCheck, stepsAlongHighway(startPos, endPos) + 1);
         }
@@ -5982,12 +6054,18 @@ public class HighwayContext {
             BlockPos curPos = pattern.isCustom()
                     ? startPos.offset(sliceDelta(scanT0, i))
                     : startPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
+            if (front != null && front.passed(curPos, liqCheckSchem)) {
+                break;
+            }
             for (int y = 0; y < liqCheckSchem.heightY(); y++) {
                 for (int z = 0; z < liqCheckSchem.lengthZ(); z++) {
                     for (int x = 0; x < liqCheckSchem.widthX(); x++) {
                         int blockX = x + curPos.getX();
                         int blockY = y + curPos.getY();
                         int blockZ = z + curPos.getZ();
+                        if (front != null && front.excludes(blockX, blockZ)) {
+                            continue;
+                        }
                         BlockState current = playerContext.world().getBlockState(new BlockPos(blockX, blockY, blockZ));
                         if (!liqCheckSchem.inSchematic(x, y, z, current)) {
                             continue;

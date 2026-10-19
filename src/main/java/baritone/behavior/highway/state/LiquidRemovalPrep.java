@@ -37,10 +37,11 @@ public class LiquidRemovalPrep extends State {
         Vec3 direction = new Vec3(context.highwayDirection().getX(), context.highwayDirection().getY(), context.highwayDirection().getZ());
         Vec3 feetPos = new Vec3(context.playerContext().playerFeet().getX(), context.playerContext().playerFeet().getY(), context.playerContext().playerFeet().getZ());
         // Start a bit behind us to clear up our own mess, and scan far enough forward to always
-        // re-find whatever the detection scan flagged - both counted in slices
+        // re-find whatever the detection scan flagged, but no farther than a little past its front
         BlockPos startCheckPos = context.sliceAlongLine(context.liqOriginVector(), feetPos, -HighwayContext.LIQUID_SCAN_BACK_SLICES, LocationType.ShulkerEchestInteraction);
+        HighwayContext.ScanFront front = context.liquidScanFront();
 
-        BlockPos liquidPos = context.findFirstLiquidGround(startCheckPos, context.liquidScanWindowSlices(), false);
+        BlockPos liquidPos = context.findFirstLiquidGround(startCheckPos, HighwayContext.LIQUID_SCAN_BACK_SLICES + front.slicesAhead(), front, false);
 
         if (liquidPos == null) {
             Helper.HELPER.logDebug("findFirstLiquidGround Failed. Going back to state Nothing");
