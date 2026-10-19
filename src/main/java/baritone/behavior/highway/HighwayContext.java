@@ -148,6 +148,8 @@ public class HighwayContext {
     }
 
     private final ArrayList<String> lastMismatches = new ArrayList<>();
+    // where the last isHighwayCorrect that found a liquid found it
+    private BlockPos lastLiquid = null;
 
     public Rotation floatingFixReachablesRemoveFirst() {
         if (!floatingFixReachables.isEmpty()) {
@@ -232,6 +234,18 @@ public class HighwayContext {
     private int travelBestSteps = Integer.MAX_VALUE; // closest we've come to travelTarget, in slices
     private int travelNoProgressTicks = 0;
     private int travelStallCooldown = 0; // ticks to leave the walk alone after one failed to make progress
+    private static final int END_STALL_RESTART_TICKS = 20; // builder restarts while stalled short of the end, at most one this often
+    private static final int END_STALL_REPORT_TICKS = 100; // stalled this long, say what the end check is failing on
+    private static final int END_STALL_RELOG_TICKS = 200; // and this long, reconnect
+    // a longer gap between two idle builders means something else ran meanwhile; Nothing alone can wait 200 ticks for chunks
+    private static final int END_STALL_GAP_TICKS = 300;
+    private static final int END_STALL_MOVE_SQ = 4; // moving further than 2 blocks ends a stall
+    private BetterBlockPos endStallFeet = null; // where we stood when the builder first ran out of work short of the end, null if it hasn't
+    private long endStallSince; // game times of that, of the latest time since, and of the latest builder restart
+    private long endStallLast;
+    private long endStallLastRestart;
+    private boolean endStallReported = false;
+    private BetterBlockPos endStallRelogSpot = null; // where we last reconnected for one, so a rejoin that didn't help can't loop
     private CompositeSchematic schematic;
     /** Per-slice cross-sections for an angled build with rails; null when every slice is the same. */
     private CompositeSchematic[] patternSchematics;
@@ -5220,16 +5234,113 @@ public class HighwayContext {
         if (hop <= 0) {
             return false;
         }
-        travelTarget = laneOnSlice(pattern.isCustom()
+        BetterBlockPos target = laneOnSlice(pattern.isCustom()
                 ? feetSlice.offset(sliceDelta(sliceIndexOf(feetSlice, originVector), hop))
                 : feetSlice.offset(hop * highwayDirection.getX(), 0, hop * highwayDirection.getZ()));
+        int steps = stepsAlongHighway(playerContext.playerFeet(), target);
+        if (steps <= 0) {
+            // On a -X diagonal the slice our feet project onto lies a slice or two behind where we
+            // stand, so a hop that short lands on our own cell or behind it. The walk would arrive
+            // at once and hand straight back to a builder that still has nothing to do.
+            return false;
+        }
+        travelTarget = target;
         travelGoal = new GoalBlock(travelTarget);
-        travelBestSteps = stepsAlongHighway(playerContext.playerFeet(), travelTarget);
+        travelBestSteps = steps;
         travelNoProgressTicks = 0;
         travellingToEnd = true;
         Helper.HELPER.logDirect("Nothing left to build within render distance, walking to " + travelTarget + " to load more of the highway.");
         baritone.getCustomGoalProcess().setGoalAndPath(travelGoal);
         return true;
+    }
+
+    /** What the BuildingHighway state does about a builder that ran out of work, see {@link #endStall} */
+    public enum EndStall {
+        /** restart it, as for any other time it runs out of work */
+        RESTART_BUILDER,
+        /** leave it stopped this tick and go on with the state's other checks */
+        WAIT,
+        /** dealt with: the state changed, or we're reconnecting */
+        HANDLED
+    }
+
+    /**
+     * Called whenever the builder has run out of work and {@link #travelTowardsEnd} has nowhere to
+     * walk. Short of an end that isn't complete, that repeats every few ticks for as long as the end
+     * check and the builder disagree about what's left, which standing there never settles: the end
+     * check also wants every chunk up to the end loaded and no liquid beside the road, and a cell the
+     * client shows wrong stays wrong until the server sends it again. So once it has gone on for a
+     * while this says what the end check is failing on, starts the liquid removal for a liquid, and
+     * otherwise reconnects, once per spot, to load the world afresh.
+     */
+    public EndStall endStall() {
+        if (endPos == null || invalidBlockFixActive()) {
+            clearEndStall();
+            return EndStall.RESTART_BUILDER;
+        }
+        long now = playerContext.world().getGameTime();
+        BetterBlockPos feet = playerContext.playerFeet();
+        if (endStallFeet == null || now - endStallLast > END_STALL_GAP_TICKS || feet.distSqr(endStallFeet) > END_STALL_MOVE_SQ) {
+            endStallFeet = feet;
+            endStallSince = now;
+            endStallLast = now;
+            endStallLastRestart = now;
+            endStallReported = false;
+            return EndStall.RESTART_BUILDER;
+        }
+        endStallLast = now;
+        long stalled = now - endStallSince;
+        if (!endStallReported && stalled >= END_STALL_REPORT_TICKS) {
+            endStallReported = true;
+            EndCheck check = endCheck();
+            BlockPos unloaded = endCheckUnloadedCell(check);
+            HighwayBlockState found = unloaded != null ? null : isHighwayCorrect(check.start(), check.startLiq(), check.slices(), false);
+            String why = unloaded != null ? "the chunk with " + unloaded.toShortString() + " isn't loaded"
+                    : switch (found) {
+                        case Liquids -> BlockUtils.blockToString(playerContext.world().getBlockState(lastLiquid).getBlock()) + " at " + lastLiquid.toShortString();
+                        case Blocks -> "blocks that differ, " + String.join("; ", lastMismatches);
+                        case Boat -> "a boat at " + boatLocation.toShortString();
+                        case Air -> "nothing any more";
+                    };
+            Helper.HELPER.logDirect("The builder has had nothing to do for " + stalled / 20 + " s short of the end at "
+                    + endPos.toShortString() + ", where the end check finds " + why);
+            if (found == HighwayBlockState.Liquids) {
+                Helper.HELPER.logDirect("Removing liquids.");
+                transitionTo(HighwayState.LiquidRemovalPrep);
+                setLiquidPathingCanMine(true);
+                resetTimer();
+                return EndStall.HANDLED;
+            }
+            if (found == HighwayBlockState.Boat) {
+                Helper.HELPER.logDirect("Found a boat, trying to remove blocks around and under it.");
+                transitionTo(HighwayState.BoatRemoval);
+                baritone.getPathingBehavior().cancelEverything();
+                resetTimer();
+                return EndStall.HANDLED;
+            }
+        }
+        if (stalled >= END_STALL_RELOG_TICKS && (endStallRelogSpot == null || feet.distSqr(endStallRelogSpot) > END_STALL_MOVE_SQ)) {
+            endStallRelogSpot = feet;
+            clearEndStall();
+            Component dcMsg = Component.literal("Stuck short of the end of the highway for " + stalled / 20 + " s. Reconnect to load the world afresh");
+            Helper.HELPER.logDirect(dcMsg);
+            baritone.getInputOverrideHandler().clearAllKeys();
+            baritone.getPathingBehavior().cancelEverything();
+            transitionTo(HighwayState.Nothing);
+            playerContext.player().connection.getConnection().disconnect(dcMsg);
+            return EndStall.HANDLED;
+        }
+        // now and then, in case what came in meanwhile gave the builder something
+        if (now - endStallLastRestart >= END_STALL_RESTART_TICKS) {
+            endStallLastRestart = now;
+            return EndStall.RESTART_BUILDER;
+        }
+        return EndStall.WAIT;
+    }
+
+    /** The builder has work again, so whatever it had run out on is settled */
+    public void clearEndStall() {
+        endStallFeet = null;
     }
 
     public void stopTravelTowardsEnd() {
@@ -5264,6 +5375,20 @@ public class HighwayContext {
         if (endPos == null) {
             return false;
         }
+        EndCheck check = endCheck();
+        if (endCheckUnloadedCell(check) != null) {
+            return false;
+        }
+        return isHighwayCorrect(check.start(), check.startLiq(), check.slices(), false) == HighwayBlockState.Air;
+    }
+
+    /**
+     * The stretch {@link #isHighwayEndComplete} checks: from highwayCheckBackDistance slices behind us
+     * to the end, on the build line and on the liquid line
+     */
+    private record EndCheck(BlockPos start, BlockPos startLiq, int slices) {}
+
+    private EndCheck endCheck() {
         Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
         Vec3 curPosPlayer = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
         // feetClosest is clamped to the end: even if we wandered past the end the scan still covers
@@ -5272,12 +5397,16 @@ public class HighwayContext {
         Vec3 feetClosestVec = new Vec3(feetClosest.getX(), feetClosest.getY(), feetClosest.getZ());
         BlockPos startCheckPos = sliceAlongLine(originVector, feetClosestVec, -highwayCheckBackDistance, LocationType.HighwayBuild);
         BlockPos startCheckPosLiq = sliceAlongLine(liqOriginVector, feetClosestVec, -highwayCheckBackDistance, LocationType.ShulkerEchestInteraction);
-        int scanDist = stepsAlongHighway(startCheckPos, endPos) + 1;
-        if (!isStretchLoaded(startCheckPos, originVector, schematic.widthX(), schematic.lengthZ(), scanDist)
-                || !isStretchLoaded(startCheckPosLiq, liqOriginVector, liqCheckSchem.widthX(), liqCheckSchem.lengthZ(), scanDist)) {
-            return false;
-        }
-        return isHighwayCorrect(startCheckPos, startCheckPosLiq, scanDist, false) == HighwayBlockState.Air;
+        return new EndCheck(startCheckPos, startCheckPosLiq, stepsAlongHighway(startCheckPos, endPos) + 1);
+    }
+
+    /**
+     * @return a cell of the end check's stretch in a chunk we haven't got, or null if it's all loaded
+     */
+    private BlockPos endCheckUnloadedCell(EndCheck check) {
+        BlockPos unloaded = firstUnloadedCell(check.start(), originVector, schematic.widthX(), schematic.lengthZ(), 1, check.slices());
+        return unloaded != null ? unloaded
+                : firstUnloadedCell(check.startLiq(), liqOriginVector, liqCheckSchem.widthX(), liqCheckSchem.lengthZ(), 1, check.slices());
     }
 
     /**
@@ -5301,6 +5430,10 @@ public class HighwayContext {
     }
 
     private boolean isStretchLoaded(BlockPos startPos, Vec3 lineOrigin, int widthX, int lengthZ, int firstSlice, int distanceToCheck) {
+        return firstUnloadedCell(startPos, lineOrigin, widthX, lengthZ, firstSlice, distanceToCheck) == null;
+    }
+
+    private BlockPos firstUnloadedCell(BlockPos startPos, Vec3 lineOrigin, int widthX, int lengthZ, int firstSlice, int distanceToCheck) {
         int scanT0 = pattern.isCustom() ? sliceIndexOf(startPos, lineOrigin) : 0;
         for (int i = distanceToCheck - 1; i >= firstSlice; i--) {
             BlockPos curPos = pattern.isCustom()
@@ -5309,12 +5442,12 @@ public class HighwayContext {
             for (int z = 0; z < lengthZ; z++) {
                 for (int x = 0; x < widthX; x++) {
                     if (!baritone.bsi.worldContainsLoadedChunk(x + curPos.getX(), z + curPos.getZ())) {
-                        return false;
+                        return new BlockPos(x + curPos.getX(), curPos.getY(), z + curPos.getZ());
                     }
                 }
             }
         }
-        return true;
+        return null;
     }
 
     private static final int CREEP_FLOOR_LOOKAHEAD = 3;
@@ -5756,6 +5889,7 @@ public class HighwayContext {
                                 if (current.getBlock() instanceof LiquidBlock
                                         && !(ourSchem instanceof WhiteBlackSchematic && ((WhiteBlackSchematic) ourSchem).coversLiquid(current))) {
                                     renderLockBuilding.unlock();
+                                    lastLiquid = new BlockPos(blockX, blockY, blockZ);
                                     return HighwayBlockState.Liquids;
                                 } else {
                                     foundBlocks = true;
@@ -5773,7 +5907,9 @@ public class HighwayContext {
         }
         renderLockBuilding.unlock();
 
-        if (findFirstLiquidGround(startPosLiq, distanceToCheck, renderLiquidScan) != null) {
+        BlockPos liquidGround = findFirstLiquidGround(startPosLiq, distanceToCheck, renderLiquidScan);
+        if (liquidGround != null) {
+            lastLiquid = liquidGround;
             return HighwayBlockState.Liquids;
         }
 

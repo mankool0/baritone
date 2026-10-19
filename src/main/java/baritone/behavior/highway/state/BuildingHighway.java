@@ -47,12 +47,23 @@ public class BuildingHighway extends State {
 
         if (!context.baritone().getBuilderProcess().isActive()) {
             if (!context.travelTowardsEnd()) {
-                Helper.HELPER.logDirect("Restarting builder");
-                context.transitionTo(HighwayState.Nothing);
-                return;
+                switch (context.endStall()) {
+                    case RESTART_BUILDER -> {
+                        Helper.HELPER.logDirect("Restarting builder");
+                        context.transitionTo(HighwayState.Nothing);
+                        return;
+                    }
+                    case HANDLED -> {
+                        return;
+                    }
+                    case WAIT -> {
+                        // the checks below still run with the builder stopped
+                    }
+                }
             }
         } else {
             context.stopTravelTowardsEnd();
+            context.clearEndStall();
         }
 
         if (context.walkBackTimer() > 120 && context.baritone().getPathingControlManager().mostRecentCommand().isPresent()) {
