@@ -2700,10 +2700,12 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         private int originY;
         private int originZ;
         private Long2ObjectMap<CompletedWatch> watched;
+        private final boolean highwayRoad;
 
         public BuilderCalculationContext() {
             super(BuilderProcess.this.baritone, true); // wew lad
             retarget();
+            this.highwayRoad = BuilderProcess.this.baritone.getNetherHighwayBuilderBehavior().isBuildingHighwayState();
 
             this.jumpPenalty += 10;
             this.backtrackCostFavoringCoefficient = 1;
@@ -2743,6 +2745,12 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             if (sch != null) {
                 // TODO this can return true even when allowPlace is off.... is that an issue?
                 if (sch.getBlock() instanceof AirBlock) {
+                    if (highwayRoad) {
+                        // A road has no use for scaffolding, and the builder digs a wrong block out
+                        // of it as soon as it's in reach, cancelling the path to do so. The path
+                        // loses the step it just put down, and the next one plans the same step.
+                        return COST_INF;
+                    }
                     // we want this to be air, but they're asking if they can place here
                     // this won't be a schematic block, this will be a throwaway
                     return placeBlockCost * Baritone.settings().placeIncorrectBlockPenaltyMultiplier.value; // we're going to have to break it eventually
