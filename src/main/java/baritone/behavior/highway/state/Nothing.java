@@ -112,7 +112,10 @@ public class Nothing extends State {
         if (context.settings().printer.value && lookahead > 1 && !nearEnd && !context.pattern().isCustom()) {
             int stepX = context.highwayDirection().getX();
             int stepZ = context.highwayDirection().getZ();
-            LookaheadWindow window = LookaheadWindow.of(context.schematic(), stepX, stepZ, lookahead);
+            // digging has no rails to place, and digs don't care which way the face looks
+            int laneLead = context.paving() && context.settings().highwayRail.value ? LookaheadWindow.PAVING_LANE_LEAD : 0;
+            LookaheadWindow window = LookaheadWindow.of(context.schematic(), stepX, stepZ, lookahead,
+                    laneLead, context.settings().highwayWidth.value);
             buildSchem = window.schematic();
             buildOrigin = buildOrigin.offset(window.originShift());
             // the builder only repeats once the whole region is correct, so advance by the full

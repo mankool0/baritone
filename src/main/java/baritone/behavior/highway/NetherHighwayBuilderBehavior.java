@@ -756,6 +756,11 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     }
 
     @Override
+    public boolean inWalkLane(int x, int z) {
+        return highwayContext.inWalkLane(x, z);
+    }
+
+    @Override
     public boolean needsLateralTraverses() {
         int crossWidth = settings.highwayWidth.value + (settings.highwayRail.value ? 2 : 0);
         return crossWidth > 2 * settings.blockReachDistance.value;

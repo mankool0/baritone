@@ -936,7 +936,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         }
 
         // place pass
-        for (BetterBlockPos pos : candidates) {
+        for (BetterBlockPos pos : printerPlaceOrder(candidates)) {
             if (placesLeft <= 0) {
                 break;
             }
@@ -1007,8 +1007,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     }
 
     /**
-     * Keeps the reason from the attempt that got furthest, and of those the first, which is the
-     * nearest target: that's the one the printer would have placed.
+     * Keeps the reason from the attempt that got furthest, and of those the first in the order the
+     * printer tries them: that's the one it would have placed.
      */
     private void printerNoteIdle(int rank, String reason) {
         if (rank > printerIdleRank) {
@@ -1053,6 +1053,22 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         Set<BetterBlockPos> candidates = new LinkedHashSet<>(toBreakEntity);
         candidates.addAll(incorrectPositions);
         return new ArrayList<>(candidates);
+    }
+
+    /**
+     * Nearest first, but on a highway the cells beside the walk lane before the lane's own. A rail
+     * over open air only goes against the rail before it, from the few blocks past that rail's face,
+     * and the creep doesn't wait for rails. Nearest first, the floor ahead always came first and the
+     * rails fell out of reach behind us, for the builder to path back to.
+     */
+    private List<BetterBlockPos> printerPlaceOrder(List<BetterBlockPos> nearestFirst) {
+        INetherHighwayBuilderBehavior highway = baritone.getNetherHighwayBuilderBehavior();
+        if (!highway.isBuildingHighwayState()) {
+            return nearestFirst;
+        }
+        List<BetterBlockPos> order = new ArrayList<>(nearestFirst);
+        order.sort(Comparator.comparing(pos -> highway.inWalkLane(pos.x, pos.z))); // stable, so still nearest first within each
+        return order;
     }
 
     private BlockState printerDesired(BuilderCalculationContext bcc, BetterBlockPos pos, BlockState curr) {

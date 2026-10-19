@@ -39,7 +39,8 @@ import static org.junit.Assert.assertTrue;
 /**
  * The builder's lookahead windows against the real cross-sections: window n is exactly the road
  * cells from its first slice on, up to the line square to the heading through its last slice's
- * leading corner. On a straight highway that is the whole slices it always was.
+ * leading corner, plus the walk lane for its lane lead's worth of slices past that line. On a
+ * straight highway without a lead that is the whole slices it always was.
  */
 public class LookaheadWindowTest {
 
@@ -56,36 +57,47 @@ public class LookaheadWindowTest {
         for (int width : new int[]{4, 7}) {
             for (boolean pave : new boolean[]{true, false}) {
                 for (int lookahead : new int[]{2, 4, 15}) {
-                    for (int[] dir : DIRECTIONS) {
-                        check(width, pave, lookahead, dir[0], dir[1]);
+                    for (int laneLead : new int[]{0, LookaheadWindow.PAVING_LANE_LEAD}) {
+                        for (int[] dir : DIRECTIONS) {
+                            check(width, pave, lookahead, laneLead, dir[0], dir[1]);
+                        }
                     }
                 }
             }
         }
     }
 
-    private static void check(int width, boolean pave, int lookahead, int stepX, int stepZ) {
+    private static void check(int width, boolean pave, int lookahead, int laneLead, int stepX, int stepZ) {
         BlockState air = Blocks.AIR.defaultBlockState(); // not a static field: Blocks needs the bootstrap first
-        String what = String.format("width %d %s lookahead %d heading %d,%d", width, pave ? "pave" : "dig", lookahead, stepX, stepZ);
+        String what = String.format("width %d %s lookahead %d lane lead %d heading %d,%d",
+                width, pave ? "pave" : "dig", lookahead, laneLead, stepX, stepZ);
         Settings settings = TestSettings.fresh();
         settings.highwayWidth.value = width;
         CompositeSchematic slice = NetherHighwayBuilderBehavior.composeHighwaySchematic(new Vec3i(stepX, 0, stepZ), pave, settings);
-        LookaheadWindow window = LookaheadWindow.of(slice, stepX, stepZ, lookahead);
+        LookaheadWindow window = LookaheadWindow.of(slice, stepX, stepZ, lookahead, laneLead, width);
         boolean straight = stepX == 0 || stepZ == 0;
         if (straight) {
-            assertEquals(what, 0, window.extraSlices());
+            assertEquals(what, laneLead, window.extraSlices());
         }
+        boolean crossZ = slice.lengthZ() >= slice.widthX();
+        int perSlice = stepX * stepX + stepZ * stepZ;
 
         // every road cell from a few slices before the start to past the last window, by slice
         Map<BlockPos, Integer> sliceOf = new HashMap<>();
+        Set<BlockPos> lane = new HashSet<>();
         int lastSlice = (WINDOWS + 1) * lookahead + window.extraSlices() + 2;
         for (int i = -window.extraSlices() - 2; i <= lastSlice; i++) {
             for (int x = 0; x < slice.widthX(); x++) {
                 for (int y = 0; y < slice.heightY(); y++) {
                     for (int z = 0; z < slice.lengthZ(); z++) {
                         if (slice.inSchematic(x, y, z, air)) {
-                            Integer previous = sliceOf.put(new BlockPos(i * stepX + x, y, i * stepZ + z), i);
+                            BlockPos pos = new BlockPos(i * stepX + x, y, i * stepZ + z);
+                            Integer previous = sliceOf.put(pos, i);
                             assertTrue(what + ": two slices share a cell", previous == null);
+                            int column = crossZ ? z : x;
+                            if (column >= 1 && column <= width) {
+                                lane.add(pos);
+                            }
                         }
                     }
                 }
@@ -104,7 +116,9 @@ public class LookaheadWindowTest {
             }
             Set<BlockPos> expected = new HashSet<>();
             for (Map.Entry<BlockPos, Integer> cell : sliceOf.entrySet()) {
-                if (cell.getValue() >= first && along(cell.getKey(), stepX, stepZ) <= front) {
+                int along = along(cell.getKey(), stepX, stepZ);
+                if (cell.getValue() >= first && (along <= front
+                        || along <= front + laneLead * perSlice && lane.contains(cell.getKey()))) {
                     expected.add(cell.getKey());
                 }
             }
@@ -131,7 +145,8 @@ public class LookaheadWindowTest {
             if (straight) {
                 for (BlockPos pos : actual) {
                     int i = sliceOf.get(pos);
-                    assertTrue(what + ": straight window " + n + " isn't whole slices", i >= first && i <= last);
+                    assertTrue(what + ": straight window " + n + " isn't whole slices", i >= first && i <= last
+                            || i <= last + laneLead && lane.contains(pos));
                 }
             }
             covered.addAll(actual);

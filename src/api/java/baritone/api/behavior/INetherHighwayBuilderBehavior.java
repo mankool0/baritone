@@ -41,6 +41,11 @@ public interface INetherHighwayBuilderBehavior extends IBehavior {
      */
     int lateralColumn(int x, int z);
 
+    /**
+     * Whether the given block is in the walk lane rather than one of the rail columns beside it.
+     */
+    boolean inWalkLane(int x, int z);
+
     boolean isHighwayActive();
 
     void build(int startX, int startZ, Vec3i direct, boolean selfSolve, boolean pave);
