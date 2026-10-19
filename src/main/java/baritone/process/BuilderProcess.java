@@ -1870,6 +1870,20 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
 
             return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
         }
+        if (toBreak.isEmpty() && isSafeToCancel && ctx.player().onGround() && !printerAction.acted()) {
+            BetterBlockPos hidden = entityHoleOutOfSight(bcc);
+            if (hidden != null) {
+                // Standing beside the hole is all its goal asks for, so no path will move us from here. But the bottom
+                // of a narrow hole only shows past the rim from the side of our block nearest it. Walk over to the rim,
+                // sneaking so vanilla stops us at the edge instead of letting us drop in after the entity.
+                legitAimTargetLastTick = hidden;
+                Vec3 face = new Vec3(hidden.x + 0.5, hidden.y + 1, hidden.z + 0.5);
+                baritone.getLookBehavior().updateTarget(RotationUtils.calcRotationFromVec3d(ctx.playerHead(), face, ctx.playerRotations()), true);
+                baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
+                baritone.getInputOverrideHandler().setInputForceState(Input.MOVE_FORWARD, true);
+                return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
+            }
+        }
         List<BlockState> desirableOnHotbar = new ArrayList<>();
         Optional<Placement> toPlace = searchForPlacables(bcc, desirableOnHotbar);
         // a printer only waiting on a place limit places next tick; the click here would stop and
@@ -2252,9 +2266,10 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         Entity self = ctx.player().getRootVehicle();
         BlockState air = Blocks.AIR.defaultBlockState();
         // Only as deep as we can dig from up here beside it. Further down, digging it out takes climbing in
-        // after the entity, where the block we're building over it shuts us in.
+        // after the entity, where the block we're building over it shuts us in. Crouched, since we sneak up to the
+        // rim for the bottom of the hole anyway, and the lower eye reaches a layer further down.
         entityHoleDigY = standingY();
-        int lowestLayer = EntityHole.lowestDiggableLayer(entityHoleDigY, ctx.player().getEyeHeight(Pose.STANDING),
+        int lowestLayer = EntityHole.lowestDiggableLayer(entityHoleDigY, ctx.player().getEyeHeight(Pose.CROUCHING),
                 ctx.playerController().getBlockReachDistance());
         // each vehicle once with everything riding it, since they drop together
         List<Entity> roots = ctx.entitiesStream()
@@ -2317,6 +2332,32 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         }
         bcc.entityHoleCells = cells;
         entityHoleColumns = columns;
+    }
+
+    /**
+     * The nearest cell of an entity's hole still to dig with us already beside it ({@link GoalBesideEntityHole}),
+     * or null. Asked only once {@link #toBreakNearPlayer} found nothing it can see, which covers every one of these.
+     */
+    private BetterBlockPos entityHoleOutOfSight(BuilderCalculationContext bcc) {
+        BetterBlockPos feet = ctx.playerFeet();
+        Vec3 pos = ctx.player().position();
+        BetterBlockPos nearest = null;
+        double nearestDistSq = Double.MAX_VALUE;
+        for (BetterBlockPos cell : toBreakEntity) {
+            if (!new GoalBesideEntityHole(cell, entityHoleDigY, entityHoleColumns).isInGoal(feet)) {
+                continue;
+            }
+            if (valid(bcc.bsi.get0(cell), Blocks.AIR.defaultBlockState(), false)) {
+                continue; // toBreakNearPlayer doesn't dig it either, so seeing it changes nothing
+            }
+            double dx = cell.x + 0.5 - pos.x;
+            double dz = cell.z + 0.5 - pos.z;
+            if (dx * dx + dz * dz < nearestDistSq) {
+                nearest = cell;
+                nearestDistSq = dx * dx + dz * dz;
+            }
+        }
+        return nearest;
     }
 
     /** The level we're standing at: our feet, or the block under them mid-jump, so a jump doesn't change it. */

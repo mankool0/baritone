@@ -55,6 +55,7 @@ public class EntityHoleTest {
     private static final double BOAT_HEIGHT = 0.5625;
     private static final double ENDERMAN_HEIGHT = 2.9;
     private static final double EYE_HEIGHT = 1.62;
+    private static final double CROUCHING_EYE_HEIGHT = 1.27;
     private static final double REACH = 4.5;
 
     private final Map<BlockPos, BlockState> blocks = new HashMap<>();
@@ -128,9 +129,9 @@ public class EntityHoleTest {
         return EntityHole.plan(world, box, clearY, refill::contains);
     }
 
-    /** Only what we can dig standing on the floor beside the hole. */
+    /** Only what we can dig from the floor beside the hole, crouched at its rim the way the builder digs its bottom. */
     private List<BlockPos> planFromTheFloor(AABB box, int clearY) {
-        return EntityHole.plan(world, box, clearY, refill::contains, EntityHole.lowestDiggableLayer(FEET, EYE_HEIGHT, REACH));
+        return EntityHole.plan(world, box, clearY, refill::contains, EntityHole.lowestDiggableLayer(FEET, CROUCHING_EYE_HEIGHT, REACH));
     }
 
     private static Set<BlockPos> cells(int... xyz) {
@@ -222,9 +223,10 @@ public class EntityHoleTest {
     }
 
     @Test
-    public void threeLayersDownIsAllWeCanDigFromBeside() {
-        // a fourth layer's top face is past 4.5 blocks from a standing eye
+    public void crouchingDigsALayerDeeperFromBeside() {
+        // a fourth layer's top face is past 4.5 blocks from a standing eye, a fifth one from a crouching eye too
         assertEquals(FEET - 3, EntityHole.lowestDiggableLayer(FEET, EYE_HEIGHT, REACH));
+        assertEquals(FEET - 4, EntityHole.lowestDiggableLayer(FEET, CROUCHING_EYE_HEIGHT, REACH));
     }
 
     @Test
@@ -235,13 +237,22 @@ public class EntityHoleTest {
     }
 
     @Test
-    public void endermanBesideARailGapIsTooDeepToDigFromTheFloor() {
+    public void endermanBesideARailGapIsDugFromTheRim() {
         remove(0, FEET, 0);
         AABB enderman = standing(0.5, FEET, 0.9, PIGMAN_WIDTH, ENDERMAN_HEIGHT);
-        // below the floor and the rail support it needs four layers, the last one only diggable from inside the hole
-        List<BlockPos> hole = plan(enderman, FEET);
+        // below the floor and the rail support it needs four layers, the last one only in reach crouched at the rim
+        List<BlockPos> hole = planFromTheFloor(enderman, FEET);
         assertNotNull(hole);
         assertEquals(FEET - 4, hole.stream().mapToInt(BlockPos::getY).min().getAsInt());
-        assertNull(planFromTheFloor(enderman, FEET));
+        assertEquals(new HashSet<>(plan(enderman, FEET)), new HashSet<>(hole));
+    }
+
+    @Test
+    public void fiveLayersDownIsOutOfReachFromTheFloor() {
+        remove(0, FEET, 0);
+        // anything taller than three blocks sinks a fifth layer below the floor
+        AABB stack = standing(0.5, FEET, 0.9, PIGMAN_WIDTH, 3.5);
+        assertNotNull(plan(stack, FEET));
+        assertNull(planFromTheFloor(stack, FEET));
     }
 }
