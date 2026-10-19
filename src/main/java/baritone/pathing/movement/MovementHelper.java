@@ -851,6 +851,12 @@ public interface MovementHelper extends ActionCosts, Helper {
 
     static PlaceResult attemptToPlaceABlock(MovementState state, IBaritone baritone, BlockPos placeAt, boolean preferDown, boolean wouldSneak) {
         IPlayerContext ctx = baritone.getPlayerContext();
+        if (EntityObstruction.blocksPlacement(ctx, placeAt)) {
+            // the click would never go through, and a fresh path won't plan a placement there while it stays
+            Helper.HELPER.logDebug("Can't place at " + placeAt + ", an entity is in the way");
+            state.setStatus(MovementStatus.UNREACHABLE);
+            return PlaceResult.NO_OPTION;
+        }
         Optional<Rotation> direct = RotationUtils.reachable(ctx, placeAt, wouldSneak); // we assume that if there is a block there, it must be replacable
         boolean found = false;
         if (direct.isPresent()) {

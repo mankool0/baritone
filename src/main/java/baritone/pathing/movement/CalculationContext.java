@@ -20,11 +20,13 @@ package baritone.pathing.movement;
 import baritone.Baritone;
 import baritone.api.IBaritone;
 import baritone.api.pathing.movement.ActionCosts;
+import baritone.api.utils.BetterBlockPos;
 import baritone.cache.WorldData;
 import baritone.pathing.precompute.PrecomputedData;
 import baritone.utils.BlockStateInterface;
 import baritone.utils.ToolSet;
 import baritone.utils.pathing.BetterWorldBorder;
+import it.unimi.dsi.fastutil.longs.LongSet;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
@@ -85,6 +87,7 @@ public class CalculationContext {
     public final boolean allowWalkOnMagmaBlocks;
     public boolean avoidNetherPortals;
     public final BetterWorldBorder worldBorder;
+    private final LongSet entityOccupied;
     // world.dimensionType() goes through a Holder and we were calling it twice per block. per block!
     public final int minY;
     public final int maxY;
@@ -110,13 +113,14 @@ public class CalculationContext {
                 Baritone.settings().allowWaterBucketFall.value && Inventory.isHotbarSlot(baritone.getPlayerContext().player().getInventory().findSlotMatchingItem(STACK_BUCKET_WATER)) && baritone.getPlayerContext().world().dimension() != Level.NETHER,
                 Baritone.settings().allowSprint.value && baritone.getPlayerContext().player().getFoodData().getFoodLevel() > 6,
                 frostWalkerLevel(baritone.getPlayerContext().player()),
-                waterSpeedMultiplier(baritone.getPlayerContext().player())
+                waterSpeedMultiplier(baritone.getPlayerContext().player()),
+                EntityObstruction.occupiedCells(baritone.getPlayerContext())
         );
     }
 
     // everything that needs a player or a world comes in as a parameter so you can build one of these with no game running
     // all the settings get snapshotted in here so nobody can accidentally read them differently
-    protected CalculationContext(IBaritone baritone, boolean forUseOnAnotherThread, Level world, WorldData worldData, BlockStateInterface bsi, ToolSet toolSet, boolean hasThrowaway, boolean hasWaterBucket, boolean canSprint, int frostWalker, float waterSpeedMultiplier) {
+    protected CalculationContext(IBaritone baritone, boolean forUseOnAnotherThread, Level world, WorldData worldData, BlockStateInterface bsi, ToolSet toolSet, boolean hasThrowaway, boolean hasWaterBucket, boolean canSprint, int frostWalker, float waterSpeedMultiplier, LongSet entityOccupied) {
         this.precomputedData = PrecomputedData.forCurrentSettings();
         this.safeForThreadedUse = forUseOnAnotherThread;
         this.baritone = baritone;
@@ -161,6 +165,7 @@ public class CalculationContext {
         // because if some movements are calculated one way and others are calculated another way,
         // then you get a wildly inconsistent path that isn't optimal for either scenario.
         this.worldBorder = bsi.worldBorder;
+        this.entityOccupied = entityOccupied;
     }
 
     private static int frostWalkerLevel(LocalPlayer player) {
@@ -216,7 +221,7 @@ public class CalculationContext {
         if (!hasThrowaway) { // only true if allowPlace is true, see constructor
             return COST_INF;
         }
-        if (isPossiblyProtected(x, y, z)) {
+        if (isPossiblyProtected(x, y, z) || isOccupiedByEntity(x, y, z)) {
             return COST_INF;
         }
         if (!worldBorder.canPlaceAt(x, z)) {
@@ -243,6 +248,13 @@ public class CalculationContext {
 
     public double placeBucketCost() {
         return placeBlockCost; // shrug
+    }
+
+    /**
+     * Whether an entity was in the way of placing a block here when this context was made, see {@link EntityObstruction}
+     */
+    public boolean isOccupiedByEntity(int x, int y, int z) {
+        return entityOccupied.contains(BetterBlockPos.longHash(x, y, z));
     }
 
     public boolean isPossiblyProtected(int x, int y, int z) {
