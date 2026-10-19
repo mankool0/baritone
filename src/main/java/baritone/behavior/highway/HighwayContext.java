@@ -58,6 +58,7 @@ import net.minecraft.world.InteractionResult;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.monster.Shulker;
 import net.minecraft.world.entity.vehicle.boat.AbstractBoat;
@@ -4763,15 +4764,28 @@ public class HighwayContext {
     private final Map<String, Integer> walkGateTally = new LinkedHashMap<>();
     private int walkGateTicks;
     private int walkGateHeld;
+    private int walkGateToEdge;
+    private int walkGateEdgeGiveUps;
 
     /** Records the first condition that stopped the walk-creep holding the key this tick, or null if it held. */
-    public void noteWalkGate(String blocker) {
+    /**
+     * @param toEdge the key is down only to walk out to the edge of the floor, which the gate
+     *               would otherwise have stopped short of
+     */
+    public void noteWalkGate(String blocker, boolean toEdge) {
         walkGateTicks++;
         if (blocker == null) {
             walkGateHeld++;
+            if (toEdge) {
+                walkGateToEdge++;
+            }
         } else {
             walkGateTally.merge(blocker, 1, Integer::sum);
         }
+    }
+
+    public void noteEdgeGiveUp() {
+        walkGateEdgeGiveUps++;
     }
 
     // what each tick did for placing, tallied since the last nhwstatus
@@ -4926,12 +4940,20 @@ public class HighwayContext {
         }
         StringBuilder sb = new StringBuilder(String.format("Walk gate: held %d of %d ticks (%d%%)",
                 walkGateHeld, walkGateTicks, Math.round(100.0 * walkGateHeld / walkGateTicks)));
+        if (walkGateToEdge > 0 || walkGateEdgeGiveUps > 0) {
+            sb.append(String.format(", %d of them out to the edge of the floor for the printer", walkGateToEdge));
+            if (walkGateEdgeGiveUps > 0) {
+                sb.append(String.format(", left to the builder %d times", walkGateEdgeGiveUps));
+            }
+        }
         walkGateTally.entrySet().stream()
                 .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
                 .forEach(e -> sb.append(" | ").append(e.getKey()).append(" x").append(e.getValue()));
         walkGateTally.clear();
         walkGateTicks = 0;
         walkGateHeld = 0;
+        walkGateToEdge = 0;
+        walkGateEdgeGiveUps = 0;
         return sb.toString();
     }
 
@@ -5494,6 +5516,56 @@ public class HighwayContext {
     }
 
     private static final int CREEP_FLOOR_LOOKAHEAD = 3;
+    // past where friction stops the player, for the creep's steering to move it about
+    private static final double EDGE_SLIDE_MARGIN = 0.1;
+
+    /**
+     * Whether what's left of the player's slide, with this tick's step on top when it walks, would
+     * carry its hitbox off the floor anywhere along the way. With a sneak down, vanilla stops the
+     * player at the edge instead (Player.maybeBackOffFromEdge), half out over the gap.
+     */
+    public boolean wouldSlideOffFloor(boolean walking) {
+        LocalPlayer player = playerContext.player();
+        BetterBlockPos feet = playerContext.playerFeet();
+        float friction = playerContext.world().getBlockState(feet.below()).getBlock().getFriction();
+        double moveX = player.getDeltaMovement().x;
+        double moveZ = player.getDeltaMovement().z;
+        if (walking) {
+            // a tick of walking along the yaw, the way LivingEntity.travel accelerates on the ground
+            double step = player.getAttributeValue(Attributes.MOVEMENT_SPEED) * (0.21600002 / (friction * friction * friction)) * 0.98;
+            double yaw = Math.toRadians(player.getYRot());
+            moveX -= Math.sin(yaw) * step;
+            moveZ += Math.cos(yaw) * step;
+        }
+        double speed = Math.sqrt(moveX * moveX + moveZ * moveZ);
+        if (speed < 1.0E-4) {
+            return false;
+        }
+        // every tick friction keeps friction * 0.91 of it, so this is how far it goes in all
+        double slide = speed / (1 - friction * 0.91) + EDGE_SLIDE_MARGIN;
+        int floorY = feet.y - 1;
+        for (double along = Math.min(0.25, slide); ; along = Math.min(along + 0.25, slide)) {
+            AABB box = player.getBoundingBox().move(moveX / speed * along, 0, moveZ / speed * along);
+            if (!overFloor(box, floorY)) {
+                return true;
+            }
+            if (along >= slide) {
+                return false;
+            }
+        }
+    }
+
+    // a hitbox's footprint touches something to stand on, shrunk like vanilla's edge check
+    private boolean overFloor(AABB box, int floorY) {
+        for (int x = Mth.floor(box.minX + 1.0E-7); x <= Mth.floor(box.maxX - 1.0E-7); x++) {
+            for (int z = Mth.floor(box.minZ + 1.0E-7); z <= Mth.floor(box.maxZ - 1.0E-7); z++) {
+                if (MovementHelper.canWalkOn(baritone.bsi, x, floorY, z)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
 
     public boolean canWalkOnFloorAhead() {
         BetterBlockPos feet = playerContext.playerFeet();

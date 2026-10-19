@@ -111,6 +111,17 @@ public final class InputOverrideHandler extends Behavior implements IInputOverri
         blockBreakHelper.tick(isInputForcedDown(Input.CLICK_LEFT) && !suppressed);
         blockPlaceHelper.tick(isInputForcedDown(Input.CLICK_RIGHT) && !suppressed);
 
+        updateMovementInput();
+        // only set it if it was previously incorrect
+        // gotta do it this way, or else it constantly thinks you're beginning a double tap W sprint lol
+    }
+
+    /**
+     * Puts the movement input that reads the forced inputs in place, or the keyboard back. The tick
+     * does this, but a behavior ticking after this one that forces an input has to call it as well:
+     * the player reads its keys later in the same tick, and the keyboard input never sees a forced one.
+     */
+    public void updateMovementInput() {
         if (inControl()) {
             if (ctx.player().input.getClass() != PlayerMovementInput.class) {
                 swapInput(new PlayerMovementInput(this));
@@ -120,8 +131,6 @@ public final class InputOverrideHandler extends Behavior implements IInputOverri
                 swapInput(new KeyboardInput(ctx.minecraft().options));
             }
         }
-        // only set it if it was previously incorrect
-        // gotta do it this way, or else it constantly thinks you're beginning a double tap W sprint lol
     }
 
     /**

@@ -2326,6 +2326,15 @@ public final class Settings {
     public final Setting<Integer> printerNoRotateRetryTicks = new Setting<>(600);
 
     /**
+     * Let the printer place a block that has nothing it can be placed against from where the bot
+     * stands, by clicking the empty space itself ("air placing"). A road then goes out over open air
+     * without the bot having to stand at the edge of what's built for every block. Vanilla servers
+     * take these, but anticheats refuse them: Grim's AirLiquidPlace cancels every one. Only used by
+     * {@link #printerNoRotate}.
+     */
+    public final Setting<Boolean> printerAirPlace = new Setting<>(true);
+
+    /**
      * A map of lowercase setting field names to their respective setting
      */
     public final Map<String, Setting<?>> byLowerName;

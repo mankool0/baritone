@@ -73,6 +73,18 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
     private boolean walkKeyHeld = false;
 
+    private static final String FRONT_TOO_CLOSE = "front too close";
+    private static final String NO_FLOOR_AHEAD = "no floor ahead";
+    /** Ticks pressed against an edge with nothing placed before the creep lets go of it */
+    private static final int EDGE_STILL_TICKS = 20;
+    /** Ticks it then leaves the builder to deal with whatever the printer couldn't place */
+    private static final int EDGE_GIVE_UP_TICKS = 40;
+    // a sneak this behavior put down to keep the creep from walking off the edge of the floor
+    private boolean edgeSneakHeld = false;
+    private int edgeStillTicks;
+    private int edgeGiveUpTicks;
+    private Vec3 edgeLastPos;
+
     /** Dimension the build was started in; a mismatch means a portal teleported us away. */
     private ResourceKey<Level> startDimension = null;
     private boolean wrongDimension = false;
@@ -318,6 +330,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         highwayContext.stopTravelTowardsEnd();
         highwayContext.transitionTo(HighwayState.Nothing); // onExit: whatever the state we interrupt holds
         setWalkForward(false);
+        edgeStillTicks = 0;
+        edgeGiveUpTicks = 0;
+        edgeLastPos = null;
         baritone.getInputOverrideHandler().clearAllKeys();
         baritone.getPathingBehavior().cancelEverything();
         highwayContext.setFirstStartingPos(null); // a stale start or end clamps every projection the next build makes
@@ -586,6 +601,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     public void onTick(TickEvent event) {
         if (highwayContext.paused() || highwayContext.schematic() == null || ctx.player() == null || ctx.player().getInventory().isEmpty() || event.getType() == TickEvent.Type.OUT) {
             setWalkForward(false); // never leave the walk key latched while the state machine isn't driving
+            if (ctx.player() != null && event.getType() != TickEvent.Type.OUT) {
+                updateEdgeSneak(false, false); // stopped at the edge, the bot still slides
+            }
             setbacks.skipTick(event.getType() == TickEvent.Type.OUT);
             return;
         }
@@ -606,6 +624,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     baritone.getPathingBehavior().cancelEverything();
                 }
                 setWalkForward(false);
+                updateEdgeSneak(false, false);
                 portalReturn.tick(startDimension);
                 return;
             }
@@ -641,11 +660,13 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         boolean pauseStateMachine = !escaping && (highwayContext.rescueOffhandEnderChests() || highwayContext.autoTotem() || highwayContext.clearCursorItem());
         if (highwayContext.stuckCheck() || highwayContext.healthCheck() || pauseStateMachine) {
             setWalkForward(false);
+            updateEdgeSneak(false, false);
             return;
         }
 
         // Handle distance to keep from end of highway
         boolean walk = false;
+        boolean mayEdgeSneak = false;
         if (settings.highwayEndDistance.value != -1 && highwayContext.currentState().getState() == HighwayState.BuildingHighway) {
             boolean pathing = baritone.getPathingBehavior().isPathing();
             BlockPos builderAim = baritone.getBuilderProcess().stationaryAimTarget();
@@ -657,67 +678,142 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             }
             // both sides of these comparisons are blocks along the highway, including creepMaxOvershoot
             int frontDistance = highwayContext.getHighwayFrontDistance();
-            // a dispatched repair needs to path to a block behind us; creeping forward (and
-            // steering back to the lane center) would drag the bot off that path every tick
-            // Same conditions in the same order as before, evaluated one at a time so nhwstatus can
-            // say which one is actually holding the key down
-            String walkBlocker = null;
-            if (highwayContext.invalidBlockFixActive()) {
-                walkBlocker = "invalid-block repair";
-            } else if (frontDistance < settings.highwayEndDistance.value) {
-                walkBlocker = "front too close";
-            } else if (frontDistance >= settings.highwayEndDistance.value + highwayContext.creepMaxOvershoot()) {
-                // only creep while the build front is right in front of us
-                walkBlocker = "front too far";
-            } else if (!highwayContext.canWalkOnFloorAhead()) {
-                walkBlocker = "no floor ahead";
-            } else if (!highwayContext.canWalkThroughAhead()) {
-                // a solid at body height on an all-correct stretch is schematic-valid (the
-                // ledge of a paved section, the wall of a pocket in the floor) and will never
-                // be dug; the creep can't jump it, so release and let the builder path instead
-                walkBlocker = "blocked at body height ahead";
-            } else if (!highwayContext.noPortalAhead()) {
-                // never creep into a lit portal waiting for its frame to be mined
-                walkBlocker = "portal ahead";
-            } else if (baritone.getInventoryPauserProcess().calmPausePending()) {
-                // release the key while an inventory move waits for a tick without movement input
-                walkBlocker = "inventory pause";
-            } else if (pathing) {
-                // while a segment executes the path executor owns the movement keys; forcing
-                // the walk key under it would shove the player off the moves it planned
-                walkBlocker = "pathing";
-            } else if (baritone.getBuilderProcess().isBreakingInPlace()) {
-                // a dig that spans ticks only finishes if the crosshair holds on the block: walking
-                // slides the hit result onto a neighbour and vanilla restarts the progress there
-                walkBlocker = "breaking in place";
-            } else if (builderAim != null && builderAim.getY() >= ctx.playerFeet().y
-                    && !highwayContext.inWalkLane(builderAim.getX(), builderAim.getZ())) {
-                // A rail column is outside the lane the front scan watches, so nothing above knows
-                // the builder is working on one. The walk key runs along the aim yaw, which points
-                // at the rail, so it walks the bot into the rail it's trying to clear and slides it
-                // along the face until the block it was aiming at isn't in the crosshair any more.
-                // Only from our own feet up: nothing lower than that is in the way of a walk, and
-                // a support column offset out under the rails is dug from the lane all day.
-                walkBlocker = "interacting off the lane";
-            } else if (builderAim != null && baritone.getInputOverrideHandler().isInputForcedDown(Input.SNEAK)) {
-                // a stationary sneak-placement needs stillness in either mode. The key is read a
-                // tick late like the aim is, which is right: the builder clears every forced input
-                // at the top of its own tick, so what's still down is what it set on the last one
-                walkBlocker = "sneak placement";
-            } else if (builderAim != null && !highwayContext.paving() && !aimAlongHighway(builderAim)) {
-                walkBlocker = "aim off the highway";
+            String walkBlocker = creepBlocker(frontDistance, pathing, builderAim, false);
+            // read every tick, so a tick the builder didn't run never counts
+            boolean printerOutOfReach = baritone.getBuilderProcess().consumePrinterOutOfReach();
+            boolean toEdge = false;
+            if ((walkBlocker == FRONT_TOO_CLOSE || walkBlocker == NO_FLOOR_AHEAD) && highwayContext.paving()
+                    && printerOutOfReach && edgeGiveUpTicks == 0 && ctx.player().onGround()) {
+                // Out over open air the next block of floor only goes against the face of the last
+                // one that looks along the road, and the server only takes a click on that face from
+                // a player standing past it. The creep stopped short of it, so the builder pathed
+                // over and bridged every block itself. Walk on instead, with a sneak down where the
+                // floor runs out: vanilla stops the player at the edge, half out over the gap with
+                // that face turned towards it. The rest of the gate still has its say.
+                toEdge = creepBlocker(frontDistance, pathing, builderAim, true) == null;
             }
-            walk = walkBlocker == null;
-            highwayContext.noteWalkGate(walkBlocker);
+            noteEdgeProgress(toEdge);
+            walk = walkBlocker == null || toEdge;
+            highwayContext.noteWalkGate(walk ? null : walkBlocker, toEdge);
             if (walk) {
                 // the key walks along the player's yaw, so point it down the highway every tick we
                 // hold it; without this it walks wherever the last rotation left the camera
                 highwayContext.faceHighwayDirection();
             }
+            mayEdgeSneak = highwayContext.paving() && !pathing;
         }
         setWalkForward(walk);
+        updateEdgeSneak(walk, mayEdgeSneak);
 
         highwayContext.handle();
+    }
+
+    /**
+     * What holds the walk creep's key up this tick, or null if nothing does. Same conditions in the
+     * same order as ever, evaluated one at a time so nhwstatus can say which one is actually
+     * holding the key down.
+     *
+     * @param toEdge leave out the two that keep it short of the front and of the edge of the floor
+     */
+    private String creepBlocker(int frontDistance, boolean pathing, BlockPos builderAim, boolean toEdge) {
+        // a dispatched repair needs to path to a block behind us; creeping forward (and
+        // steering back to the lane center) would drag the bot off that path every tick
+        if (highwayContext.invalidBlockFixActive()) {
+            return "invalid-block repair";
+        } else if (!toEdge && frontDistance < settings.highwayEndDistance.value) {
+            return FRONT_TOO_CLOSE;
+        } else if (frontDistance >= settings.highwayEndDistance.value + highwayContext.creepMaxOvershoot()) {
+            // only creep while the build front is right in front of us
+            return "front too far";
+        } else if (!toEdge && !highwayContext.canWalkOnFloorAhead()) {
+            return NO_FLOOR_AHEAD;
+        } else if (!highwayContext.canWalkThroughAhead()) {
+            // a solid at body height on an all-correct stretch is schematic-valid (the
+            // ledge of a paved section, the wall of a pocket in the floor) and will never
+            // be dug; the creep can't jump it, so release and let the builder path instead
+            return "blocked at body height ahead";
+        } else if (!highwayContext.noPortalAhead()) {
+            // never creep into a lit portal waiting for its frame to be mined
+            return "portal ahead";
+        } else if (baritone.getInventoryPauserProcess().calmPausePending()) {
+            // release the key while an inventory move waits for a tick without movement input
+            return "inventory pause";
+        } else if (pathing) {
+            // while a segment executes the path executor owns the movement keys; forcing
+            // the walk key under it would shove the player off the moves it planned
+            return "pathing";
+        } else if (baritone.getBuilderProcess().isBreakingInPlace()) {
+            // a dig that spans ticks only finishes if the crosshair holds on the block: walking
+            // slides the hit result onto a neighbour and vanilla restarts the progress there
+            return "breaking in place";
+        } else if (builderAim != null && builderAim.getY() >= ctx.playerFeet().y
+                && !highwayContext.inWalkLane(builderAim.getX(), builderAim.getZ())) {
+            // A rail column is outside the lane the front scan watches, so nothing above knows
+            // the builder is working on one. The walk key runs along the aim yaw, which points
+            // at the rail, so it walks the bot into the rail it's trying to clear and slides it
+            // along the face until the block it was aiming at isn't in the crosshair any more.
+            // Only from our own feet up: nothing lower than that is in the way of a walk, and
+            // a support column offset out under the rails is dug from the lane all day.
+            return "interacting off the lane";
+        } else if (builderAim != null && baritone.getInputOverrideHandler().isInputForcedDown(Input.SNEAK)) {
+            // a stationary sneak-placement needs stillness in either mode. The key is read a
+            // tick late like the aim is, which is right: the builder clears every forced input
+            // at the top of its own tick, so what's still down is what it set on the last one
+            return "sneak placement";
+        } else if (builderAim != null && !highwayContext.paving() && !aimAlongHighway(builderAim)) {
+            return "aim off the highway";
+        }
+        return null;
+    }
+
+    /**
+     * Counts the ticks the creep walks out to the edge without getting anywhere. Pressed against the
+     * edge with the printer still idle, whatever it can't place isn't the next block of floor, so
+     * the creep lets go for a while and leaves it to the builder.
+     */
+    private void noteEdgeProgress(boolean toEdge) {
+        if (edgeGiveUpTicks > 0) {
+            edgeGiveUpTicks--;
+        }
+        Vec3 pos = ctx.player().position();
+        if (toEdge && edgeLastPos != null && pos.distanceToSqr(edgeLastPos) < 1.0E-4) {
+            if (++edgeStillTicks >= EDGE_STILL_TICKS) {
+                edgeStillTicks = 0;
+                edgeGiveUpTicks = EDGE_GIVE_UP_TICKS;
+                highwayContext.noteEdgeGiveUp();
+            }
+        } else {
+            edgeStillTicks = 0;
+        }
+        edgeLastPos = pos;
+    }
+
+    /**
+     * Holds a sneak down while the rest of the player's slide would carry it off the edge of the
+     * floor, so that vanilla stops it at the edge instead. Vanilla does that on the very tick the
+     * sneak goes down, so the sneak only goes down on the tick a step would go over, and the creep
+     * walks at full speed until then.
+     *
+     * @param walking whether the walk key is down this tick
+     * @param start   whether a sneak may go down this tick, rather than only stay down: on the walk
+     *                creep's own ticks, never under anything else's movement
+     */
+    private void updateEdgeSneak(boolean walking, boolean start) {
+        boolean pathing = baritone.getPathingBehavior().isPathing();
+        boolean sneak = (start || edgeSneakHeld) && !pathing && ctx.player().onGround()
+                && highwayContext.wouldSlideOffFloor(walking);
+        if (sneak) {
+            edgeSneakHeld = true;
+            baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
+            // the input handler already picked this tick's movement input, and only the one it
+            // swaps in for forced inputs reads a forced sneak
+            baritone.getInputOverrideHandler().updateMovementInput();
+        } else if (edgeSneakHeld) {
+            edgeSneakHeld = false;
+            if (!pathing && baritone.getBuilderProcess().stationaryAimTarget() == null) {
+                baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, false); // otherwise it's theirs now
+            }
+        }
     }
 
     /**
@@ -768,7 +864,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
     @Override
     public void onPlayerSprintState(SprintStateEvent event) {
-        if (walkKeyHeld && settings.highwaySprint.value && !baritone.getPathingBehavior().isPathing()) {
+        // a sneak stops a sprint anyway, and asking for one under it would only fight it
+        if (walkKeyHeld && settings.highwaySprint.value && !baritone.getPathingBehavior().isPathing() && !edgeSneakHeld) {
             event.setState(true);
         }
     }

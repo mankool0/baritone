@@ -255,6 +255,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private int printerMultiPlaceSeen = 1;
     // the furthest a placement got on this tick's fire before it stopped; the reason kept is that one's
     private int printerIdleRank;
+    // the builder's last tick left the printer idle only for want of a face to click from here
+    private boolean printerOutOfReach;
     private String printerPlaceFailure;
     // what last kept restockHotbarEarly from moving, so a hotbar that ran dry anyway says why; null once one went through
     private String restockEarlyBlocker;
@@ -415,6 +417,17 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         printerRevertsSinceReport = 0;
         printerUnhandledSinceReport = PendingPlaces.Unanswered.NONE;
         return report;
+    }
+
+    /**
+     * Whether the printer, on the builder's last tick, had places to spare and work in reach, but
+     * nothing next to any of it that the server takes a click on from where we stand. False if the
+     * builder hasn't ticked since this was last asked.
+     */
+    public boolean consumePrinterOutOfReach() {
+        boolean outOfReach = printerOutOfReach;
+        printerOutOfReach = false;
+        return outOfReach;
     }
 
     @Override
@@ -863,7 +876,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                 breaksLeft -= spent;
                 continue;
             }
-            int usedSlot = placesLeft > 0 ? printerTryPlace(bcc, bhr, clicked, rot, placed ? placeSlot : -1) : -1;
+            int usedSlot = placesLeft > 0 ? printerTryPlace(bcc, bhr, clicked, rot, placed ? placeSlot : -1, false) : -1;
             if (usedSlot >= 0) {
                 placed = true;
                 placeSlot = usedSlot;
@@ -947,32 +960,59 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                 continue; // needs breaking, not placing
             }
             printerNoteIdle(PRINTER_IDLE_NO_FACE, "no face to click within reach");
+            int usedSlot = -1;
             for (Direction d : Direction.values()) { // DOWN first: click the UP face of the support below
                 BetterBlockPos neighbor = pos.relative(d);
                 if (!MovementHelper.canPlaceAgainst(bcc.bsi, neighbor)) {
                     continue;
                 }
-                Direction face = d.getOpposite();
-                if (!printerPlaceReaches(neighbor, face, feet, reachSq) || !printerPlaceReaches(neighbor, face, predictedFeet, reachSq)) {
-                    continue;
-                }
-                Vec3 hitVec = VecUtils.getBlockPosCenter(neighbor)
-                        .add(face.getStepX() * 0.5, face.getStepY() * 0.5, face.getStepZ() * 0.5);
-                // plain BlockPos on purpose: the hit result flows into vanilla world mutation, and
-                // BetterBlockPos's different hashCode must not leak into the block entity map
-                BlockHitResult bhr = new BlockHitResult(hitVec, face, new BlockPos(neighbor.x, neighbor.y, neighbor.z), false);
-                int usedSlot = printerTryPlace(bcc, bhr, neighbor, rot, placed ? placeSlot : -1);
+                usedSlot = printerTryPlaceFrom(bcc, neighbor, d.getOpposite(), false, feet, predictedFeet, reachSq, rot, placed ? placeSlot : -1);
                 if (usedSlot >= 0) {
-                    placed = true;
-                    placeSlot = usedSlot;
-                    placesLeft--;
-                    printerNoteNoRotatePlace(pos);
-                    break; // next candidate
+                    break;
                 }
-                printerNoteIdle(PRINTER_IDLE_TRIED, printerPlaceFailure);
+            }
+            if (usedSlot < 0 && Baritone.settings().printerAirPlace.value) {
+                // nothing next to it the server takes a click on from here, so click the cell itself
+                for (Direction face : Direction.values()) {
+                    usedSlot = printerTryPlaceFrom(bcc, pos, face, true, feet, predictedFeet, reachSq, rot, placed ? placeSlot : -1);
+                    if (usedSlot >= 0) {
+                        break;
+                    }
+                }
+            }
+            if (usedSlot >= 0) {
+                placed = true;
+                placeSlot = usedSlot;
+                placesLeft--;
+                printerNoteNoRotatePlace(pos);
             }
         }
         return printerFinish(placed, broke);
+    }
+
+    /**
+     * A no-rotation place by a click on {@code face} of {@code clicked}, if the server takes it from
+     * where we are.
+     *
+     * @param air {@code clicked} is the empty cell to place in, rather than the block to place
+     *            against
+     * @return the hotbar slot used, or -1 if nothing was placed
+     */
+    private int printerTryPlaceFrom(BuilderCalculationContext bcc, BetterBlockPos clicked, Direction face, boolean air,
+                                    Vec3 feet, Vec3 predictedFeet, double reachSq, Rotation rot, int requiredSlot) {
+        if (!printerPlaceReaches(clicked, face, feet, reachSq) || !printerPlaceReaches(clicked, face, predictedFeet, reachSq)) {
+            return -1;
+        }
+        Vec3 hitVec = VecUtils.getBlockPosCenter(clicked)
+                .add(face.getStepX() * 0.5, face.getStepY() * 0.5, face.getStepZ() * 0.5);
+        // plain BlockPos on purpose: the hit result flows into vanilla world mutation, and
+        // BetterBlockPos's different hashCode must not leak into the block entity map
+        BlockHitResult bhr = new BlockHitResult(hitVec, face, new BlockPos(clicked.x, clicked.y, clicked.z), false);
+        int usedSlot = printerTryPlace(bcc, bhr, clicked, rot, requiredSlot, air);
+        if (usedSlot < 0) {
+            printerNoteIdle(PRINTER_IDLE_TRIED, printerPlaceFailure);
+        }
+        return usedSlot;
     }
 
     /**
@@ -1155,10 +1195,12 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     /**
      * @param requiredSlot if >= 0, only place when this hotbar slot works: changing the selected
      *                     slot after a use packet within the same tick is not vanilla-plausible
+     * @param air          the click is on the empty cell to place in, not on a block next to it
      * @return the hotbar slot used, or -1 if nothing was placed
      */
-    private int printerTryPlace(BuilderCalculationContext bcc, BlockHitResult bhr, BetterBlockPos clicked, Rotation rot, int requiredSlot) {
-        BetterBlockPos placeAt = BetterBlockPos.from(clicked.relative(bhr.getDirection()));
+    private int printerTryPlace(BuilderCalculationContext bcc, BlockHitResult bhr, BetterBlockPos clicked, Rotation rot, int requiredSlot, boolean air) {
+        // a click on a cell that can be replaced places in it, like on tall grass
+        BetterBlockPos placeAt = air ? clicked : BetterBlockPos.from(clicked.relative(bhr.getDirection()));
         if (!incorrectPositions.contains(placeAt)) {
             return printerPlaceFailed("not a target");
         }
@@ -1169,7 +1211,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         if (pathAheadNeedsClear(placeAt)) {
             return printerPlaceFailed("the path needs it clear");
         }
-        if (!MovementHelper.canPlaceAgainst(bcc.bsi, clicked) || printerAvoidClicking(bcc.bsi.get0(clicked))) {
+        if (!air && (!MovementHelper.canPlaceAgainst(bcc.bsi, clicked) || printerAvoidClicking(bcc.bsi.get0(clicked)))) {
             return printerPlaceFailed("can't click what it's against");
         }
         BlockState curr = bcc.bsi.get0(placeAt);
@@ -1715,6 +1757,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         }
         printerReported = false;
         printerIdleReason = printerAction.placed() ? null : !printerReady ? printerUnusable : placeHold != null ? placeHold : printerIdleReason;
+        printerOutOfReach = printerReady && !printerAction.acted() && placeHold == null && printerIdleRank == PRINTER_IDLE_NO_FACE;
         if (!toBreak.isEmpty() && printerAction.placed() && !printerAction.broke()) {
             printerBreakStarvation++;
         } else {
