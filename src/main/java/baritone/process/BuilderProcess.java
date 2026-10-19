@@ -65,6 +65,7 @@ import net.minecraft.util.Tuple;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.vehicle.boat.AbstractBoat;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
@@ -771,6 +772,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         double reachSq = reach * reach;
         Vec3 eye = ctx.player().getEyePosition(1.0f);
         Vec3 predictedEye = eye.add(ctx.player().getDeltaMovement());
+        Vec3 feet = ctx.player().position();
+        Vec3 predictedFeet = feet.add(ctx.player().getDeltaMovement());
         // only used to predict getStateForPlacement orientation for directional blocks
         Rotation rot = baritone.getLookBehavior().getServerRotation().orElse(ctx.playerRotations());
         int breaksLeft = printerBreakCooldown <= 0 ? Math.max(1, Baritone.settings().multiBreak.value) : 0;
@@ -823,11 +826,11 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                     continue;
                 }
                 Direction face = d.getOpposite();
-                Vec3 hitVec = VecUtils.getBlockPosCenter(neighbor)
-                        .add(face.getStepX() * 0.5, face.getStepY() * 0.5, face.getStepZ() * 0.5);
-                if (eye.distanceToSqr(hitVec) > reachSq || predictedEye.distanceToSqr(hitVec) > reachSq) {
+                if (!printerPlaceReaches(neighbor, face, feet, reachSq) || !printerPlaceReaches(neighbor, face, predictedFeet, reachSq)) {
                     continue;
                 }
+                Vec3 hitVec = VecUtils.getBlockPosCenter(neighbor)
+                        .add(face.getStepX() * 0.5, face.getStepY() * 0.5, face.getStepZ() * 0.5);
                 // plain BlockPos on purpose: the hit result flows into vanilla world mutation, and
                 // BetterBlockPos's different hashCode must not leak into the block entity map
                 BlockHitResult bhr = new BlockHitResult(hitVec, face, new BlockPos(neighbor.x, neighbor.y, neighbor.z), false);
@@ -842,6 +845,32 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             }
         }
         return printerFinish(placed, broke);
+    }
+
+    /**
+     * Whether the server takes a no-rotation place against {@code face} of {@code clicked} from a
+     * player standing at {@code feet}. Grim's FarPlace measures to the closest point of the clicked
+     * block from every eye height the player could have, crouching included, whatever its pose. That
+     * is the reach the stationary place path gets by crouching for real, so measuring the face centre
+     * from the standing eye left a ring of cells just past the printer that the stationary path
+     * stopped and crouched for every time the printer ran out of work in reach. Grim's PositionPlace
+     * also wants the clicked face turned towards those eyes, and measured to the block rather than
+     * the face, a face on its far side would pass the reach check as easily as a near one.
+     */
+    private boolean printerPlaceReaches(BetterBlockPos clicked, Direction face, Vec3 feet, double reachSq) {
+        double standingEye = feet.y + ctx.player().getEyeHeight(Pose.STANDING);
+        double crouchingEye = feet.y + ctx.player().getEyeHeight(Pose.CROUCHING);
+        boolean facing = switch (face) {
+            case UP -> standingEye >= clicked.y + 1;
+            case DOWN -> crouchingEye <= clicked.y;
+            case EAST -> feet.x >= clicked.x + 1;
+            case WEST -> feet.x <= clicked.x;
+            case SOUTH -> feet.z >= clicked.z + 1;
+            case NORTH -> feet.z <= clicked.z;
+        };
+        AABB box = new AABB(clicked.x, clicked.y, clicked.z, clicked.x + 1, clicked.y + 1, clicked.z + 1);
+        return facing && (box.distanceToSqr(new Vec3(feet.x, standingEye, feet.z)) <= reachSq
+                || box.distanceToSqr(new Vec3(feet.x, crouchingEye, feet.z)) <= reachSq);
     }
 
     private void printerNoteNoRotatePlace(BetterBlockPos target) {
