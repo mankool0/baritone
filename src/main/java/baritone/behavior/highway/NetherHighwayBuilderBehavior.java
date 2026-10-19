@@ -547,6 +547,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
      * watched can be gone over from the log. Reading them resets them.
      */
     private void printBuildSummary() {
+        if (!Baritone.settings().highwayLogBuildSummary.value) {
+            return; // left for nhwstatus
+        }
         if (!highwayContext.printerTallied()) {
             return; // a second stop right after the first
         }

@@ -1973,6 +1973,12 @@ public final class Settings {
     public final Setting<Boolean> highwayRenderBuildingArea = new Setting<>(false);
 
     /**
+     * When the highway builder stops, log what nhwstatus would print about the stretch since the
+     * last one: the walk gate, printer, packet and set-back tallies. Logging them resets them.
+     */
+    public final Setting<Boolean> highwayLogBuildSummary = new Setting<>(false);
+
+    /**
      * The maximum distance Baritone should go back when looking for a lost shulker
      */
     public final Setting<Integer> highwayMaxLostShulkerSearchDist = new Setting<>(256);
