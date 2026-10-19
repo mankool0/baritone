@@ -53,10 +53,17 @@ public class CompositeSchematic extends AbstractSchematic {
      * {@code (copies - 1) * step} on that axis to keep the first copy where it was.
      */
     public CompositeSchematic repeated(int stepX, int stepY, int stepZ, int copies) {
+        return repeatedInto(new CompositeSchematic(0, 0, 0), stepX, stepY, stepZ, copies);
+    }
+
+    /**
+     * {@link #repeated} into an empty composite the caller made, so a subclass can decide which of
+     * the copied cells count as part of it.
+     */
+    public <T extends CompositeSchematic> T repeatedInto(T repeated, int stepX, int stepY, int stepZ, int copies) {
         int shiftX = stepX < 0 ? -(copies - 1) * stepX : 0;
         int shiftY = stepY < 0 ? -(copies - 1) * stepY : 0;
         int shiftZ = stepZ < 0 ? -(copies - 1) * stepZ : 0;
-        CompositeSchematic repeated = new CompositeSchematic(0, 0, 0);
         for (int k = 0; k < copies; k++) {
             for (CompositeSchematicEntry entry : schematics) {
                 repeated.put(entry.schematic, entry.x + k * stepX + shiftX, entry.y + k * stepY + shiftY, entry.z + k * stepZ + shiftZ);

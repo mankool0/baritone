@@ -5139,8 +5139,12 @@ public class HighwayContext {
                 return false;
             }
         } else {
-            // Blocks we'll be standing on after stepping forward
-            for (int d = 1; d <= lookahead; d++) {
+            // Blocks we'll be standing on after stepping forward, as many steps as fit in the
+            // lookahead's blocks of travel. A diagonal step is sqrt(2) blocks, so counting steps
+            // asked for floor 4.2 blocks ahead, past what the printer places from where the walk
+            // stops, and the creep could only wait for the builder's stationary fallback.
+            int steps = Math.max(1, (int) (lookahead / stepLength()));
+            for (int d = 1; d <= steps; d++) {
                 if (!MovementHelper.canWalkOn(baritone.bsi, feet.x + d * dirX, floorY, feet.z + d * dirZ)) {
                     return false;
                 }
