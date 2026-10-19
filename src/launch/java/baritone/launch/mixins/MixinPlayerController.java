@@ -131,7 +131,7 @@ public abstract class MixinPlayerController implements IPlayerControllerMP {
             int sequence = ((IClientLevel) level).getPredictionHandler().currentSequence();
             // unchanged when the click was refused before anything went out
             if (sequence != useSequenceBefore) {
-                ((IClientLevel) level).getPendingPlaces().onUse(useSlot, sequence, useStack, useCount);
+                ((IClientLevel) level).getPendingPlaces().onUse(useSlot, sequence, useStack, useCount, result.getBlockPos().relative(result.getDirection()), player.tickCount);
             }
         }
         useSlot = -1;

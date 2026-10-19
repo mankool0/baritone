@@ -35,6 +35,7 @@ import baritone.selection.SelectionManager;
 import baritone.utils.BlockStateInterface;
 import baritone.utils.GuiClick;
 import baritone.utils.InputOverrideHandler;
+import baritone.utils.PacketTrace;
 import baritone.utils.PathingControlManager;
 import baritone.utils.ServerDigSpeed;
 import baritone.utils.ServerDigTarget;
@@ -106,6 +107,7 @@ public class Baritone implements IBaritone {
     private final IPlayerContext playerContext;
     private final ServerDigSpeed serverDigSpeed;
     private final ServerDigTarget serverDigTarget;
+    private final PacketTrace packetTrace;
     private final WorldProvider worldProvider;
 
     public BlockStateInterface bsi;
@@ -123,6 +125,9 @@ public class Baritone implements IBaritone {
 
         // Define this before behaviors try and get it, or else it will be null and the builds will fail!
         this.playerContext = new BaritonePlayerContext(this, mc);
+        // first, so a tick's packets are counted from the start of its tick event
+        this.packetTrace = new PacketTrace(this.playerContext);
+        this.gameEventHandler.registerEventListener(this.packetTrace);
         this.serverDigSpeed = new ServerDigSpeed(this.playerContext);
         this.gameEventHandler.registerEventListener(this.serverDigSpeed);
         this.serverDigTarget = new ServerDigTarget(this.playerContext);
@@ -188,6 +193,10 @@ public class Baritone implements IBaritone {
 
     public ServerDigTarget getServerDigTarget() {
         return this.serverDigTarget;
+    }
+
+    public PacketTrace getPacketTrace() {
+        return this.packetTrace;
     }
 
     @Override

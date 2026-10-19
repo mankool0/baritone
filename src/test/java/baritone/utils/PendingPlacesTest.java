@@ -18,6 +18,7 @@
 package baritone.utils;
 
 import baritone.test.HeadlessGame;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.junit.BeforeClass;
@@ -32,6 +33,7 @@ import static org.junit.Assert.assertTrue;
 public class PendingPlacesTest {
 
     private static final int SLOT = 5;
+    private static final BlockPos TARGET = new BlockPos(0, 120, 0);
 
     @BeforeClass
     public static void bootstrap() {
@@ -78,7 +80,7 @@ public class PendingPlacesTest {
                 int seq = ++sequence;
                 int before = stack.getCount();
                 stack.shrink(1);
-                pending.onUse(SLOT, seq, stack, before);
+                pending.onUse(SLOT, seq, stack, before, TARGET, t);
                 toServer.add(new Packet(t + oneWay, () -> serverPlace(seq)));
             }
             deliver(toServer, t);
@@ -152,7 +154,7 @@ public class PendingPlacesTest {
         PendingPlaces pending = new PendingPlaces();
         ItemStack stack = new ItemStack(Items.OBSIDIAN, 5);
         stack.shrink(1);
-        pending.onUse(SLOT, 1, stack, 5);
+        pending.onUse(SLOT, 1, stack, 5, TARGET, 1);
         assertEquals(4, pending.countAfterInFlight(SLOT, stack));
         // the server didn't place it, so no update comes, only the ack
         pending.onAck(1);
@@ -166,7 +168,7 @@ public class PendingPlacesTest {
         PendingPlaces pending = new PendingPlaces(() -> now[0]);
         ItemStack stack = new ItemStack(Items.OBSIDIAN, 2);
         stack.shrink(1);
-        pending.onUse(SLOT, 1, stack, 2);
+        pending.onUse(SLOT, 1, stack, 2, TARGET, 1);
         // the place was dropped before reaching the server, and an update from it brought the
         // stack back without the client's decrement, so the slot reads as spent
         ItemStack update = new ItemStack(Items.OBSIDIAN, 1);
@@ -183,9 +185,9 @@ public class PendingPlacesTest {
         PendingPlaces pending = new PendingPlaces();
         ItemStack stack = new ItemStack(Items.OBSIDIAN, 10);
         stack.shrink(1);
-        pending.onUse(SLOT, 1, stack, 10);
+        pending.onUse(SLOT, 1, stack, 10, TARGET, 1);
         stack.shrink(1);
-        pending.onUse(SLOT, 2, stack, 9);
+        pending.onUse(SLOT, 2, stack, 9, TARGET, 2);
         assertEquals(8 + 2 - 2, pending.countAfterInFlight(SLOT, stack));
         // the server has handled the first place but not the second
         ItemStack update = new ItemStack(Items.OBSIDIAN, 9);
@@ -193,5 +195,49 @@ public class PendingPlacesTest {
         assertEquals(9 - 1, pending.countAfterInFlight(SLOT, update));
         assertEquals(1, pending.inFlight(SLOT));
         assertEquals(0, pending.inFlight(SLOT + 1));
+    }
+
+    @Test
+    public void useAckedWithoutTheBlocksStateWasUnhandled() {
+        long[] now = {0};
+        PendingPlaces pending = new PendingPlaces(() -> now[0]);
+        ItemStack stack = new ItemStack(Items.OBSIDIAN, 10);
+        pending.onUse(SLOT, 1, stack, 10, TARGET, 1);
+        pending.onUse(SLOT, 2, stack, 9, TARGET.east(), 2);
+        pending.onUse(SLOT, 3, stack, 8, TARGET.east(2), 3);
+        // the server answers the first and third with their blocks, refused or not, and acks up
+        // to the third: the second never reached its handler
+        pending.onServerState(TARGET);
+        pending.onServerState(TARGET.east(2));
+        pending.onAck(3);
+        // it may still be answered a while after the ack
+        assertEquals(0, pending.takeUnanswered().total());
+        now[0] = 1_100_000_000L;
+        assertEquals(new PendingPlaces.Unanswered(1, 0, 0), pending.takeUnanswered());
+        assertEquals(0, pending.takeUnanswered().total());
+    }
+
+    @Test
+    public void useAckedByItselfWithoutItsBlockWasTurnedDown() {
+        PendingPlaces pending = new PendingPlaces();
+        ItemStack stack = new ItemStack(Items.OBSIDIAN, 10);
+        pending.onUse(SLOT, 1, stack, 10, TARGET, 7);
+        pending.onUse(SLOT, 2, stack, 9, TARGET.east(), 7);
+        // an anticheat cancels the second as it arrives and acks it at once, which covers the
+        // first before the server has answered it
+        pending.onAck(2);
+        pending.onServerState(TARGET);
+        pending.onAck(1);
+        assertEquals(new PendingPlaces.Unanswered(0, 1, 1), pending.takeUnanswered());
+    }
+
+    @Test
+    public void useNeverAckedWasUnhandled() {
+        long[] now = {0};
+        PendingPlaces pending = new PendingPlaces(() -> now[0]);
+        pending.onUse(SLOT, 1, new ItemStack(Items.OBSIDIAN, 10), 10, TARGET, 1);
+        assertEquals(0, pending.takeUnanswered().total());
+        now[0] = 2_500_000_000L;
+        assertEquals(new PendingPlaces.Unanswered(1, 0, 0), pending.takeUnanswered());
     }
 }

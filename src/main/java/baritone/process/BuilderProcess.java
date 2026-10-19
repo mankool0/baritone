@@ -43,6 +43,10 @@ import baritone.utils.BlockStateInterface;
 import baritone.utils.DoubleMine;
 import baritone.utils.EntityHole;
 import baritone.utils.PathingCommandContext;
+import baritone.utils.PendingPlaces;
+import baritone.utils.PlaceRateLimiter;
+import baritone.utils.accessor.IClientLevel;
+import baritone.utils.accessor.IPlayerControllerMP;
 import baritone.utils.schematic.MapArtSchematic;
 import baritone.utils.schematic.SchematicSystem;
 import baritone.utils.schematic.SelectionSchematic;
@@ -194,6 +198,15 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
      */
     private static final int PRINTER_NO_ROTATE_VERIFY_TICKS = 10;
 
+    // How far a placement got before it stopped, for the idle reason: a target in reach that
+    // needs breaking first, one with nothing to click within reach, one whose click was tried
+    private static final int PRINTER_IDLE_NEEDS_BREAK = 1;
+    private static final int PRINTER_IDLE_NO_FACE = 2;
+    private static final int PRINTER_IDLE_TRIED = 3;
+
+    // a place's use and swing, and a hotbar switch to its slot
+    private static final int PRINTER_PLACE_PACKETS = 3;
+
     private int printerPlaceCooldown;
     private int printerBreakCooldown;
     private int printerBreakGrace;
@@ -206,6 +219,15 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private boolean legitSlowBreakLastTick;
     private BetterBlockPos legitAimTargetLastTick;
     private final DoubleMine doubleMine;
+    private final PlaceRateLimiter placeRateLimiter = new PlaceRateLimiter();
+    // why printerPlacesLeft allowed none this tick
+    private String printerPlaceHold;
+    // a place waited for room under printerPacketsPerTick, so the next tick's breaks leave it some
+    private boolean printerPlaceWaitedForPackets;
+    // this tick's places waited on the server's place limit or printerPacketsPerTick
+    private boolean printerPlacesHeld;
+    // the packets this tick's breaks leave for such a place
+    private int printerPlaceReserve;
     // the hotbar slot the last place went out from, kept to while it lasts so places don't switch back and forth
     private int lastPlaceSlot = -1;
     private int printerBreakStarvation;
@@ -219,6 +241,21 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private int printerNoRotateVerifyAge;
     private boolean printerNoRotateSuppressed;
     private int printerNoRotateSuppressedTicks;
+    /**
+     * Why the printer placed nothing on the builder's last tick, for the highway's nhwstatus. Null
+     * when it placed.
+     */
+    private String printerIdleReason;
+    // set once the last tick's report is read, so a tick the builder didn't run at all can be told apart
+    private boolean printerReported = true;
+    private int printerPlacedSinceReport;
+    private int printerRevertsSinceReport;
+    private PendingPlaces.Unanswered printerUnhandledSinceReport = PendingPlaces.Unanswered.NONE;
+    // the printerMultiPlace the limiter learned under
+    private int printerMultiPlaceSeen = 1;
+    // the furthest a placement got on this tick's fire before it stopped; the reason kept is that one's
+    private int printerIdleRank;
+    private String printerPlaceFailure;
     // what last kept restockHotbarEarly from moving, so a hotbar that ran dry anyway says why; null once one went through
     private String restockEarlyBlocker;
 
@@ -230,6 +267,19 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             return placed || broke;
         }
     }
+
+    /**
+     * What the printer did on one builder tick: the blocks it placed, or if none why not, and how
+     * many recently completed positions were seen undone again since the last report.
+     *
+     * @param unhandled         places the server never handled
+     * @param placeWindowMillis the window printerMultiPlace keeps at most the server's limit in
+     * @param onePlaceATick     printerMultiPlace gave up on placing more than one a tick
+     * @param setbackBackOffs   how many times since the last report set-backs held placing to one a tick
+     * @param setbackBackOff    whether set-backs hold placing to one a tick now
+     */
+    public record PrinterReport(int placed, String idleReason, int reverts, PendingPlaces.Unanswered unhandled,
+                                int placeWindowMillis, boolean onePlaceATick, int setbackBackOffs, boolean setbackBackOff) {}
 
     /**
      * A recently completed position and the schematic and origin of the window it was completed
@@ -258,6 +308,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         super(baritone);
         doubleMine = new DoubleMine(ctx, baritone.getServerDigSpeed());
         baritone.getGameEventHandler().registerEventListener(doubleMine);
+        baritone.getGameEventHandler().registerEventListener(placeRateLimiter);
     }
 
     /** The substitute/mirror/rotate/skip-blocks wrappers every schematic handed to the builder gets. */
@@ -346,6 +397,24 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     @Override
     public boolean isBreakingInPlace() {
         return legitSlowBreakLastTick;
+    }
+
+    /**
+     * @return what the printer did on the builder's last tick, or null if the builder hasn't
+     * ticked since this was last asked
+     */
+    public PrinterReport consumePrinterReport() {
+        if (printerReported) {
+            return null;
+        }
+        PrinterReport report = new PrinterReport(printerPlacedSinceReport, printerIdleReason, printerRevertsSinceReport,
+                printerUnhandledSinceReport, placeRateLimiter.windowMillis(), placeRateLimiter.multiPlaceGivenUp(),
+                placeRateLimiter.takeBackOffsStarted(), placeRateLimiter.backOffSecondsLeft() > 0);
+        printerReported = true;
+        printerPlacedSinceReport = 0;
+        printerRevertsSinceReport = 0;
+        printerUnhandledSinceReport = PendingPlaces.Unanswered.NONE;
+        return report;
     }
 
     @Override
@@ -690,6 +759,17 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
      * @return the actions performed this tick, if any
      */
     private PrinterAction printerTick(BuilderCalculationContext bcc, boolean mayPlace) {
+        PendingPlaces.Unanswered unhandled = ((IClientLevel) ctx.world()).getPendingPlaces().takeUnanswered();
+        printerUnhandledSinceReport = printerUnhandledSinceReport.plus(unhandled);
+        int multiPlace = Math.max(1, Baritone.settings().printerMultiPlace.value);
+        if (multiPlace != printerMultiPlaceSeen) {
+            printerMultiPlaceSeen = multiPlace;
+            placeRateLimiter.retryMultiPlace();
+        }
+        if (multiPlace > 1) {
+            // at one a tick there's nothing to learn, and refusals of other uses would only mislead it
+            placeRateLimiter.noteUnhandled(unhandled);
+        }
         if (printerPlaceCooldown > 0) {
             printerPlaceCooldown--;
         }
@@ -699,6 +779,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         if (printerBreakGrace > 0) {
             printerBreakGrace--;
         }
+        printerPlaceReserve = printerPlaceWaitedForPackets ? PRINTER_PLACE_PACKETS : 0;
+        printerPlaceWaitedForPackets = false;
         if (Baritone.settings().printerNoRotate.value && printerNoRotateSuppressed) {
             int retryTicks = Baritone.settings().printerNoRotateRetryTicks.value;
             if (retryTicks > 0 && ++printerNoRotateSuppressedTicks >= retryTicks) {
@@ -726,15 +808,40 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         return action;
     }
 
+    /**
+     * How many places this tick's fire may send: printerMultiPlace, but above one only as many as
+     * the server's spam limit has room for, and one once the server turned down placing more. When
+     * that's none, printerPlaceHold says why.
+     */
+    private int printerPlacesLeft(boolean mayPlace) {
+        if (!mayPlace || printerPlaceCooldown > 0) {
+            printerPlaceHold = "place delay";
+            return 0;
+        }
+        int multiPlace = Math.max(1, Baritone.settings().printerMultiPlace.value);
+        if (multiPlace == 1 || placeRateLimiter.multiPlaceGivenUp() || placeRateLimiter.backOffSecondsLeft() > 0) {
+            return 1; // a place a tick stays under the limit by itself
+        }
+        int allowed = placeRateLimiter.placesAllowed();
+        if (allowed <= 0) {
+            printerPlaceHold = "held under the server's place limit";
+            printerPlacesHeld = true;
+            return 0;
+        }
+        return Math.min(multiPlace, allowed);
+    }
+
     private PrinterAction printerFire(BuilderCalculationContext bcc, boolean mayPlace) {
         Rotation rot = baritone.getLookBehavior().getServerRotation().orElse(null);
         if (rot == null) {
+            printerResetIdle("no rotation sent yet");
             return PrinterAction.NONE;
         }
         double reach = ctx.playerController().getBlockReachDistance();
         Vec3 predictedEye = ctx.player().getEyePosition(1.0f).add(ctx.player().getDeltaMovement());
         int breaksLeft = printerBreakCooldown <= 0 ? Math.max(1, Baritone.settings().multiBreak.value) : 0;
-        int placesLeft = mayPlace && printerPlaceCooldown <= 0 ? Math.max(1, Baritone.settings().printerMultiPlace.value) : 0;
+        int placesLeft = printerPlacesLeft(mayPlace);
+        printerResetIdle(placesLeft > 0 ? "rotation not on anything to place" : printerPlaceHold);
         boolean placed = false;
         boolean broke = false;
         int placeSlot = -1;
@@ -762,6 +869,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                 placeSlot = usedSlot;
                 placesLeft--;
                 continue;
+            }
+            if (placesLeft > 0) {
+                printerNoteIdle(PRINTER_IDLE_TRIED, printerPlaceFailure);
             }
             break;
         }
@@ -791,9 +901,10 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         // only used to predict getStateForPlacement orientation for directional blocks
         Rotation rot = baritone.getLookBehavior().getServerRotation().orElse(ctx.playerRotations());
         int breaksLeft = printerBreakCooldown <= 0 ? Math.max(1, Baritone.settings().multiBreak.value) : 0;
-        int placesLeft = mayPlace && printerPlaceCooldown <= 0 ? Math.max(1, Baritone.settings().printerMultiPlace.value) : 0;
+        int placesLeft = printerPlacesLeft(mayPlace);
 
         List<BetterBlockPos> candidates = printerCandidates();
+        printerResetIdle(placesLeft <= 0 ? printerPlaceHold : candidates.isEmpty() ? "nothing left to build" : "nothing within reach");
         double maxDistSq = (reach + 1) * (reach + 1); // same block-center slack as printerAim
         candidates.removeIf(pos -> eye.distanceToSqr(VecUtils.getBlockPosCenter(pos)) > maxDistSq);
         candidates.sort(Comparator.comparingDouble(pos -> eye.distanceToSqr(VecUtils.getBlockPosCenter(pos))));
@@ -832,8 +943,10 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             BlockState curr = bcc.bsi.get0(pos);
             if (!(curr.getBlock() instanceof AirBlock) && !(curr.getBlock() instanceof LiquidBlock)
                     && !MovementHelper.isReplaceable(pos.x, pos.y, pos.z, curr, bcc.bsi)) {
+                printerNoteIdle(PRINTER_IDLE_NEEDS_BREAK, "only blocks to break within reach");
                 continue; // needs breaking, not placing
             }
+            printerNoteIdle(PRINTER_IDLE_NO_FACE, "no face to click within reach");
             for (Direction d : Direction.values()) { // DOWN first: click the UP face of the support below
                 BetterBlockPos neighbor = pos.relative(d);
                 if (!MovementHelper.canPlaceAgainst(bcc.bsi, neighbor)) {
@@ -856,6 +969,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                     printerNoteNoRotatePlace(pos);
                     break; // next candidate
                 }
+                printerNoteIdle(PRINTER_IDLE_TRIED, printerPlaceFailure);
             }
         }
         return printerFinish(placed, broke);
@@ -885,6 +999,22 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         AABB box = new AABB(clicked.x, clicked.y, clicked.z, clicked.x + 1, clicked.y + 1, clicked.z + 1);
         return facing && (box.distanceToSqr(new Vec3(feet.x, standingEye, feet.z)) <= reachSq
                 || box.distanceToSqr(new Vec3(feet.x, crouchingEye, feet.z)) <= reachSq);
+    }
+
+    private void printerResetIdle(String reason) {
+        printerIdleRank = 0;
+        printerIdleReason = reason;
+    }
+
+    /**
+     * Keeps the reason from the attempt that got furthest, and of those the first, which is the
+     * nearest target: that's the one the printer would have placed.
+     */
+    private void printerNoteIdle(int rank, String reason) {
+        if (rank > printerIdleRank) {
+            printerIdleRank = rank;
+            printerIdleReason = reason;
+        }
     }
 
     private void printerNoteNoRotatePlace(BetterBlockPos target) {
@@ -971,6 +1101,13 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             ctx.player().getInventory().setSelectedSlot(previous);
             return 0;
         }
+        // its dig packets, the abort below, the tick's one swing and a switch to the tool
+        int sending = packets + (ctx.playerController().hasBrokenBlock() ? 0 : 1) + (first ? 1 : 0)
+                + (ctx.player().getInventory().getSelectedSlot() != carriedSlot() ? 1 : 0);
+        if (!printerPacketsFit(sending, printerPlaceReserve)) {
+            ctx.player().getInventory().setSelectedSlot(previous);
+            return 0;
+        }
         // clickBlock doesn't sync the hotbar the way the use path does, so the tool we just
         // picked would otherwise reach the server a tick after the dig it applies to
         ctx.playerController().syncHeldItem();
@@ -1007,44 +1144,88 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private int printerTryPlace(BuilderCalculationContext bcc, BlockHitResult bhr, BetterBlockPos clicked, Rotation rot, int requiredSlot) {
         BetterBlockPos placeAt = BetterBlockPos.from(clicked.relative(bhr.getDirection()));
         if (!incorrectPositions.contains(placeAt)) {
-            return -1;
+            return printerPlaceFailed("not a target");
         }
         if (entityHole.contains(placeAt)) {
-            return -1; // being cleared for an entity; filling it back in would just fight the break
+            // being cleared for an entity; filling it back in would just fight the break
+            return printerPlaceFailed("kept open for an entity");
         }
         if (pathAheadNeedsClear(placeAt)) {
-            return -1;
+            return printerPlaceFailed("the path needs it clear");
         }
         if (!MovementHelper.canPlaceAgainst(bcc.bsi, clicked) || printerAvoidClicking(bcc.bsi.get0(clicked))) {
-            return -1;
+            return printerPlaceFailed("can't click what it's against");
         }
         BlockState curr = bcc.bsi.get0(placeAt);
         if (!MovementHelper.isReplaceable(placeAt.x, placeAt.y, placeAt.z, curr, bcc.bsi)) {
-            return -1;
+            return printerPlaceFailed("occupied");
         }
         BlockState desired = bcc.getSchematic(placeAt.x, placeAt.y, placeAt.z, curr);
         if (desired == null || desired.getBlock() instanceof AirBlock || valid(curr, desired, false)) {
-            return -1;
+            return printerPlaceFailed("already correct");
         }
         if (!desired.canSurvive(ctx.world(), placeAt) || !placementPlausible(placeAt, desired)) {
-            return -1;
+            return printerPlaceFailed("an entity is in the way");
         }
         OptionalInt slot = hasAnyItemThatWouldPlace(desired, bhr, rot);
-        if (!slot.isPresent() || (requiredSlot >= 0 && slot.getAsInt() != requiredSlot) || printerSlotUnsettled(slot.getAsInt())) {
-            return -1;
+        if (!slot.isPresent()) {
+            // also a hotbar stack whose last items are all in flight
+            if (approxPlaceable.subList(9, 36).stream().noneMatch(state -> valid(state, desired, true))) {
+                return printerPlaceFailed("nothing on the hotbar to place, none in the inventory either");
+            }
+            return printerPlaceFailed(restockEarlyBlocker == null ? "nothing on the hotbar to place"
+                    : "nothing on the hotbar to place, early restock: " + restockEarlyBlocker);
+        }
+        if (requiredSlot >= 0 && slot.getAsInt() != requiredSlot) {
+            return printerPlaceFailed("needs another hotbar slot");
+        }
+        if (printerSlotUnsettled(slot.getAsInt())) {
+            return printerPlaceFailed("hotbar slot settling after a swap");
+        }
+        if (!printerPacketsFit(PRINTER_PLACE_PACKETS - (slot.getAsInt() == carriedSlot() ? 1 : 0), 0)) {
+            printerPlaceWaitedForPackets = true;
+            printerPlacesHeld = true;
+            return printerPlaceFailed("held under the per-tick packet limit");
         }
         ctx.player().getInventory().setSelectedSlot(slot.getAsInt());
         lastPlaceSlot = slot.getAsInt();
         placedFrom[slot.getAsInt()] = ctx.player().getMainHandItem().getItem();
         InteractionResult result = ctx.playerController().processRightClickBlock(ctx.player(), ctx.world(), InteractionHand.MAIN_HAND, bhr);
         if (!result.consumesAction()) {
-            return -1;
+            return printerPlaceFailed("click did nothing");
         }
         if (result == InteractionResult.SUCCESS) {
             // vanilla only swings on SUCCESS, not CONSUME
             ctx.player().swing(InteractionHand.MAIN_HAND);
         }
+        if (requiredSlot >= 0) {
+            placeRateLimiter.noteSecondPlace();
+        }
+        printerPlacedSinceReport++;
         return slot.getAsInt();
+    }
+
+    private int printerPlaceFailed(String reason) {
+        printerPlaceFailure = reason;
+        return -1;
+    }
+
+    /**
+     * @param packets what a break or place would send
+     * @param reserve what to leave for a place later in the tick
+     * @return whether that fits under printerPacketsPerTick with what this tick already sent; the
+     * tick's first action always does, unless room is being kept for a place
+     */
+    private boolean printerPacketsFit(int packets, int reserve) {
+        int sent = baritone.getPacketTrace().actionsThisTick();
+        return sent == 0 && reserve == 0 || sent + packets + reserve <= Baritone.settings().printerPacketsPerTick.value;
+    }
+
+    /**
+     * @return the hotbar slot the server last heard was selected
+     */
+    private int carriedSlot() {
+        return ((IPlayerControllerMP) ctx.minecraft().gameMode).getCarriedIndex();
     }
 
     /**
@@ -1156,16 +1337,35 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         return result instanceof BlockHitResult hr && result.getType() == HitResult.Type.BLOCK && test.test(hr);
     }
 
-    private boolean printerUsable() {
-        return ctx.player() != null
-                && ctx.minecraft().gameMode != null
-                && (ctx.minecraft().screen == null || ctx.minecraft().screen instanceof ChatScreen || ctx.minecraft().screen instanceof InventoryScreen || ctx.minecraft().screen instanceof PauseScreen)
-                && !ctx.minecraft().isPaused()
-                && ctx.player().containerMenu.getCarried().isEmpty()
-                && !ctx.player().isUsingItem()
-                && !ctx.player().isHandsBusy()
-                && !ctx.player().isFallFlying()
-                && !ctx.player().isPassenger();
+    /**
+     * @return why the printer can't act right now, or null if it can
+     */
+    private String printerUnusableReason() {
+        if (ctx.player() == null || ctx.minecraft().gameMode == null) {
+            return "not in game";
+        }
+        if (!(ctx.minecraft().screen == null || ctx.minecraft().screen instanceof ChatScreen || ctx.minecraft().screen instanceof InventoryScreen || ctx.minecraft().screen instanceof PauseScreen)) {
+            return "screen open";
+        }
+        if (ctx.minecraft().isPaused()) {
+            return "game paused";
+        }
+        if (!ctx.player().containerMenu.getCarried().isEmpty()) {
+            return "item on the cursor";
+        }
+        if (ctx.player().isUsingItem()) {
+            return "using an item";
+        }
+        if (ctx.player().isHandsBusy()) {
+            return "hands busy";
+        }
+        if (ctx.player().isFallFlying()) {
+            return "flying";
+        }
+        if (ctx.player().isPassenger()) {
+            return "riding";
+        }
+        return null;
     }
 
     /**
@@ -1487,12 +1687,18 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         // Never place while a stationary break is being lined up: a placement skips the break
         // branch for that tick, releasing the attack and resetting the dig progress, and the
         // placed block can wall off the break target. Nor let placements starve breaking forever.
-        boolean mayPlace = !breakSession && printerBreakStarvation < PRINTER_MAX_BREAK_STARVATION;
+        String placeHold = breakSession ? "held for a stationary break"
+                : printerBreakStarvation >= PRINTER_MAX_BREAK_STARVATION ? "paused to let breaking catch up" : null;
+        boolean mayPlace = placeHold == null;
         PrinterAction printerAction = PrinterAction.NONE;
-        boolean printerReady = Baritone.settings().printer.value && printerUsable();
+        String printerUnusable = Baritone.settings().printer.value ? printerUnusableReason() : "printer off";
+        boolean printerReady = printerUnusable == null;
+        printerPlacesHeld = false;
         if (printerReady) {
             printerAction = printerTick(bcc, mayPlace);
         }
+        printerReported = false;
+        printerIdleReason = printerAction.placed() ? null : !printerReady ? printerUnusable : placeHold != null ? placeHold : printerIdleReason;
         if (!toBreak.isEmpty() && printerAction.placed() && !printerAction.broke()) {
             printerBreakStarvation++;
         } else {
@@ -1572,7 +1778,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         }
         List<BlockState> desirableOnHotbar = new ArrayList<>();
         Optional<Placement> toPlace = searchForPlacables(bcc, desirableOnHotbar);
-        if (!printerAction.acted() && toPlace.isPresent() && isSafeToCancel && ctx.player().onGround() && ticks <= 0) {
+        // a printer only waiting on a place limit places next tick; the click here would stop and
+        // sneak for a block that's about to be placed anyway, and go over the limit doing it
+        if (!printerAction.acted() && !printerPlacesHeld && toPlace.isPresent() && isSafeToCancel && ctx.player().onGround() && ticks <= 0) {
             if (!printerSlotUnsettled(toPlace.get().hotbarSelection)) {
                 Rotation rot = toPlace.get().rot;
                 legitAimTargetLastTick = new BetterBlockPos(toPlace.get().placeAgainst);
@@ -1793,7 +2001,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                 completedWatchSnapshot = null;
             } else if (!valid(current, desired, false)) {
                 // reverted: stays watched until it's fixed, or getSchematic would stop knowing it
-                incorrectPositions.add(pos);
+                if (incorrectPositions.add(pos)) {
+                    printerRevertsSinceReport++;
+                }
             } else if (incorrectPositions.remove(pos)) {
                 watch.completedTick = builderTick;
             } else if (builderTick - watch.completedTick >= COMPLETED_WATCH_TICKS) {
@@ -1843,7 +2053,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                             }
                             observedCompleted.add(BetterBlockPos.longHash(pos));
                         } else {
-                            incorrectPositions.add(pos);
+                            if (incorrectPositions.add(pos) && completedWatch.containsKey(BetterBlockPos.longHash(pos))) {
+                                printerRevertsSinceReport++; // completed a moment ago, now undone
+                            }
                             observedCompleted.remove(BetterBlockPos.longHash(pos));
                         }
                     }

@@ -69,6 +69,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     public static boolean suppressHitResult = false;
 
     private final HighwayContext highwayContext;
+    private final SetbackTally setbacks = new SetbackTally();
 
     private boolean walkKeyHeld = false;
 
@@ -535,9 +536,26 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     public void stop() {
         Helper.HELPER.logDirect("STOPPING NETHERHIGHWAYBUILDER");
         Helper.HELPER.logDirect("Was at state " + highwayContext.currentState().getState() + " before termination");
+        printBuildSummary();
 
         teardown();
         highwayContext.setPaused(true);
+    }
+
+    /**
+     * The tallies nhwstatus prints, for the stretch since they were last read, so runs nobody
+     * watched can be gone over from the log. Reading them resets them.
+     */
+    private void printBuildSummary() {
+        if (!highwayContext.printerTallied()) {
+            return; // a second stop right after the first
+        }
+        Helper.HELPER.logDirect("Build summary up to " + (ctx.player() != null ? ctx.playerFeet() : "here")
+                + (highwayContext.endPos() != null ? ", building towards " + highwayContext.endPos() : "") + ":");
+        Helper.HELPER.logDirect(highwayContext.walkGateDiagnostic());
+        Helper.HELPER.logDirect(highwayContext.printerDiagnostic());
+        Helper.HELPER.logDirect(baritone.getPacketTrace().diagnostic());
+        Helper.HELPER.logDirect(setbacks.diagnostic());
     }
 
     @Override
@@ -554,6 +572,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         Helper.HELPER.logDirect("startShulkerCount: " + highwayContext.startShulkerCount());
         Helper.HELPER.logDirect(highwayContext.frontDistanceDiagnostic());
         Helper.HELPER.logDirect(highwayContext.walkGateDiagnostic());
+        Helper.HELPER.logDirect(highwayContext.printerDiagnostic());
+        Helper.HELPER.logDirect(baritone.getPacketTrace().diagnostic());
+        Helper.HELPER.logDirect(setbacks.diagnostic());
         highwayContext.stateDwellDiagnostic(12).forEach(Helper.HELPER::logDirect);
     }
 
@@ -561,10 +582,14 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     public void onTick(TickEvent event) {
         if (highwayContext.paused() || highwayContext.schematic() == null || ctx.player() == null || ctx.player().getInventory().isEmpty() || event.getType() == TickEvent.Type.OUT) {
             setWalkForward(false); // never leave the walk key latched while the state machine isn't driving
+            setbacks.skipTick(event.getType() == TickEvent.Type.OUT);
             return;
         }
 
         highwayContext.incrementTimers();
+        // the processes ticked earlier this tick, so the builder's report is this tick's
+        highwayContext.notePrinterTick(baritone.getBuilderProcess().consumePrinterReport());
+        setbacks.noteTick(highwayContext.currentState().getState() == HighwayState.BuildingHighway, ctx.player());
 
         if (startDimension != null && !highwayContext.isInQueue()) {
             if (ctx.world().dimension() != startDimension) {
@@ -789,9 +814,13 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
     @Override
     public void onSendPacket(PacketEvent event) {
-        if (event.getState() == EventState.PRE && event.getPacket() instanceof ServerboundUseItemOnPacket use) {
+        if (event.getState() != EventState.PRE) {
+            return;
+        }
+        if (event.getPacket() instanceof ServerboundUseItemOnPacket use) {
             highwayContext.noteUseItemOn(use.getHitResult().getBlockPos());
         }
+        setbacks.noteSent(event.getPacket());
     }
 
     @Override

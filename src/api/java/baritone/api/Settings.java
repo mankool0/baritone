@@ -2244,9 +2244,23 @@ public final class Settings {
 
     /**
      * Maximum printer placements per tick. Values above 1 are more likely to be flagged by an
-     * anticheat, as are {@link #multiBreak} values above 1, which cap the printer's breaks.
+     * anticheat, as are {@link #multiBreak} values above 1, which cap the printer's breaks. Above 1
+     * the printer also paces itself under Paper's spam limit on item uses (9 per 300 ms by default,
+     * dropped silently past that), lengthening its window whenever the server drops one. If the
+     * server turns down a good share of the places after the first in a tick, or keeps dropping them
+     * at a place a tick's pace, it goes back to one a tick until this is changed. Several anticheat
+     * set-backs in a short while of placing more than one a tick send it back to one a tick for a few
+     * minutes
      */
     public final Setting<Integer> printerMultiPlace = new Setting<>(1);
+
+    /**
+     * Most dig, swing, place and hotbar switch packets the printer lets out in a tick, counting the
+     * ones already sent that tick. A break or place that would go over waits for the next tick,
+     * except the tick's first. Some servers kick for sending many of these in one tick, with the
+     * breaks of {@link #multiBreak} and the places of {@link #printerMultiPlace} together
+     */
+    public final Setting<Integer> printerPacketsPerTick = new Setting<>(7);
 
     /**
      * Ticks between printer instant-breaks. 1 = up to one break every tick.

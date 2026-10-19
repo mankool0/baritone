@@ -22,6 +22,8 @@ import baritone.utils.PendingToolDamage;
 import baritone.utils.accessor.IClientLevel;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.prediction.BlockStatePredictionHandler;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.state.BlockState;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.gen.Accessor;
@@ -55,6 +57,16 @@ public abstract class MixinClientLevel implements IClientLevel {
         lastAckedSequence = Math.max(lastAckedSequence, sequence);
         pendingToolDamage.onAck(sequence);
         pendingPlaces.onAck(sequence);
+    }
+
+    // block updates, single or by section, land here on the main thread, even for a position the
+    // client is still predicting
+    @Inject(
+            method = "setServerVerifiedBlockState",
+            at = @At("HEAD")
+    )
+    private void onServerVerifiedBlockState(BlockPos pos, BlockState state, int flags, CallbackInfo ci) {
+        pendingPlaces.onServerState(pos);
     }
 
     @Override

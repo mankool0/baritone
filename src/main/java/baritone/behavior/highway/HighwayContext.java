@@ -35,6 +35,7 @@ import baritone.pathing.movement.MovementHelper;
 import baritone.process.BuilderProcess;
 import baritone.utils.BrokenBlocks;
 import baritone.utils.EntityHole;
+import baritone.utils.PendingPlaces;
 import baritone.utils.ServerDigTarget;
 import baritone.utils.accessor.IClientLevel;
 import it.unimi.dsi.fastutil.ints.IntArrayFIFOQueue;
@@ -93,6 +94,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.IntPredicate;
@@ -4670,6 +4672,151 @@ public class HighwayContext {
         } else {
             walkGateTally.merge(blocker, 1, Integer::sum);
         }
+    }
+
+    // what each tick did for placing, tallied since the last nhwstatus
+    private final Map<String, Integer> printerTally = new LinkedHashMap<>();
+    private int printerTicks;
+    private int printerPlacedTicks;
+    private int printerPlacedBlocks;
+    private int printerReverts;
+    private PendingPlaces.Unanswered printerUnhandled = PendingPlaces.Unanswered.NONE;
+    private int printerPlaceWindowMillis;
+    private boolean printerOnePlaceATick;
+    private int printerSetbackBackOffs;
+    private int printerSetbackBackOffTicks;
+    private long printerLastTickNanos;
+    private long printerTickNanos; // time between tallied ticks, leaving out the gaps of a pause
+    private int printerTickGaps;
+    private static final long PRINTER_TALLY_MAX_GAP_NANOS = TimeUnit.SECONDS.toNanos(5);
+    // the same over the ticks spent in BuildingHighway, with the progress made along the heading
+    private long pavingNanos;
+    private double pavingBlocksAlong;
+    private int pavingPlacedBlocks;
+    private Vec3 pavingLastPos; // null once a tick wasn't paving, so the walk back from elsewhere isn't counted
+
+    /**
+     * Records what the builder's printer did this tick.
+     *
+     * @param report this tick's report, or null if the builder didn't tick
+     */
+    public void notePrinterTick(BuilderProcess.PrinterReport report) {
+        long now = System.nanoTime();
+        // the gaps measure the client's tick rate, since every reason below scales with it
+        boolean continuous = printerLastTickNanos != 0 && now - printerLastTickNanos < PRINTER_TALLY_MAX_GAP_NANOS;
+        if (continuous) {
+            printerTickNanos += now - printerLastTickNanos;
+            printerTickGaps++;
+        }
+        if (currentState.getState() == HighwayState.BuildingHighway) {
+            Vec3 pos = playerContext.player().position();
+            if (continuous && pavingLastPos != null) {
+                double headX = pattern.isCustom() ? pattern.periodWorldX() : highwayDirection.getX();
+                double headZ = pattern.isCustom() ? pattern.periodWorldZ() : highwayDirection.getZ();
+                pavingNanos += now - printerLastTickNanos;
+                pavingBlocksAlong += ((pos.x - pavingLastPos.x) * headX + (pos.z - pavingLastPos.z) * headZ) / Math.sqrt(headX * headX + headZ * headZ);
+            }
+            pavingLastPos = pos;
+            if (report != null) {
+                pavingPlacedBlocks += report.placed();
+            }
+        } else {
+            pavingLastPos = null;
+        }
+        printerLastTickNanos = now;
+        printerTicks++;
+        if (report != null) {
+            printerPlacedBlocks += report.placed();
+            printerReverts += report.reverts();
+            printerUnhandled = printerUnhandled.plus(report.unhandled());
+            printerPlaceWindowMillis = report.placeWindowMillis();
+            printerOnePlaceATick = report.onePlaceATick();
+            printerSetbackBackOffs += report.setbackBackOffs();
+            if (report.setbackBackOff()) {
+                printerSetbackBackOffTicks++;
+            }
+            if (report.placed() > 0) {
+                printerPlacedTicks++;
+                return;
+            }
+        }
+        printerTally.merge(report != null ? report.idleReason() : printerNotTickingReason(), 1, Integer::sum);
+    }
+
+    private String printerNotTickingReason() {
+        if (currentState.getState() != HighwayState.BuildingHighway) {
+            return "in " + currentState.getState();
+        }
+        BuilderProcess builder = baritone.getBuilderProcess();
+        if (!builder.isActive()) {
+            return "builder not running";
+        }
+        if (builder.isPaused()) {
+            return "builder paused";
+        }
+        return baritone.getPathingControlManager().mostRecentInControl()
+                .map(process -> process.displayName() + " in control")
+                .orElse("builder not ticked");
+    }
+
+    /**
+     * @return whether any ticks were tallied for {@link #printerDiagnostic} since it was last read
+     */
+    public boolean printerTallied() {
+        return printerTicks > 0;
+    }
+
+    /**
+     * Where the ticks went since this was last asked: on how many the printer placed, and why it
+     * didn't on the rest. Reading it resets the tally.
+     */
+    public String printerDiagnostic() {
+        if (printerTicks == 0) {
+            return "Printer: no ticks tallied";
+        }
+        double ticksPerSecond = printerTickNanos > 0 ? printerTickGaps / (printerTickNanos / 1e9) : 0;
+        StringBuilder sb = new StringBuilder(String.format("Printer: placed on %d of %d ticks (%d%%), %d blocks, %d undone again, %d never handled by the server",
+                printerPlacedTicks, printerTicks, Math.round(100.0 * printerPlacedTicks / printerTicks),
+                printerPlacedBlocks, printerReverts, printerUnhandled.total()));
+        if (printerUnhandled.total() > 0) {
+            // turned down: acked alone, by a check; dropped: never reached the server's handler
+            sb.append(String.format(" (%d turned down, %d of those second in their tick, %d dropped unread)",
+                    printerUnhandled.refused(), printerUnhandled.refusedLater(), printerUnhandled.dropped()));
+        }
+        sb.append(String.format(", client at %.1f ticks/s", ticksPerSecond));
+        if (settings.printerMultiPlace.value > 1) {
+            sb.append(printerOnePlaceATick ? ", placing one a tick since the server throws out more"
+                    : String.format(", pacing to at most 9 places per %d ms", printerPlaceWindowMillis));
+            if (printerSetbackBackOffs > 0 || printerSetbackBackOffTicks > 0) {
+                sb.append(String.format(", one a tick after setbacks on %d ticks (%d times)", printerSetbackBackOffTicks, printerSetbackBackOffs));
+            }
+        }
+        if (pavingNanos > 0) {
+            double seconds = pavingNanos / 1e9;
+            sb.append(String.format("; paving %.1f s at %.2f m/s along the highway, %.1f blocks/s",
+                    seconds, pavingBlocksAlong / seconds, pavingPlacedBlocks / seconds));
+            if (pavingBlocksAlong >= 1) {
+                // per slice rather than per block of travel, to compare with the cross-section
+                sb.append(String.format(", %.1f blocks a slice", pavingPlacedBlocks / (pavingBlocksAlong / stepLength())));
+            }
+        }
+        printerTally.entrySet().stream()
+                .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
+                .forEach(e -> sb.append(" | ").append(e.getKey()).append(" x").append(e.getValue()));
+        printerTally.clear();
+        printerTicks = 0;
+        printerPlacedTicks = 0;
+        printerPlacedBlocks = 0;
+        printerReverts = 0;
+        printerUnhandled = PendingPlaces.Unanswered.NONE;
+        printerSetbackBackOffs = 0;
+        printerSetbackBackOffTicks = 0;
+        printerTickNanos = 0;
+        printerTickGaps = 0;
+        pavingNanos = 0;
+        pavingBlocksAlong = 0;
+        pavingPlacedBlocks = 0;
+        return sb.toString();
     }
 
     /** What has been stopping the walk-creep since this was last asked. Reading it resets the tally. */
