@@ -186,6 +186,13 @@ public final class Settings {
     public final Setting<Double> walkOnWaterOnePenalty = new Setting<>(3D);
 
     /**
+     * Additional penalty for a move into a block a mob (or anything else that blocks placing) is standing in. Walking
+     * into one shoves it, which is slow, and one with nowhere to go doesn't move at all, so this makes the path go
+     * around it when there's a way that isn't much longer.
+     */
+    public final Setting<Double> walkIntoEntityPenalty = new Setting<>(20D);
+
+    /**
      * Don't allow breaking blocks next to liquids.
      * <p>
      * Enable if you have mods adding custom fluid physics.

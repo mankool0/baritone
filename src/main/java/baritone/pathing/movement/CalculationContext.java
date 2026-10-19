@@ -84,6 +84,7 @@ public class CalculationContext {
     public double backtrackCostFavoringCoefficient;
     public double jumpPenalty;
     public final double walkOnWaterOnePenalty;
+    public final double walkIntoEntityPenalty;
     public final boolean allowWalkOnMagmaBlocks;
     public boolean avoidNetherPortals;
     public final BetterWorldBorder worldBorder;
@@ -159,6 +160,7 @@ public class CalculationContext {
         this.backtrackCostFavoringCoefficient = Baritone.settings().backtrackCostFavoringCoefficient.value;
         this.jumpPenalty = Baritone.settings().jumpPenalty.value;
         this.walkOnWaterOnePenalty = Baritone.settings().walkOnWaterOnePenalty.value;
+        this.walkIntoEntityPenalty = Baritone.settings().walkIntoEntityPenalty.value;
         this.allowWalkOnMagmaBlocks = Baritone.settings().allowWalkOnMagmaBlocks.value;
         this.avoidNetherPortals = baritone.getNetherHighwayBuilderBehavior().isHighwayActive();
         // why cache these things here, why not let the movements just get directly from settings?
@@ -255,6 +257,27 @@ public class CalculationContext {
      */
     public boolean isOccupiedByEntity(int x, int y, int z) {
         return entityOccupied.contains(BetterBlockPos.longHash(x, y, z));
+    }
+
+    /**
+     * Extra cost for a move that has to get past an entity, see {@link EntityObstruction}. Walking into one shoves it,
+     * which is slow, and one boxed in doesn't budge at all. An ascend also has to line up in the block it jumps from
+     * before it jumps, so an entity in there is in its way too. {@link ActionCosts#COST_INF} rules the move out.
+     */
+    public double entityInTheWayCost(Moves move, int srcX, int srcY, int srcZ, int destX, int destY, int destZ) {
+        if (entityOccupied.isEmpty()) {
+            return 0;
+        }
+        if (isBodyOccupiedByEntity(destX, destY, destZ)) {
+            return walkIntoEntityPenalty;
+        }
+        boolean ascend = move.yOffset == 1 && move != Moves.PILLAR; // pillar can't place into one at all, see costOfPlacingAt
+        return ascend && isBodyOccupiedByEntity(srcX, srcY, srcZ) ? walkIntoEntityPenalty : 0;
+    }
+
+    // the feet and head blocks of someone standing at x, y, z
+    private boolean isBodyOccupiedByEntity(int x, int y, int z) {
+        return isOccupiedByEntity(x, y, z) || isOccupiedByEntity(x, y + 1, z);
     }
 
     public boolean isPossiblyProtected(int x, int y, int z) {

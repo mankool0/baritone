@@ -32,10 +32,12 @@ import baritone.api.schematic.format.ISchematicFormat;
 import baritone.api.utils.*;
 import baritone.api.utils.Rotation;
 import baritone.api.utils.input.Input;
+import baritone.api.utils.interfaces.IGoalRenderPos;
 import baritone.behavior.LookBehavior;
 import baritone.pathing.movement.CalculationContext;
 import baritone.pathing.movement.Movement;
 import baritone.pathing.movement.MovementHelper;
+import baritone.pathing.movement.Moves;
 import baritone.pathing.path.PathExecutor;
 import baritone.utils.BaritoneProcessHelper;
 import baritone.utils.BlockBreakHelper;
@@ -57,6 +59,8 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMaps;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.longs.LongSet;
+import it.unimi.dsi.fastutil.longs.LongSets;
 import it.unimi.dsi.fastutil.objects.ObjectIterator;
 import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.gui.screens.PauseScreen;
@@ -151,6 +155,12 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
      * placed in them, or the support we just dug comes straight back and gets dug out again.
      */
     private final Set<BetterBlockPos> entityHole = new HashSet<>();
+    /**
+     * The columns of {@link #entityHole}, as {@code longHash(x, 0, z)}, and the level we dig them out from. Replaced,
+     * never changed, since the goals that read them do it from the path search's thread.
+     */
+    private LongSet entityHoleColumns = LongSets.EMPTY_SET;
+    private int entityHoleDigY;
     /** Cells missing a block that an entity is standing in. */
     private final Set<BetterBlockPos> entityBlocked = new HashSet<>();
     /** The ones of those a boat is in; the highway's BoatRemoval deals with boats. */
@@ -171,6 +181,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
      * revert there is outside the schematic and nothing looks at it again.
      */
     private static final int COMPLETED_WATCH_TICKS = 40;
+
+    /** Where {@link #reachableTopFace} aims across a top face, along each axis. */
+    private static final double[] TOP_FACE_POINTS = {0.15, 0.5, 0.85};
 
     /**
      * How far the aimed-at yaw may sit from the movement yaw before a pitch-only aim is hopeless.
@@ -542,6 +555,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             BlockState curr = bcc.bsi.get0(pos);
             if (curr.getBlock() != Blocks.AIR && !(curr.getBlock() instanceof LiquidBlock) && !valid(curr, Blocks.AIR.defaultBlockState(), false)) {
                 Optional<Rotation> rot = RotationUtils.reachable(ctx, pos, ctx.playerController().getBlockReachDistance());
+                if (rot.isEmpty()) {
+                    rot = reachableTopFace(pos, ctx.playerController().getBlockReachDistance());
+                }
                 rot.ifPresent(rotation -> toReturn.add(Optional.of(new Tuple<>(pos, rotation))));
             }
         }
@@ -568,6 +584,25 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             }
         }
         return toReturn;
+    }
+
+    /**
+     * Seen from beside a narrow hole, all that shows of its bottom layer is the far side of the top face
+     * ({@link EntityHole#lowestDiggableLayer}). {@link RotationUtils#reachable} only aims at the middles of faces, and
+     * from there the rim is in the way.
+     */
+    private Optional<Rotation> reachableTopFace(BetterBlockPos pos, double reach) {
+        BlockPos block = new BlockPos(pos.x, pos.y, pos.z);
+        for (double dx : TOP_FACE_POINTS) {
+            for (double dz : TOP_FACE_POINTS) {
+                Vec3 point = new Vec3(pos.x + dx, pos.y + 1, pos.z + dz);
+                Optional<Rotation> rot = RotationUtils.reachableOffset(ctx, block, point, reach, false);
+                if (rot.isPresent()) {
+                    return rot;
+                }
+            }
+        }
+        return Optional.empty();
     }
 
     public static class Placement {
@@ -2212,8 +2247,15 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
      */
     private void updateEntityHoles(BuilderCalculationContext bcc) {
         clearEntityHoles();
+        LongSet cells = new LongOpenHashSet();
+        LongSet columns = new LongOpenHashSet();
         Entity self = ctx.player().getRootVehicle();
         BlockState air = Blocks.AIR.defaultBlockState();
+        // Only as deep as we can dig from up here beside it. Further down, digging it out takes climbing in
+        // after the entity, where the block we're building over it shuts us in.
+        entityHoleDigY = standingY();
+        int lowestLayer = EntityHole.lowestDiggableLayer(entityHoleDigY, ctx.player().getEyeHeight(Pose.STANDING),
+                ctx.playerController().getBlockReachDistance());
         // each vehicle once with everything riding it, since they drop together
         List<Entity> roots = ctx.entitiesStream()
                 .filter(e -> e.isAlive() && e.blocksBuilding)
@@ -2257,13 +2299,15 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             List<BlockPos> hole = EntityHole.plan(ctx.world(), EntityHole.groupBox(root), clearY, pos -> {
                 BlockState desired = bcc.getSchematic(pos.getX(), pos.getY(), pos.getZ(), air);
                 return desired != null && !(desired.getBlock() instanceof AirBlock);
-            });
+            }, lowestLayer);
             if (hole == null) {
                 continue; // nothing we'd dig drops it, so its cell just waits for it to move
             }
             for (BlockPos cell : hole) {
                 BetterBlockPos pos = new BetterBlockPos(cell);
                 entityHole.add(pos);
+                cells.add(BetterBlockPos.longHash(pos.x, pos.y, pos.z));
+                columns.add(BetterBlockPos.longHash(pos.x, 0, pos.z));
                 BlockState state = bcc.bsi.get0(pos);
                 if (!(state.getBlock() instanceof AirBlock) && !(state.getBlock() instanceof LiquidBlock)
                         && !state.getCollisionShape(ctx.world(), cell).isEmpty()) {
@@ -2271,6 +2315,14 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                 }
             }
         }
+        bcc.entityHoleCells = cells;
+        entityHoleColumns = columns;
+    }
+
+    /** The level we're standing at: our feet, or the block under them mid-jump, so a jump doesn't change it. */
+    private int standingY() {
+        BetterBlockPos feet = ctx.playerFeet();
+        return ctx.player().onGround() || MovementHelper.canWalkOn(ctx, feet.below()) ? feet.y : feet.y - 1;
     }
 
     private Goal assemble(BuilderCalculationContext bcc, List<BlockState> approxPlaceable, boolean logMissing, Collection<BetterBlockPos> candidates) {
@@ -2333,7 +2385,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
 
         List<Goal> toBreak = new ArrayList<>();
         if (entityDetected.get()) {
-            toBreakEntity.forEach(pos -> toBreak.add(breakGoal(pos, bcc)));
+            toBreakEntity.forEach(pos -> toBreak.add(new GoalBesideEntityHole(pos, entityHoleDigY, entityHoleColumns)));
             if (!toBreak.isEmpty()) {
                 return new GoalComposite(toBreak.toArray(new Goal[0]));
             }
@@ -2582,6 +2634,68 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         }
     }
 
+    /**
+     * Next to a cell of the hole an entity drops through, at the level it's dug from ({@link EntityHole#lowestDiggableLayer})
+     * and not over the hole. A {@link GoalBreak} takes standing on the cell or level with it, which down a hole means
+     * climbing in after the entity, or tunnelling in beside it under the floor.
+     */
+    public static class GoalBesideEntityHole implements Goal, IGoalRenderPos {
+
+        private final BetterBlockPos cell;
+        private final int digY;
+        private final LongSet holeColumns;
+
+        public GoalBesideEntityHole(BetterBlockPos cell, int digY, LongSet holeColumns) {
+            this.cell = cell;
+            this.digY = digY;
+            this.holeColumns = holeColumns;
+        }
+
+        @Override
+        public boolean isInGoal(int x, int y, int z) {
+            return y == digY && Math.abs(x - cell.x) <= 1 && Math.abs(z - cell.z) <= 1
+                    && !holeColumns.contains(BetterBlockPos.longHash(x, 0, z));
+        }
+
+        @Override
+        public double heuristic(int x, int y, int z) {
+            return GoalBlock.calculate(x - cell.x, y - digY, z - cell.z);
+        }
+
+        @Override
+        public BlockPos getGoalPos() {
+            return cell;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            GoalBesideEntityHole goal = (GoalBesideEntityHole) o;
+            return digY == goal.digY && cell.equals(goal.cell) && holeColumns.equals(goal.holeColumns);
+        }
+
+        @Override
+        public int hashCode() {
+            return 31 * cell.hashCode() + digY;
+        }
+
+        @Override
+        public String toString() {
+            return String.format(
+                    "GoalBesideEntityHole{x=%s,y=%s,z=%s,digY=%s}",
+                    SettingsUtil.maybeCensor(cell.x),
+                    SettingsUtil.maybeCensor(cell.y),
+                    SettingsUtil.maybeCensor(cell.z),
+                    SettingsUtil.maybeCensor(digY)
+            );
+        }
+    }
+
     @Override
     public void onLostControl() {
         incorrectPositions = null;
@@ -2744,6 +2858,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         private int originZ;
         private Long2ObjectMap<CompletedWatch> watched;
         private final boolean highwayRoad;
+        /** {@link BuilderProcess#entityHole} as {@code longHash}es, set by {@link #updateEntityHoles} before any path is planned with this. */
+        private LongSet entityHoleCells = LongSets.EMPTY_SET;
 
         public BuilderCalculationContext() {
             super(BuilderProcess.this.baritone, true); // wew lad
@@ -2784,6 +2900,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             if (isPossiblyProtected(x, y, z) || !worldBorder.canPlaceAt(x, z) || isOccupiedByEntity(x, y, z)) { // make calculation fail properly if we can't build
                 return COST_INF;
             }
+            if (inEntityHole(x, y, z)) {
+                return COST_INF; // a bridge block in it stops the drop, and gets dug straight back out
+            }
             BlockState sch = getSchematic(x, y, z, current);
             if (sch != null) {
                 // TODO this can return true even when allowPlace is off.... is that an issue?
@@ -2817,6 +2936,22 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                     return COST_INF;
                 }
             }
+        }
+
+        /**
+         * Never stand on, in or under a hole dug for an entity to drop through. It stays open until the entity has
+         * dropped, and whatever gets built back over it then shuts in anything still down there.
+         */
+        @Override
+        public double entityInTheWayCost(Moves move, int srcX, int srcY, int srcZ, int destX, int destY, int destZ) {
+            if (inEntityHole(destX, destY - 1, destZ) || inEntityHole(destX, destY, destZ) || inEntityHole(destX, destY + 1, destZ)) {
+                return COST_INF;
+            }
+            return super.entityInTheWayCost(move, srcX, srcY, srcZ, destX, destY, destZ);
+        }
+
+        private boolean inEntityHole(int x, int y, int z) {
+            return !entityHoleCells.isEmpty() && entityHoleCells.contains(BetterBlockPos.longHash(x, y, z));
         }
 
         @Override

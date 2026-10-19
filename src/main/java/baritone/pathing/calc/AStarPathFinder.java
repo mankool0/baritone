@@ -163,6 +163,10 @@ public final class AStarPathFinder extends AbstractNodeCostSearch {
                             SettingsUtil.maybeCensor(res.y),
                             SettingsUtil.maybeCensor(currentNode.y + moves.yOffset)));
                 }
+                double entityCost = calcContext.entityInTheWayCost(moves, currentNode.x, currentNode.y, currentNode.z, res.x, res.y, res.z);
+                if (entityCost >= ActionCosts.COST_INF) {
+                    continue;
+                }
                 long hashCode = BetterBlockPos.longHash(res.x, res.y, res.z);
                 PathNode neighbor = getNodeAtPosition(res.x, res.y, res.z, hashCode);
                 if (isFavoring) {
@@ -174,6 +178,7 @@ public final class AStarPathFinder extends AbstractNodeCostSearch {
                     }
                     actionCost *= neighbor.favor;
                 }
+                actionCost += entityCost;
                 double tentativeCost = currentNode.cost + actionCost;
                 if (neighbor.cost - tentativeCost > minimumImprovement) {
                     neighbor.previous = currentNode;

@@ -46,6 +46,11 @@ public final class EntityHole {
     private static final int MAX_DEPTH = 6;
     /** Vanilla's collision tolerance: a box overlapping a column by less than this still falls past it. */
     private static final double COLLISION_EPSILON = 1.0E-7;
+    /**
+     * How far out from under our eye the bottom of a narrow hole first shows past its rim, looking down it from
+     * the block beside it. Any closer and the line of sight runs into the block we're standing on.
+     */
+    private static final double RIM_SIGHT = 1.2;
 
     private EntityHole() {}
 
@@ -70,21 +75,38 @@ public final class EntityHole {
     }
 
     /**
+     * The lowest layer a hole can reach down to and still be dug out from beside it, standing with our feet at
+     * {@code feetY}: that layer's top face has to be within reach, seen past the rim ({@link #RIM_SIGHT}).
+     * Anything deeper has to be dug from inside the hole, down there with the entity, under whatever
+     * gets built back over it.
+     */
+    public static int lowestDiggableLayer(int feetY, double eyeHeight, double reach) {
+        double drop = Math.sqrt(reach * reach - RIM_SIGHT * RIM_SIGHT);
+        return Mth.ceil(feetY + eyeHeight - drop) - 1;
+    }
+
+    /** {@link #plan(BlockGetter, AABB, int, Predicate, int)} with no limit on how far down it can be dug. */
+    public static List<BlockPos> plan(BlockGetter world, AABB box, int clearY, Predicate<BlockPos> needsRefill) {
+        return plan(world, box, clearY, needsRefill, Integer.MIN_VALUE);
+    }
+
+    /**
      * @param box         what has to drop, riders included ({@link #groupBox})
      * @param clearY      the lowest cell it's in the way of; its top has to end up at or below this
      * @param needsRefill cells that get a block put back once they're empty. It has to drop below
      *                    those as well, or the hole only moves the problem down a block
+     * @param lowestLayer the deepest the hole can go, see {@link #lowestDiggableLayer}
      * @return every cell of the hole, already empty ones included, since a block put back in any
      *         of them stops the drop; null when it can't be dropped. Obsidian gets dug like anything
      *         else: a few seconds of mining and a block to put back beat waiting for a mob to move
      */
-    public static List<BlockPos> plan(BlockGetter world, AABB box, int clearY, Predicate<BlockPos> needsRefill) {
+    public static List<BlockPos> plan(BlockGetter world, AABB box, int clearY, Predicate<BlockPos> needsRefill, int lowestLayer) {
         int minX = Mth.floor(box.minX + COLLISION_EPSILON);
         int maxX = Mth.ceil(box.maxX - COLLISION_EPSILON) - 1;
         int minZ = Mth.floor(box.minZ + COLLISION_EPSILON);
         int maxZ = Mth.ceil(box.maxZ - COLLISION_EPSILON) - 1;
         double height = box.maxY - box.minY;
-        int deepest = clearY - MAX_DEPTH;
+        int deepest = Math.max(clearY - MAX_DEPTH, lowestLayer);
 
         // it comes to rest on a block top, so its feet end up on a whole y
         int land = Mth.floor(clearY - height);

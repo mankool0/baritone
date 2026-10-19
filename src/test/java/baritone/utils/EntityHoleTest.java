@@ -53,6 +53,9 @@ public class EntityHoleTest {
     private static final double PIGMAN_HEIGHT = 1.95;
     private static final double BOAT_WIDTH = 1.375;
     private static final double BOAT_HEIGHT = 0.5625;
+    private static final double ENDERMAN_HEIGHT = 2.9;
+    private static final double EYE_HEIGHT = 1.62;
+    private static final double REACH = 4.5;
 
     private final Map<BlockPos, BlockState> blocks = new HashMap<>();
     private final Set<BlockPos> refill = new HashSet<>();
@@ -123,6 +126,11 @@ public class EntityHoleTest {
 
     private List<BlockPos> plan(AABB box, int clearY) {
         return EntityHole.plan(world, box, clearY, refill::contains);
+    }
+
+    /** Only what we can dig standing on the floor beside the hole. */
+    private List<BlockPos> planFromTheFloor(AABB box, int clearY) {
+        return EntityHole.plan(world, box, clearY, refill::contains, EntityHole.lowestDiggableLayer(FEET, EYE_HEIGHT, REACH));
     }
 
     private static Set<BlockPos> cells(int... xyz) {
@@ -211,5 +219,29 @@ public class EntityHoleTest {
     public void tooTallIsntWorthIt() {
         remove(0, FLOOR, 2);
         assertNull(plan(standing(0.5, FLOOR, 2.5, PIGMAN_WIDTH, 7.0), FLOOR));
+    }
+
+    @Test
+    public void threeLayersDownIsAllWeCanDigFromBeside() {
+        // a fourth layer's top face is past 4.5 blocks from a standing eye
+        assertEquals(FEET - 3, EntityHole.lowestDiggableLayer(FEET, EYE_HEIGHT, REACH));
+    }
+
+    @Test
+    public void pigmanBesideARailGapIsDugFromTheFloor() {
+        remove(0, FEET, 0);
+        AABB pigman = standing(0.5, FEET, 0.9, PIGMAN_WIDTH, PIGMAN_HEIGHT);
+        assertEquals(new HashSet<>(plan(pigman, FEET)), new HashSet<>(planFromTheFloor(pigman, FEET)));
+    }
+
+    @Test
+    public void endermanBesideARailGapIsTooDeepToDigFromTheFloor() {
+        remove(0, FEET, 0);
+        AABB enderman = standing(0.5, FEET, 0.9, PIGMAN_WIDTH, ENDERMAN_HEIGHT);
+        // below the floor and the rail support it needs four layers, the last one only diggable from inside the hole
+        List<BlockPos> hole = plan(enderman, FEET);
+        assertNotNull(hole);
+        assertEquals(FEET - 4, hole.stream().mapToInt(BlockPos::getY).min().getAsInt());
+        assertNull(planFromTheFloor(enderman, FEET));
     }
 }
