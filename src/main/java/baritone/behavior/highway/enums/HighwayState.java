@@ -109,6 +109,7 @@ public enum HighwayState {
     PlacingEmptyShulker,
 
     BoatRemoval,
+    CrystalRemoval,
 
     EmergencyGapplePrep,
     EmergencyGapplePreEat,

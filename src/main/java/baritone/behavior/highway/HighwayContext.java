@@ -59,6 +59,7 @@ import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.monster.Shulker;
 import net.minecraft.world.entity.vehicle.boat.AbstractBoat;
@@ -167,6 +168,7 @@ public class HighwayContext {
     private HighwayState emergencyEatReturnState = HighwayState.Nothing;
     private Entity currentMobTarget = null;
     private final Map<java.util.UUID, Long> ignoredMobs = new HashMap<>(); // mobs a stalled chase gave up on, to the game time they stay ignored until
+    private final Map<java.util.UUID, Long> ignoredCrystals = new HashMap<>(); // end crystals CrystalRemoval gave up on, likewise
     // MobCombat's chase-stall clock, kept here because every engagement starts a new MobCombat, see chaseStalled
     private final Map<java.util.UUID, Double> chaseClosestReach = new HashMap<>();
     private int chaseStallTicks = 0;
@@ -728,6 +730,13 @@ public class HighwayContext {
     }
 
     private BlockPos boatLocation = null;
+
+    public void setCrystalLocation(BlockPos crystalLocation) {
+        this.crystalLocation = crystalLocation;
+    }
+
+    /** A highway cell an end crystal stands in the way of, for CrystalRemoval. */
+    private BlockPos crystalLocation = null;
     private boolean inQueue = false;
     private HighwayState stateBeforeQueue = HighwayState.Nothing;
     
@@ -1093,6 +1102,19 @@ public class HighwayContext {
 
     public void clearIgnoredMobs() {
         ignoredMobs.clear();
+        ignoredCrystals.clear();
+    }
+
+    /** Leaves an end crystal out of {@link #isHighwayCorrect} for a while, so a crystal we can't break doesn't send us straight back. */
+    public void ignoreCrystal(Entity crystal, int ticks) {
+        long now = playerContext.world().getGameTime();
+        ignoredCrystals.values().removeIf(until -> until <= now);
+        ignoredCrystals.put(crystal.getUUID(), now + ticks);
+    }
+
+    private boolean isCrystalIgnored(Entity crystal) {
+        Long until = ignoredCrystals.get(crystal.getUUID());
+        return until != null && until > playerContext.world().getGameTime();
     }
 
     /**
@@ -1723,8 +1745,12 @@ public class HighwayContext {
     }
 
     public void attackEntity(Entity target) {
-        Rotation aim = RotationUtils.calcRotationFromVec3d(playerContext.playerHead(),
-                target.getBoundingBox().getCenter(), playerContext.playerRotations());
+        attackEntity(target, target.getBoundingBox().getCenter());
+    }
+
+    /** @param aimAt where on the target to aim, for a hit that has to go over something in front of its middle */
+    public void attackEntity(Entity target, Vec3 aimAt) {
+        Rotation aim = RotationUtils.calcRotationFromVec3d(playerContext.playerHead(), aimAt, playerContext.playerRotations());
         baritone.getLookBehavior().updateTarget(aim, true);
 
         if (playerContext.player().getAttackStrengthScale(0.5f) < 1.0f) {
@@ -5365,6 +5391,7 @@ public class HighwayContext {
                         case Liquids -> BlockUtils.blockToString(playerContext.world().getBlockState(lastLiquid).getBlock()) + " at " + lastLiquid.toShortString();
                         case Blocks -> "blocks that differ, " + String.join("; ", lastMismatches);
                         case Boat -> "a boat at " + boatLocation.toShortString();
+                        case Crystal -> "an end crystal at " + crystalLocation.toShortString();
                         case Air -> "nothing any more";
                     };
             Helper.HELPER.logDirect("The builder has had nothing to do for " + stalled / 20 + " s short of the end at "
@@ -5379,6 +5406,13 @@ public class HighwayContext {
             if (found == HighwayBlockState.Boat) {
                 Helper.HELPER.logDirect("Found a boat, trying to remove blocks around and under it.");
                 transitionTo(HighwayState.BoatRemoval);
+                baritone.getPathingBehavior().cancelEverything();
+                resetTimer();
+                return EndStall.HANDLED;
+            }
+            if (found == HighwayBlockState.Crystal) {
+                Helper.HELPER.logDirect("Found an end crystal in the way at " + crystalLocation.toShortString() + ", breaking it from behind cover.");
+                transitionTo(HighwayState.CrystalRemoval);
                 baritone.getPathingBehavior().cancelEverything();
                 resetTimer();
                 return EndStall.HANDLED;
@@ -6061,6 +6095,12 @@ public class HighwayContext {
                                             renderLockBuilding.unlock();
                                             return HighwayBlockState.Boat;
                                         }
+                                        if (entity instanceof EndCrystal && entity.isAlive() && !isCrystalIgnored(entity)) {
+                                            // never moves, so no hole drops it: it has to be broken
+                                            crystalLocation = new BlockPos(blockX, blockY, blockZ);
+                                            renderLockBuilding.unlock();
+                                            return HighwayBlockState.Crystal;
+                                        }
                                     }
                                 }
 
@@ -6215,6 +6255,10 @@ public class HighwayContext {
 
     public BlockPos boatLocation() {
         return boatLocation;
+    }
+
+    public BlockPos crystalLocation() {
+        return crystalLocation;
     }
 
     /** Slices either side of a dropped entity that are checked for cells the highway builds back. */

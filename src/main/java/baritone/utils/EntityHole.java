@@ -23,6 +23,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.ambient.Bat;
 import net.minecraft.world.entity.animal.FlyingAnimal;
 import net.minecraft.world.entity.animal.happyghast.HappyGhast;
+import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
 import net.minecraft.world.entity.monster.Ghast;
 import net.minecraft.world.entity.monster.Phantom;
 import net.minecraft.world.entity.monster.Vex;
@@ -54,9 +55,13 @@ public final class EntityHole {
 
     private EntityHole() {}
 
-    /** Whether the entity drops into a hole dug under it at all; flyers just hover over it. */
+    /**
+     * Whether the entity drops into a hole dug under it at all. Flyers just hover over it, and an end crystal never
+     * moves at all: the highway breaks those instead (CrystalRemoval).
+     */
     public static boolean falls(Entity entity) {
         return !entity.isNoGravity()
+                && !(entity instanceof EndCrystal)
                 && !(entity instanceof FlyingAnimal)
                 && !(entity instanceof Ghast)
                 && !(entity instanceof HappyGhast)

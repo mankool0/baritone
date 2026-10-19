@@ -256,6 +256,9 @@ public class StateFactory {
             case BoatRemoval -> {
                 return new BoatRemoval(highwayState);
             }
+            case CrystalRemoval -> {
+                return new CrystalRemoval(highwayState);
+            }
             case EmergencyGapplePrep -> {
                 return new EmergencyGapplePrep(highwayState);
             }

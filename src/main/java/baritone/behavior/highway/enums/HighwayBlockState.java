@@ -21,5 +21,6 @@ public enum HighwayBlockState {
     Air,
     Liquids,
     Blocks,
-    Boat
+    Boat,
+    Crystal
 }

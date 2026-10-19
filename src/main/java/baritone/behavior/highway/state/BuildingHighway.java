@@ -338,6 +338,14 @@ public class BuildingHighway extends State {
                 return;
             }
 
+            if (curState == HighwayBlockState.Crystal) {
+                Helper.HELPER.logDirect("Found an end crystal in the way at " + context.crystalLocation().toShortString() + ", breaking it from behind cover.");
+                context.transitionTo(HighwayState.CrystalRemoval);
+                context.baritone().getPathingBehavior().cancelEverything();
+                context.resetTimer();
+                return;
+            }
+
             int blocksCheckDist = Math.max(0, tempCheckBackDist - context.settings().highwayInvalidBlockCheckMargin.value);
             BlockPos blocksCheckPos = startCheckPos;
             BlockPos blocksCheckPosLiq = startCheckPosLiq;
