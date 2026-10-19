@@ -23,6 +23,7 @@ import baritone.api.event.events.TickEvent;
 import baritone.api.utils.IInputOverrideHandler;
 import baritone.api.utils.input.Input;
 import baritone.behavior.Behavior;
+import net.minecraft.client.player.ClientInput;
 import net.minecraft.client.player.KeyboardInput;
 
 import java.util.HashMap;
@@ -112,15 +113,26 @@ public final class InputOverrideHandler extends Behavior implements IInputOverri
 
         if (inControl()) {
             if (ctx.player().input.getClass() != PlayerMovementInput.class) {
-                ctx.player().input = new PlayerMovementInput(this);
+                swapInput(new PlayerMovementInput(this));
             }
         } else {
             if (ctx.player().input.getClass() == PlayerMovementInput.class) { // allow other movement inputs that aren't this one, e.g. for a freecam
-                ctx.player().input = new KeyboardInput(ctx.minecraft().options);
+                swapInput(new KeyboardInput(ctx.minecraft().options));
             }
         }
         // only set it if it was previously incorrect
         // gotta do it this way, or else it constantly thinks you're beginning a double tap W sprint lol
+    }
+
+    /**
+     * The player reads the keys of the last tick before this one's: a sneak held then still slows
+     * this tick down and keeps it from starting to sprint. A new input starts with none pressed, so
+     * it takes over the old one's, or the tick after letting go of a sneak would run at full speed
+     * where the server's movement checks expect it slowed.
+     */
+    private void swapInput(ClientInput next) {
+        next.keyPresses = ctx.player().input.keyPresses;
+        ctx.player().input = next;
     }
 
     private boolean inControl() {
