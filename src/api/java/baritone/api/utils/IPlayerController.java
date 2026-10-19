@@ -69,6 +69,14 @@ public interface IPlayerController {
     boolean clickBlockFinishing(BlockPos loc, Direction face);
 
     /**
+     * Finishes a dig whose start packet went out on an earlier tick, predicting the break like a
+     * vanilla finished dig. The server times the dig from that start, so the block breaks once
+     * {@link #SERVER_FINISH_DIG_PROGRESS} of its break time has passed, without the client mining
+     * it out to the end. A refused break is restored by the server's ack.
+     */
+    boolean finishBlock(BlockPos loc, Direction face);
+
+    /**
      * Fraction of a block's break time after which the vanilla server accepts a finished dig.
      */
     float SERVER_FINISH_DIG_PROGRESS = 0.7f;

@@ -87,14 +87,19 @@ public class FarmingEnderChest extends State {
                 return;
             }
 
-            // First chest of the session so break it the legitimate way (real client mining) so
-            // the server's destroy target is set. With instant mining off every chest goes this
-            // way and the destroy target is never reused.
-            if (!instantMine || !context.instantMineCalibrated()) {
+            // With instant mining off every chest is broken the legitimate way (real client mining).
+            if (!instantMine) {
                 if (context.calibrationBreakTick(context.placeLoc())) {
-                    if (instantMine) {
-                        context.setInstantMineCalibrated(true);
-                    }
+                    context.setEchestPlacedServerSide(false);
+                }
+                return;
+            }
+
+            // First chest of the session: make placeLoc the server's dig target, so a lone stop
+            // breaks every chest after it.
+            if (!context.instantMineCalibrated()) {
+                if (context.calibrationTick(context.placeLoc())) {
+                    context.setInstantMineCalibrated(true);
                     context.setEchestPlacedServerSide(false);
                 }
                 return;
@@ -105,6 +110,7 @@ public class FarmingEnderChest extends State {
             return;
         } else {
             context.setEchestPlacedServerSide(false);
+            context.farmChestCleared();
         }
 
         // placeLoc is clear (or gets cleared by this tick's break): decide whether to keep farming.

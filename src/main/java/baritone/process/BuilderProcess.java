@@ -256,7 +256,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
 
     public BuilderProcess(Baritone baritone) {
         super(baritone);
-        doubleMine = new DoubleMine(ctx);
+        doubleMine = new DoubleMine(ctx, baritone.getServerDigSpeed());
         baritone.getGameEventHandler().registerEventListener(doubleMine);
     }
 

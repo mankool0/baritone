@@ -37,6 +37,7 @@ import baritone.utils.GuiClick;
 import baritone.utils.InputOverrideHandler;
 import baritone.utils.PathingControlManager;
 import baritone.utils.ServerDigSpeed;
+import baritone.utils.ServerDigTarget;
 import baritone.utils.player.BaritonePlayerContext;
 import net.minecraft.client.Minecraft;
 
@@ -104,6 +105,7 @@ public class Baritone implements IBaritone {
 
     private final IPlayerContext playerContext;
     private final ServerDigSpeed serverDigSpeed;
+    private final ServerDigTarget serverDigTarget;
     private final WorldProvider worldProvider;
 
     public BlockStateInterface bsi;
@@ -123,6 +125,8 @@ public class Baritone implements IBaritone {
         this.playerContext = new BaritonePlayerContext(this, mc);
         this.serverDigSpeed = new ServerDigSpeed(this.playerContext);
         this.gameEventHandler.registerEventListener(this.serverDigSpeed);
+        this.serverDigTarget = new ServerDigTarget(this.playerContext);
+        this.gameEventHandler.registerEventListener(this.serverDigTarget);
 
         {
             this.lookBehavior         = this.registerBehavior(LookBehavior::new);
@@ -180,6 +184,10 @@ public class Baritone implements IBaritone {
 
     public ServerDigSpeed getServerDigSpeed() {
         return this.serverDigSpeed;
+    }
+
+    public ServerDigTarget getServerDigTarget() {
+        return this.serverDigTarget;
     }
 
     @Override

@@ -72,13 +72,15 @@ public final class DoubleMine implements AbstractGameEventListener {
     private static final int PARK_TIMEOUT_TICKS = 40;
 
     private final IPlayerContext ctx;
+    private final ServerDigSpeed digSpeed;
     private Dig regular;
     private Dig parked;
     private boolean sending;
     private boolean sentThisTick;
 
-    public DoubleMine(IPlayerContext ctx) {
+    public DoubleMine(IPlayerContext ctx, ServerDigSpeed digSpeed) {
         this.ctx = ctx;
+        this.digSpeed = digSpeed;
     }
 
     /**
@@ -91,13 +93,13 @@ public final class DoubleMine implements AbstractGameEventListener {
     public BlockPos tick(List<Tuple<BetterBlockPos, Rotation>> candidates) {
         long now = ctx.world().getGameTime();
         sentThisTick = false;
-        if (parked != null && (gone(parked) || now > parked.finishAt + PARK_TIMEOUT_TICKS)) {
+        if (parked != null && (gone(parked) || now > parked.start + ServerDigTarget.ticksToReach(progress(parked), 1.0f) + PARK_TIMEOUT_TICKS)) {
             parked = null;
         }
         if (regular != null && (gone(regular) || !ctx.player().isWithinBlockInteractionRange(regular.pos, 0.5))) {
             regular = null;
         }
-        if (regular != null && now >= regular.finishAt) {
+        if (regular != null && now >= regular.start + ServerDigTarget.ticksToReach(progress(regular), IPlayerController.SERVER_FINISH_DIG_PROGRESS) + FINISH_MARGIN_TICKS) {
             send(regular, ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, true);
             regular = null;
         }
@@ -114,7 +116,7 @@ public final class DoubleMine implements AbstractGameEventListener {
                 break; // with nothing to start in its place, finishing in the regular slot is quicker
             }
             send(regular, ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, false);
-            parked = regular.park();
+            parked = regular;
             regular = null;
         }
         if (sentThisTick) {
@@ -177,14 +179,24 @@ public final class DoubleMine implements AbstractGameEventListener {
 
     private Dig start(Tuple<BetterBlockPos, Rotation> candidate, long now) {
         BlockPos pos = new BlockPos(candidate.getA().x, candidate.getA().y, candidate.getA().z);
-        BlockState state = ctx.world().getBlockState(pos);
-        MovementHelper.switchToBestToolFor(ctx, state);
-        float progress = state.getDestroyProgress(ctx.player(), ctx.world(), pos);
-        Dig dig = new Dig(pos, face(pos, candidate.getB()), state, now,
-                now + ticksToReach(progress, IPlayerController.SERVER_FINISH_DIG_PROGRESS) + FINISH_MARGIN_TICKS,
-                now + ticksToReach(progress, 1.0f));
+        Dig dig = new Dig(pos, face(pos, candidate.getB()), ctx.world().getBlockState(pos), now);
         send(dig, ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, false);
         return dig;
+    }
+
+    /**
+     * Per-tick progress with the tool the dig finishes with. Read again every tick rather than
+     * once at the start, the way the server judges a stop: progress of the moment times the
+     * elapsed ticks. Fixed at the start, a dig started with a block in hand would be timed
+     * without the pick's Efficiency, which the server only applies a tick later.
+     */
+    private float progress(Dig dig) {
+        var inventory = ctx.player().getInventory();
+        int previous = inventory.getSelectedSlot();
+        MovementHelper.switchToBestToolFor(ctx, dig.state);
+        float progress = digSpeed.progress(dig.state, dig.pos);
+        inventory.setSelectedSlot(previous);
+        return progress;
     }
 
     /**
@@ -226,49 +238,23 @@ public final class DoubleMine implements AbstractGameEventListener {
         return Direction.getApproximateNearest(ctx.playerHead().subtract(Vec3.atCenterOf(pos)));
     }
 
-    /**
-     * @return the elapsed ticks after which the server counts the dig as reaching the fraction;
-     * it compares {@code progress * (elapsed + 1)} in float
-     */
-    private static int ticksToReach(float progress, float fraction) {
-        int elapsed = Math.max(0, (int) Math.ceil(fraction / progress) - 1);
-        while (elapsed > 0 && progress * (float) elapsed >= fraction) {
-            elapsed--;
-        }
-        while (progress * (float) (elapsed + 1) < fraction) {
-            elapsed++;
-        }
-        return elapsed;
-    }
-
     private static final class Dig {
 
         final BlockPos pos;
         final Direction face;
         final BlockState state;
-        final long start;
         /**
-         * Regular slot: the tick its finishing stop may be sent. Parked: the tick the server
-         * should have broken it.
+         * The tick the start was sent. The server's delayed slot keeps the regular dig's start
+         * tick, so a parked block finishes a full break time after it was first started, not
+         * after it was parked.
          */
-        final long finishAt;
-        final long fullBreakAt;
+        final long start;
 
-        Dig(BlockPos pos, Direction face, BlockState state, long start, long finishAt, long fullBreakAt) {
+        Dig(BlockPos pos, Direction face, BlockState state, long start) {
             this.pos = pos;
             this.face = face;
             this.state = state;
             this.start = start;
-            this.finishAt = finishAt;
-            this.fullBreakAt = fullBreakAt;
-        }
-
-        /**
-         * The server's delayed slot keeps the regular dig's start tick, so a parked block finishes
-         * a full break time after it was first started, not after it was parked.
-         */
-        Dig park() {
-            return new Dig(pos, face, state, start, fullBreakAt, fullBreakAt);
         }
     }
 }

@@ -35,6 +35,7 @@ import baritone.pathing.movement.MovementHelper;
 import baritone.process.BuilderProcess;
 import baritone.utils.BrokenBlocks;
 import baritone.utils.EntityHole;
+import baritone.utils.ServerDigTarget;
 import baritone.utils.accessor.IClientLevel;
 import it.unimi.dsi.fastutil.ints.IntArrayFIFOQueue;
 import net.minecraft.client.multiplayer.prediction.BlockStatePredictionHandler;
@@ -569,8 +570,11 @@ public class HighwayContext {
 
     public void setInstantMineCalibrated(boolean instantMineCalibrated) {
         this.instantMineCalibrated = instantMineCalibrated;
+        this.calibrationProbing = false;
         if (!instantMineCalibrated) {
             this.instantMineCalibrationHitting = false;
+            this.calibrationStart = Long.MIN_VALUE;
+            this.calibrationProbed = false;
         }
     }
 
@@ -578,6 +582,13 @@ public class HighwayContext {
     // Whether we were mid-break last tick during the legit calibration break. The client-side
     // isDestroying flag must be saved/restored each tick since we never actually hold the attack key.
     private boolean instantMineCalibrationHitting = false;
+    // ServerDigTarget#startTick of the start the calibration sent itself, telling a dig target it
+    // set from one an earlier dig left there
+    private long calibrationStart = Long.MIN_VALUE;
+    // a stop went out at a target an earlier dig left, with a resync behind it to tell whether it broke the chest
+    private boolean calibrationProbing = false;
+    // that check is done: once it fails, the target isn't where our packets say
+    private boolean calibrationProbed = false;
 
     public BlockPos instantMineLastBlock() {
         return instantMineLastBlock;
@@ -6024,6 +6035,75 @@ public class HighwayContext {
         instantMineCalibrationHitting = !broken;
         controller.setHittingBlock(false);
         return broken;
+    }
+
+    /**
+     * One tick of calibrating on the chest at pos, which the server has: makes pos the server's dig
+     * target and breaks the chest with a stop once the server's dig timer covers it, rather than
+     * mining it out client-side. A target already at pos from an earlier dig, usually the box mined
+     * there, needs no start of its own, but the pipeline would stall on a wrong one, so this chest
+     * checks it first: a stop with a resync behind it, then {@link #farmChestCleared} once the
+     * chest goes. If it's still there once the resync is answered, the target is elsewhere.
+     *
+     * @return whether this tick broke the chest and calibrated pos
+     */
+    public boolean calibrationTick(BlockPos pos) {
+        if (playerContext.minecraft().gameMode == null) return false;
+        Direction face = faceMineTarget(pos);
+        instantMineDirection = face;
+        instantMineLastBlock = pos;
+        if (calibrationProbing) {
+            if (!farmPlaceLocConfirmed()) {
+                return false;
+            }
+            calibrationProbing = false;
+        }
+
+        ServerDigTarget target = baritone.getServerDigTarget();
+        boolean here = target.isTarget(pos);
+        boolean ours = here && target.startTick() == calibrationStart;
+        IPlayerController controller = playerContext.playerController();
+        if (!ours && (!here || calibrationProbed)) {
+            controller.setHittingBlock(false); // a fresh start, not more of a dig under way
+            controller.syncHeldItem();
+            controller.clickBlock(pos, face);
+            playerContext.player().swing(InteractionHand.MAIN_HAND);
+            // Never mined out client-side: left hitting, the attack key we don't hold aborts it.
+            controller.setHittingBlock(false);
+            calibrationStart = target.startTick();
+            return false;
+        }
+        if (!target.stopBreaks(pos, baritone.getServerDigSpeed().progress(playerContext.world().getBlockState(pos), pos))) {
+            return false;
+        }
+        if (ours) {
+            controller.syncHeldItem();
+            controller.finishBlock(pos, face);
+            playerContext.player().swing(InteractionHand.MAIN_HAND);
+            try {
+                controller.setDestroyDelay(0);
+            } catch (Exception ignored) {}
+            return true;
+        }
+        // the chest on screen is the server's only once our place is answered
+        if (farmPlacesInFlight() > 0) {
+            return false;
+        }
+        instantMineTick(pos);
+        farmPlaceLocConfirmed(); // sends the resync, after the stop
+        calibrationProbing = true;
+        calibrationProbed = true;
+        return false;
+    }
+
+    /**
+     * placeLoc shows air. While a calibration probe is out nothing but the server clears the
+     * chest, which means the probe's stop found the target.
+     */
+    public void farmChestCleared() {
+        if (calibrationProbing) {
+            setInstantMineCalibrated(true);
+        }
     }
 
     public void instantMineTick(BlockPos pos) {

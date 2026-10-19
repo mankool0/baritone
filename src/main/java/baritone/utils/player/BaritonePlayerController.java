@@ -124,6 +124,19 @@ public final class BaritonePlayerController implements IPlayerController {
         return true;
     }
 
+    @Override
+    public boolean finishBlock(BlockPos loc, Direction face) {
+        if (!beginOneTickDig(loc, face)) {
+            return false;
+        }
+        MultiPlayerGameMode gameMode = mc.gameMode;
+        ((IPlayerControllerMP) gameMode).callStartPrediction(mc.level, sequence -> {
+            gameMode.destroyBlock(loc);
+            return new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, loc, face, sequence);
+        });
+        return true;
+    }
+
     /**
      * The checks startDestroyBlock makes before a dig, and the abort of one in progress elsewhere.
      *
