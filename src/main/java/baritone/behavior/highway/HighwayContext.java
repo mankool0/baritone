@@ -2934,6 +2934,8 @@ public class HighwayContext {
     private int farmOffhandDecrements = 0;
     // Sequence of the click asking the server to resend placeLoc since the last dig, -1 if none sent.
     private int farmResyncSequence = -1;
+    // Times this farm session has put back the block its chests go on top of.
+    private int farmSupportRebuilds = 0;
 
     private int obsidianCountAll() {
         int count = getItemCountInventory(Item.getId(Blocks.OBSIDIAN.asItem()));
@@ -2960,11 +2962,43 @@ public class HighwayContext {
         farmOffhandStack = ItemStack.EMPTY;
         farmOffhandDecrements = 0;
         farmResyncSequence = -1;
+        farmSupportRebuilds = 0;
+    }
+
+    /**
+     * Prediction sequences start over on a new level, which a reconnect brings. Places recorded on
+     * the old one would never be acked and hold the farm waiting on them forever, and the new
+     * connection has no dig of ours left to finish instantly.
+     */
+    private void forgetFarmSequencesOfOldLevel(BlockStatePredictionHandler predictions) {
+        int current = predictions.currentSequence();
+        if (!farmUnackedPlaces.isEmpty() && farmUnackedPlaces.lastInt() > current || farmResyncSequence > current) {
+            farmUnackedPlaces.clear();
+            farmOffhandStack = ItemStack.EMPTY;
+            farmOffhandDecrements = 0;
+            farmResyncSequence = -1;
+            setInstantMineCalibrated(false);
+        }
+    }
+
+    /** Whether the block the farm's chests go on top of is still there to place them against */
+    public boolean farmSupportHolds() {
+        BlockPos support = placeLoc().below();
+        return !playerContext.world().getBlockState(support).getCollisionShape(playerContext.world(), support).isEmpty();
+    }
+
+    public int farmSupportRebuilds() {
+        return farmSupportRebuilds;
+    }
+
+    public void noteFarmSupportRebuilt() {
+        farmSupportRebuilds++;
     }
 
     /** Places the next farm chest from the offhand and tracks it until the server acks it */
     public PlaceResult placeFarmEnderChest() {
         BlockStatePredictionHandler predictions = ((IClientLevel) playerContext.minecraft().level).getPredictionHandler();
+        forgetFarmSequencesOfOldLevel(predictions);
         ItemStack offhand = playerContext.player().getOffhandItem();
         int sequence = predictions.currentSequence();
         PlaceResult result = place(placeLoc(), 5.0f, false, false, InteractionHand.OFF_HAND);
@@ -2984,7 +3018,9 @@ public class HighwayContext {
 
     /** Farm places sent that the server hasn't acked yet */
     public int farmPlacesInFlight() {
-        int acked = ((IClientLevel) playerContext.minecraft().level).getLastAckedSequence();
+        IClientLevel level = (IClientLevel) playerContext.minecraft().level;
+        forgetFarmSequencesOfOldLevel(level.getPredictionHandler());
+        int acked = level.getLastAckedSequence();
         while (!farmUnackedPlaces.isEmpty() && farmUnackedPlaces.firstInt() <= acked) {
             farmUnackedPlaces.dequeueInt();
         }
@@ -3019,6 +3055,7 @@ public class HighwayContext {
      */
     public boolean farmPlaceLocConfirmed() {
         IClientLevel level = (IClientLevel) playerContext.minecraft().level;
+        forgetFarmSequencesOfOldLevel(level.getPredictionHandler());
         if (farmResyncSequence == -1) {
             requestBlockResync(placeLoc());
             farmResyncSequence = level.getPredictionHandler().currentSequence();
@@ -3607,6 +3644,12 @@ public class HighwayContext {
         baritone.getBuilderProcess().build("supportBlock", supportSchem, pos);
     }
 
+    /** Builds a support out of this block only, rather than whatever throwaway block is at hand */
+    public void buildSupportBlock(BlockPos pos, Block block) {
+        WhiteBlackSchematic supportSchem = new WhiteBlackSchematic(1, 1, 1, blackListBlocks(), block.defaultBlockState(), false, false, false);
+        baritone.getBuilderProcess().build("supportBlock", supportSchem, pos);
+    }
+
     /**
      * Out over open ground, like an intersection, the side lane has nothing under the cells we
      * stand in to place and open the box. The go-to states walk to the exact cell above that floor
@@ -3739,7 +3782,7 @@ public class HighwayContext {
         return badShulkerSpots.contains(new BlockPos(pos.getX(), pos.getY(), pos.getZ()));
     }
 
-    private void rememberBadShulkerSpot(BlockPos spot) {
+    public void rememberBadShulkerSpot(BlockPos spot) {
         if (badShulkerSpots.size() >= SHULKER_SPOT_MEMORY) {
             badShulkerSpots.clear(); // the lane moves on, so old entries can never come up again
         }

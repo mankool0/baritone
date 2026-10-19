@@ -17,16 +17,19 @@
 
 package baritone.behavior.highway.state;
 
+import baritone.api.utils.BlockUtils;
 import baritone.api.utils.Helper;
 import baritone.api.utils.Rotation;
 import baritone.api.utils.RotationUtils;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.AirBlock;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -36,10 +39,16 @@ public class FarmingEnderChest extends State {
 
     /** Ticks to wait for the server to ack the places in flight before leaving anyway. */
     private static final int IN_FLIGHT_WAIT_TICKS = 100;
+    /** Ticks to let the builder pick up a dispatched support build before checking on it. */
+    private static final int BUILDER_SPINUP_TICKS = 5;
+    /** Supports to put back in one farm session before giving up on the spot. */
+    private static final int MAX_SUPPORT_REBUILDS = 3;
 
     // Decided to stop; held while the places in flight land so the stop isn't re-decided and re-logged.
     private boolean stopping;
     private int inFlightWaitTicks;
+    // Ticks since the support build went out, -1 if none is under way.
+    private int sinceSupportDispatch = -1;
 
     public FarmingEnderChest(HighwayState state) {
         super(state);
@@ -47,6 +56,25 @@ public class FarmingEnderChest extends State {
 
     @Override
     public void handle(HighwayContext context) {
+        // Putting back the block the chests go on. Wait it out first: the stuck-spot clear below
+        // would take the builder over.
+        if (sinceSupportDispatch >= 0) {
+            if (!context.baritone().getBuilderProcess().isPaused() && context.baritone().getBuilderProcess().isActive()) {
+                sinceSupportDispatch = BUILDER_SPINUP_TICKS;
+                context.resetTimer();
+                return;
+            }
+            if (sinceSupportDispatch < BUILDER_SPINUP_TICKS) {
+                sinceSupportDispatch++;
+                return;
+            }
+            // Done, or paused because it couldn't: either way the next fresh place checks again.
+            // The pick check below swaps back from the block the builder held.
+            sinceSupportDispatch = -1;
+            context.baritone().getPathingBehavior().cancelEverything();
+            context.resetTimer();
+        }
+
         // Stuck too long on this spot: clear it and force a fresh calibration break.
         if (context.timer() > 120) {
             context.baritone().getBuilderProcess().clearArea(context.placeLoc(), context.placeLoc());
@@ -160,6 +188,14 @@ public class FarmingEnderChest extends State {
                 context.playerContext().world().removeBlock(context.placeLoc(), false);
             }
         } else {
+            // Something dug out the block the chests go on. Out on the road there's usually nothing
+            // else next to placeLoc to click, so every place would fall through. Only checked with
+            // placeLoc clear on screen: the builder could take a stale chest there for a face to
+            // place the support against.
+            if (!context.farmSupportHolds()) {
+                rebuildSupport(context);
+                return;
+            }
             // Nothing placed yet: face the support block and drop a fresh ender chest from the offhand.
             // A pipelining tick keeps its aim on the mine target instead (set by instantMineTick above).
             Optional<Rotation> support = RotationUtils.reachable(context.playerContext(), context.placeLoc().below(), context.playerContext().playerController().getBlockReachDistance());
@@ -174,5 +210,41 @@ public class FarmingEnderChest extends State {
             context.setLastEchestPlaceTick(context.playerContext().player().tickCount);
             context.resetTimer();
         }
+    }
+
+    private void rebuildSupport(HighwayContext context) {
+        BlockPos support = context.placeLoc().below();
+        String found = BlockUtils.blockToString(context.playerContext().world().getBlockState(support).getBlock());
+        Block block = supportBlock(context);
+        if (block == null || context.farmSupportRebuilds() >= MAX_SUPPORT_REBUILDS) {
+            // The next farm's spot picker passes over a known-bad spot and sets up somewhere else,
+            // support included. The leftover chests stay in the inventory for it.
+            context.rememberBadShulkerSpot(context.placeLoc());
+            Helper.HELPER.logDirect("Ending the farm: the block under the ender chests at " + support.toShortString() + " is " + found
+                    + (block == null ? " and there's no obsidian or netherrack to put back" : " again after putting one back " + context.farmSupportRebuilds() + " times")
+                    + ", the next farm picks another spot");
+            stopping = true;
+            return;
+        }
+        Helper.HELPER.logDirect("The block under the ender chests at " + support.toShortString() + " is " + found + ", putting " + BlockUtils.blockToString(block) + " back");
+        context.noteFarmSupportRebuilt();
+        // the builder digs whatever is in the way, which moves the server's dig target
+        context.setInstantMineCalibrated(false);
+        context.buildSupportBlock(support, block);
+        sinceSupportDispatch = 0;
+        context.resetTimer();
+    }
+
+    /**
+     * The support is usually a cell of the road surface, so obsidian, and netherrack only when
+     * there's none. Null when we carry neither.
+     */
+    private static Block supportBlock(HighwayContext context) {
+        for (Block block : new Block[]{Blocks.OBSIDIAN, Blocks.NETHERRACK}) {
+            if (context.getItemCountInventory(Item.getId(block.asItem())) > 0) {
+                return block;
+            }
+        }
+        return null;
     }
 }
