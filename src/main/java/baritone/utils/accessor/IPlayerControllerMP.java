@@ -31,6 +31,11 @@ public interface IPlayerControllerMP {
 
     void callSyncCurrentPlayItem();
 
+    /**
+     * @return the hotbar slot last sent to the server as held
+     */
+    int getCarriedIndex();
+
     void setDestroyDelay(int destroyDelay);
 
     void callStartPrediction(ClientLevel level, PredictiveAction action);

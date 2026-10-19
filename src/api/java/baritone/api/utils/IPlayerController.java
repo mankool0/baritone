@@ -54,6 +54,13 @@ public interface IPlayerController {
     boolean clickBlock(BlockPos loc, Direction face);
 
     /**
+     * Breaks a block the server destroys on the start packet alone, predicting the break the way
+     * {@link #clickBlock} only does when the client judges the block instant itself. For when the
+     * client's view of the dig speed lags the server's.
+     */
+    boolean clickBlockInstant(BlockPos loc, Direction face);
+
+    /**
      * Starts and finishes digging a block in the same tick. The server accepts a finished dig once
      * {@link #SERVER_FINISH_DIG_PROGRESS} of the break time has passed, so this breaks any block
      * that mines at least that much per tick, not just the ones {@link #clickBlock} breaks

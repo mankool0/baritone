@@ -75,6 +75,10 @@ public abstract class MixinPlayerController implements IPlayerControllerMP {
     @Override
     public abstract void callSyncCurrentPlayItem();
 
+    @Accessor("carriedIndex")
+    @Override
+    public abstract int getCarriedIndex();
+
     @Accessor("destroyDelay")
     @Override
     public abstract void setDestroyDelay(int destroyDelay);

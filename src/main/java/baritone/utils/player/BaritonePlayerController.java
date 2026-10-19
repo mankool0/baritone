@@ -95,7 +95,41 @@ public final class BaritonePlayerController implements IPlayerController {
     }
 
     @Override
+    public boolean clickBlockInstant(BlockPos loc, Direction face) {
+        if (!beginOneTickDig(loc, face)) {
+            return false;
+        }
+        MultiPlayerGameMode gameMode = mc.gameMode;
+        ((IPlayerControllerMP) gameMode).callStartPrediction(mc.level, sequence -> {
+            gameMode.destroyBlock(loc);
+            return new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, loc, face, sequence);
+        });
+        return true;
+    }
+
+    @Override
     public boolean clickBlockFinishing(BlockPos loc, Direction face) {
+        if (!beginOneTickDig(loc, face)) {
+            return false;
+        }
+        MultiPlayerGameMode gameMode = mc.gameMode;
+        IPlayerControllerMP accessor = (IPlayerControllerMP) gameMode;
+        accessor.callStartPrediction(mc.level, sequence -> new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, loc, face, sequence));
+        // predicted under the finishing packet's sequence like a vanilla finished dig, so a refused
+        // break is restored by the server's ack instead of leaving ghost air
+        accessor.callStartPrediction(mc.level, sequence -> {
+            gameMode.destroyBlock(loc);
+            return new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, loc, face, sequence);
+        });
+        return true;
+    }
+
+    /**
+     * The checks startDestroyBlock makes before a dig, and the abort of one in progress elsewhere.
+     *
+     * @return whether the block may be dug
+     */
+    private boolean beginOneTickDig(BlockPos loc, Direction face) {
         MultiPlayerGameMode gameMode = mc.gameMode;
         IPlayerControllerMP accessor = (IPlayerControllerMP) gameMode;
         if (mc.player.blockActionRestricted(mc.level, loc, gameMode.getPlayerMode()) || !mc.level.getWorldBorder().isWithinBounds(loc)) {
@@ -107,13 +141,6 @@ public final class BaritonePlayerController implements IPlayerController {
             mc.getConnection().send(new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.ABORT_DESTROY_BLOCK, accessor.getCurrentBlock(), face));
             accessor.setIsHittingBlock(false);
         }
-        accessor.callStartPrediction(mc.level, sequence -> new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, loc, face, sequence));
-        // predicted under the finishing packet's sequence like a vanilla finished dig, so a refused
-        // break is restored by the server's ack instead of leaving ghost air
-        accessor.callStartPrediction(mc.level, sequence -> {
-            gameMode.destroyBlock(loc);
-            return new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, loc, face, sequence);
-        });
         return true;
     }
 

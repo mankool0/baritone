@@ -983,8 +983,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         }
         // plain BlockPos on purpose: the position flows into vanilla world mutation
         BlockPos pos = new BlockPos(clicked.x, clicked.y, clicked.z);
+        // instant by the server's judgment, which the client's may not share yet
         boolean dug = packets == 1
-                ? ctx.playerController().clickBlock(pos, bhr.getDirection())
+                ? ctx.playerController().clickBlockInstant(pos, bhr.getDirection())
                 : ctx.playerController().clickBlockFinishing(pos, bhr.getDirection());
         if (!dug) {
             return 0;
@@ -1283,7 +1284,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             }
             BetterBlockPos pos = info.get().getA();
             float progress = printerBreakProgress(bcc.get(pos), pos);
-            if (progress > 0 && progress < IPlayerController.SERVER_FINISH_DIG_PROGRESS) {
+            // a start the client's own judgment has instant clears the block in an anticheat's
+            // copy of the world while the server is still digging it; the two agree again shortly
+            if (progress > 0 && progress < IPlayerController.SERVER_FINISH_DIG_PROGRESS && !printerClientInstant(bcc.get(pos), pos)) {
                 slow.add(info.get());
             }
         }
@@ -1291,7 +1294,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     }
 
     /**
-     * Per-tick break progress with the tool {@link MovementHelper#switchToBestToolFor} would pick.
+     * Per-tick break progress with the tool {@link MovementHelper#switchToBestToolFor} would pick,
+     * as the server judges a dig sent this tick, and instant only if the client's judgment agrees;
+     * 0 while only the client's has it instant.
      * Probes with the same switch the dig itself performs, so aiming and firing can never disagree
      * about what is instant.
      */
@@ -1299,9 +1304,22 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         var inventory = ctx.player().getInventory();
         int previous = inventory.getSelectedSlot();
         MovementHelper.switchToBestToolFor(ctx, state);
-        float progress = state.getDestroyProgress(ctx.player(), ctx.world(), pos);
+        float progress = baritone.getServerDigSpeed().progress(state, pos);
         inventory.setSelectedSlot(previous);
         return progress;
+    }
+
+    /**
+     * Whether the client's own judgment has the block instant with the tool
+     * {@link MovementHelper#switchToBestToolFor} would pick, probing like printerBreakProgress
+     */
+    private boolean printerClientInstant(BlockState state, BlockPos pos) {
+        var inventory = ctx.player().getInventory();
+        int previous = inventory.getSelectedSlot();
+        MovementHelper.switchToBestToolFor(ctx, state);
+        boolean instant = baritone.getServerDigSpeed().clientInstant(state, pos);
+        inventory.setSelectedSlot(previous);
+        return instant;
     }
 
     /**
@@ -1540,7 +1558,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                 // dig near-instant blocks one at a time with the vanilla click
                 boolean printerTakesIt = printerReady && Baritone.settings().printerBreak.value
                         && printerBreakSafe(pos) && printerBreakPackets(progress) > 0;
-                if (progress < 1.0f && !printerTakesIt && !BlockBreakHelper.breaksNearInstant(progress)) {
+                // instant once the server's dig speed agrees with the client's, a tick or two away
+                boolean waits = progress == 0 && printerClientInstant(state, pos);
+                if (progress < 1.0f && !printerTakesIt && !waits && !BlockBreakHelper.breaksNearInstant(progress)) {
                     // a dig that spans ticks only lands if the crosshair stays on the block, so
                     // anything moving the player has to let go until it's done
                     legitSlowBreakLastTick = true;

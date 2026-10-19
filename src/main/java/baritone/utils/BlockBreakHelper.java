@@ -22,6 +22,7 @@ import baritone.api.utils.IPlayerContext;
 import baritone.api.utils.IPlayerController;
 import baritone.utils.accessor.IPlayerControllerMP;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
@@ -36,12 +37,14 @@ public final class BlockBreakHelper {
     private static final int BASE_BREAK_DELAY = 1;
 
     private final IPlayerContext ctx;
+    private final ServerDigSpeed digSpeed;
     private boolean wasHitting;
     private int breakDelayTimer = 0;
     private final BrokenBlocks broken = new BrokenBlocks();
 
-    BlockBreakHelper(IPlayerContext ctx) {
+    BlockBreakHelper(IPlayerContext ctx, ServerDigSpeed digSpeed) {
         this.ctx = ctx;
+        this.digSpeed = digSpeed;
     }
 
     public void stopBreakingBlock() {
@@ -64,11 +67,21 @@ public final class BlockBreakHelper {
         if (isLeftClick && isBlockTrace) {
             BlockPos pos = ((BlockHitResult) trace).getBlockPos();
             BlockState before = ctx.world().getBlockState(pos);
+            if (digSpeed.mustWait(before, pos)) {
+                // a tick or two until the server's dig speed agrees with the client's, which a
+                // vanilla dig would go by alone
+                return;
+            }
             ctx.playerController().setHittingBlock(wasHitting);
-            if (finishesInOneTick(pos, before)) {
-                // done within the tick like an instant break, so no break delay either
+            float progress = digSpeed.progress(before, pos);
+            if (finishesInOneTick(pos, progress)) {
+                // done within the tick, so no break delay either
                 ctx.playerController().syncHeldItem();
-                if (ctx.playerController().clickBlockFinishing(pos, ((BlockHitResult) trace).getDirection())) {
+                Direction face = ((BlockHitResult) trace).getDirection();
+                boolean dug = progress >= 1.0f
+                        ? ctx.playerController().clickBlockInstant(pos, face)
+                        : ctx.playerController().clickBlockFinishing(pos, face);
+                if (dug) {
                     ctx.player().swing(InteractionHand.MAIN_HAND);
                 }
             } else if (ctx.playerController().hasBrokenBlock()) {
@@ -101,12 +114,15 @@ public final class BlockBreakHelper {
     }
 
     /**
-     * Whether to break this block with {@link IPlayerController#clickBlockFinishing} instead of a
-     * dig that spans ticks
+     * Whether to break this block within the tick with {@link IPlayerController#clickBlockInstant}
+     * or {@link IPlayerController#clickBlockFinishing} instead of a vanilla dig, which judges
+     * instant breaks by the client's lagging view of the dig speed
+     *
+     * @param progress per-tick progress as the server judges it
      */
-    private boolean finishesInOneTick(BlockPos pos, BlockState state) {
+    private boolean finishesInOneTick(BlockPos pos, float progress) {
         if (ctx.playerController().getGameType().isCreative()
-                || !breaksNearInstant(state.getDestroyProgress(ctx.player(), ctx.world(), pos))) {
+                || progress < 1.0f && !breaksNearInstant(progress)) {
             return false;
         }
         // a dig of this block already under way finishes this tick anyway

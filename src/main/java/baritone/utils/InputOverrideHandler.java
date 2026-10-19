@@ -53,7 +53,7 @@ public final class InputOverrideHandler extends Behavior implements IInputOverri
 
     public InputOverrideHandler(Baritone baritone) {
         super(baritone);
-        this.blockBreakHelper = new BlockBreakHelper(baritone.getPlayerContext());
+        this.blockBreakHelper = new BlockBreakHelper(baritone.getPlayerContext(), baritone.getServerDigSpeed());
         this.blockPlaceHelper = new BlockPlaceHelper(baritone.getPlayerContext());
     }
 

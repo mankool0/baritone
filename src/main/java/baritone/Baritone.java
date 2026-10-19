@@ -36,6 +36,7 @@ import baritone.utils.BlockStateInterface;
 import baritone.utils.GuiClick;
 import baritone.utils.InputOverrideHandler;
 import baritone.utils.PathingControlManager;
+import baritone.utils.ServerDigSpeed;
 import baritone.utils.player.BaritonePlayerContext;
 import net.minecraft.client.Minecraft;
 
@@ -102,6 +103,7 @@ public class Baritone implements IBaritone {
     private final CommandManager commandManager;
 
     private final IPlayerContext playerContext;
+    private final ServerDigSpeed serverDigSpeed;
     private final WorldProvider worldProvider;
 
     public BlockStateInterface bsi;
@@ -119,6 +121,8 @@ public class Baritone implements IBaritone {
 
         // Define this before behaviors try and get it, or else it will be null and the builds will fail!
         this.playerContext = new BaritonePlayerContext(this, mc);
+        this.serverDigSpeed = new ServerDigSpeed(this.playerContext);
+        this.gameEventHandler.registerEventListener(this.serverDigSpeed);
 
         {
             this.lookBehavior         = this.registerBehavior(LookBehavior::new);
@@ -172,6 +176,10 @@ public class Baritone implements IBaritone {
     @Override
     public InputOverrideHandler getInputOverrideHandler() {
         return this.inputOverrideHandler;
+    }
+
+    public ServerDigSpeed getServerDigSpeed() {
+        return this.serverDigSpeed;
     }
 
     @Override
