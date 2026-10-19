@@ -206,6 +206,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private boolean legitSlowBreakLastTick;
     private BetterBlockPos legitAimTargetLastTick;
     private final DoubleMine doubleMine;
+    // the hotbar slot the last place went out from, kept to while it lasts so places don't switch back and forth
+    private int lastPlaceSlot = -1;
     private int printerBreakStarvation;
     /**
      * Snapshot of {@link LookBehavior#isMovementInputForced()} taken before the forced inputs are
@@ -217,6 +219,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private int printerNoRotateVerifyAge;
     private boolean printerNoRotateSuppressed;
     private int printerNoRotateSuppressedTicks;
+    // what last kept restockHotbarEarly from moving, so a hotbar that ran dry anyway says why; null once one went through
+    private String restockEarlyBlocker;
 
     private record PrinterAction(boolean placed, boolean broke) {
 
@@ -616,7 +620,12 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     }
 
     private OptionalInt hasAnyItemThatWouldPlace(BlockState desired, HitResult result, Rotation rot) {
-        for (int i = 0; i < 9; i++) {
+        // a slot a swap just filled sits out its settle window while another stack still places
+        int unsettled = -1;
+        for (int n = 0; n < 9; n++) {
+            // the slot the last place went out from first: a stack refilled meanwhile in a lower slot
+            // waits until this one runs out, instead of costing a hotbar switch each way
+            int i = lastPlaceSlot < 0 ? n : n == 0 ? lastPlaceSlot : n <= lastPlaceSlot ? n - 1 : n;
             ItemStack stack = ctx.player().getInventory().getNonEquipmentItems().get(i);
             if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem) || !baritone.getInventoryBehavior().hotbarStackLasts(i, stack)) {
                 continue;
@@ -643,10 +652,15 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                 continue;
             }
             if (valid(wouldBePlaced, desired, true)) {
-                return OptionalInt.of(i);
+                if (!printerSlotUnsettled(i)) {
+                    return OptionalInt.of(i);
+                }
+                if (unsettled == -1) {
+                    unsettled = i;
+                }
             }
         }
-        return OptionalInt.empty();
+        return unsettled == -1 ? OptionalInt.empty() : OptionalInt.of(unsettled);
     }
 
     private static Vec3[] aabbSideMultipliers(Direction side) {
@@ -1019,6 +1033,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             return -1;
         }
         ctx.player().getInventory().setSelectedSlot(slot.getAsInt());
+        lastPlaceSlot = slot.getAsInt();
         placedFrom[slot.getAsInt()] = ctx.player().getMainHandItem().getItem();
         InteractionResult result = ctx.playerController().processRightClickBlock(ctx.player(), ctx.world(), InteractionHand.MAIN_HAND, bhr);
         if (!result.consumesAction()) {
@@ -1168,6 +1183,19 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private boolean printerSlotUnsettled(int slot) {
         return Baritone.settings().allowInventory.value
                 && baritone.getInventoryBehavior().ticksSinceHotbarMove(slot) < Baritone.settings().printerInventorySettleTicks.value;
+    }
+
+    /**
+     * @return the hotbar slots this item was last placed from, where a restock puts it back
+     */
+    private List<Integer> placedFromSlots(Item item) {
+        List<Integer> homes = new ArrayList<>();
+        for (int h = 0; h < 9; h++) {
+            if (placedFrom[h] == item) {
+                homes.add(h);
+            }
+        }
+        return homes;
     }
 
     /**
@@ -1530,6 +1558,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                 legitAimTargetLastTick = new BetterBlockPos(toPlace.get().placeAgainst);
                 baritone.getLookBehavior().updateTarget(rot, true);
                 ctx.player().getInventory().setSelectedSlot(toPlace.get().hotbarSelection);
+                lastPlaceSlot = toPlace.get().hotbarSelection;
                 placedFrom[toPlace.get().hotbarSelection] = ctx.player().getMainHandItem().getItem();
                 baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
                 if (ctx.isLookingAt(toPlace.get().placeAgainst) && ((BlockHitResult) ctx.objectMouseOver()).getDirection().equals(toPlace.get().side)) {
@@ -1544,15 +1573,27 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         if (Baritone.settings().allowInventory.value) {
             ArrayList<Integer> usefulSlots = new ArrayList<>();
             List<BlockState> noValidHotbarOption = new ArrayList<>();
-            outer:
-            for (BlockState desired : desirableOnHotbar) {
+            List<BlockState> onLastHotbarStack = new ArrayList<>();
+            // every nearby cell that wants a block adds it again
+            for (BlockState desired : new LinkedHashSet<>(desirableOnHotbar)) {
+                int first = -1;
+                int stacks = 0;
                 for (int i = 0; i < 9; i++) {
                     if (valid(approxPlaceable.get(i), desired, true)) {
-                        usefulSlots.add(i);
-                        continue outer;
+                        if (first == -1) {
+                            first = i;
+                        }
+                        stacks++;
                     }
                 }
-                noValidHotbarOption.add(desired);
+                if (first == -1) {
+                    noValidHotbarOption.add(desired);
+                    continue;
+                }
+                usefulSlots.add(first);
+                if (stacks == 1) {
+                    onLastHotbarStack.add(desired);
+                }
             }
 
             outer:
@@ -1563,13 +1604,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                             // a move is already in flight; hold instead of clicking again
                             return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
                         }
-                        Item item = ctx.player().getInventory().getNonEquipmentItems().get(i).getItem();
-                        List<Integer> homes = new ArrayList<>();
-                        for (int h = 0; h < 9; h++) {
-                            if (placedFrom[h] == item) {
-                                homes.add(h);
-                            }
-                        }
+                        List<Integer> homes = placedFromSlots(ctx.player().getInventory().getNonEquipmentItems().get(i).getItem());
                         boolean requested;
                         if (Baritone.settings().fillEmptyHotbarSlots.value) {
                             // pull every matching stack the empty slots have room for, not just this one
@@ -1587,8 +1622,58 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                             // awaiting inventory move, so pause
                             return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
                         }
+                        restockEarlyBlocker = null;
                         break outer;
                     }
+                }
+            }
+
+            // Restocking only once the hotbar is dry leaves nothing to place while the last places
+            // are acked, the move waits for a calm tick and the new slots settle. Doing it while the
+            // last stack still lasts hides all of that behind it.
+            if (Baritone.settings().restockHotbarEarly.value && !printerInventoryUnsettled()) {
+                for (BlockState desired : onLastHotbarStack) {
+                    List<Integer> sources = new ArrayList<>();
+                    for (int j = 9; j < 36; j++) {
+                        if (valid(approxPlaceable.get(j), desired, true)) {
+                            sources.add(j);
+                        }
+                    }
+                    if (sources.isEmpty()) {
+                        continue;
+                    }
+                    List<Integer> homes = placedFromSlots(ctx.player().getInventory().getNonEquipmentItems().get(sources.get(0)).getItem());
+                    List<Integer> targets = baritone.getInventoryBehavior().topUpTargets(homes, Baritone.settings().fillEmptyHotbarSlots.value, usefulSlots::contains);
+                    if (targets == null) {
+                        restockEarlyBlocker = "a slot it ran out of is still busy";
+                        continue;
+                    }
+                    if (targets.isEmpty()) {
+                        // one more stack is all it takes to hide the next restock behind this one
+                        int evict = baritone.getInventoryBehavior().topUpEvictionSlot(usefulSlots::contains);
+                        if (evict == -1) {
+                            restockEarlyBlocker = "no free hotbar slot and nothing to swap out";
+                            continue;
+                        }
+                        targets = List.of(evict);
+                    }
+                    if (printerAction.broke()) {
+                        // The clicks would add to this tick's dig packets, and digging a tunnel
+                        // breaks on nearly every tick. printerTick counts the cooldown down first,
+                        // so this holds the next tick's breaks for the move instead.
+                        printerBreakCooldown = Math.max(printerBreakCooldown, 2);
+                        restockEarlyBlocker = "waiting for a tick without breaking";
+                        break;
+                    }
+                    if (baritone.getInventoryBehavior().topUpHotbar(sources, targets)) {
+                        restockEarlyBlocker = null;
+                        break;
+                    }
+                    // a calm tick takes the inventory pauser two ticks to set up; keep the breaks
+                    // off the tick the move goes out on
+                    printerBreakCooldown = Math.max(printerBreakCooldown, 2);
+                    restockEarlyBlocker = "waiting for the inventory move gates";
+                    break;
                 }
             }
         }

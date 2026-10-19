@@ -105,6 +105,15 @@ public final class Settings {
     public final Setting<Boolean> fillEmptyHotbarSlots = new Setting<>(true);
 
     /**
+     * When the builder is down to its last hotbar stack of a block, restock more of it into the
+     * hotbar slots that ran out while that stack still lasts, so placing doesn't stop for the
+     * restock. With no slot free, swaps one hotbar item into the main inventory to make room, first
+     * whatever has no use there, then shulker boxes, ender chests and tools that aren't kept, never
+     * food, totems or kept tools
+     */
+    public final Setting<Boolean> restockHotbarEarly = new Setting<>(true);
+
+    /**
      * Come to a halt before doing any inventory moves. Intended for anticheat such as 2b2t
      */
     public final Setting<Boolean> inventoryMoveOnlyIfStationary = new Setting<>(false);

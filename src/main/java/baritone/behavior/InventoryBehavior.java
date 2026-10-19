@@ -46,6 +46,7 @@ import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.ShulkerBoxBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
@@ -361,14 +362,9 @@ public final class InventoryBehavior extends Behavior implements Helper {
         if (inMainInvy.isEmpty()) {
             return true;
         }
-        List<Integer> targets = refillableHomes(homes, disallowedHotbar);
+        List<Integer> targets = fillTargets(homes, true, disallowedHotbar);
         if (targets == null) {
             return false;
-        }
-        for (int i = 1; i < 8; i++) { // 0 and 8 stay reserved for the sword/pickaxe and throwaway
-            if (!targets.contains(i) && ctx.player().getInventory().getNonEquipmentItems().get(i).isEmpty() && !reservedForTool(i) && !disallowedHotbar.test(i) && !hotbarSlotBusy(i)) {
-                targets.add(i);
-            }
         }
         if (targets.isEmpty()) {
             return attemptToPutOnHotbar(inMainInvy.get(0), disallowedHotbar);
@@ -376,13 +372,102 @@ public final class InventoryBehavior extends Behavior implements Helper {
         if (!inventoryMoveAllowedNow()) {
             return false;
         }
+        fillSlots(inMainInvy, targets);
+        return true;
+    }
+
+    /**
+     * Where a restock goes while the hotbar still holds some: like {@link #attemptToFillHotbarFrom}
+     * but only empty slots and homes a pickup put a throwaway block in, never evicting anything else
+     * for a temporary slot.
+     *
+     * @param fillEmpty also fill empty slots that weren't this item's homes, otherwise just one home
+     * @return null while a home is busy
+     */
+    public List<Integer> topUpTargets(List<Integer> homes, boolean fillEmpty, Predicate<Integer> disallowedHotbar) {
+        List<Integer> targets = fillTargets(homes, fillEmpty, disallowedHotbar);
+        return targets != null && !fillEmpty && targets.size() > 1 ? targets.subList(0, 1) : targets;
+    }
+
+    /**
+     * The hotbar slot an early restock swaps its stack into when none is free: the one holding what
+     * is least likely to be wanted on the hotbar soon. Nothing is lost, the swap puts it where the
+     * restocked stack came from, and the highway moves it back up when a state needs it.
+     *
+     * @return -1 if every slot holds something to keep
+     */
+    public int topUpEvictionSlot(Predicate<Integer> disallowedHotbar) {
+        int best = -1;
+        int bestRank = Integer.MAX_VALUE;
+        for (int i = 1; i < 8; i++) { // 0 and 8 stay reserved for the sword/pickaxe and throwaway
+            if (reservedForTool(i) || disallowedHotbar.test(i) || hotbarSlotBusy(i)) {
+                continue;
+            }
+            int rank = topUpEvictionRank(ctx.player().getInventory().getNonEquipmentItems().get(i));
+            if (rank >= 0 && rank < bestRank) {
+                best = i;
+                bestRank = rank;
+            }
+        }
+        return best;
+    }
+
+    /**
+     * Lower goes first, -1 stays: what's eaten or drunk, since auto-eat and the highway's emergency
+     * eat expect it on the hotbar, and totems.
+     */
+    private static int topUpEvictionRank(ItemStack stack) {
+        if (stack.has(DataComponents.CONSUMABLE) || stack.has(DataComponents.DEATH_PROTECTION)) {
+            return -1;
+        }
+        if (stack.getItem() instanceof BlockItem blockItem && blockItem.getBlock() instanceof ShulkerBoxBlock) {
+            return 1; // only wanted once the ender chests run out
+        }
+        if (stack.is(Items.ENDER_CHEST)) {
+            return 2; // wanted at every farm, which puts them back itself
+        }
+        if (stack.isDamageableItem()) {
+            return 3; // a tool that isn't kept, like the farm's pickaxe
+        }
+        return 0;
+    }
+
+    /**
+     * Moves the stacks into the slots {@link #topUpTargets} gave, if inventory moves are allowed this tick.
+     *
+     * @return whether anything was moved
+     */
+    public boolean topUpHotbar(List<Integer> inMainInvy, List<Integer> targets) {
+        if (inMainInvy.isEmpty() || targets.isEmpty() || !inventoryMoveAllowedNow()) {
+            return false;
+        }
+        fillSlots(inMainInvy, targets);
+        return true;
+    }
+
+    /**
+     * The refillable homes, then with fillEmpty the other empty slots, or null while a home is busy
+     */
+    private List<Integer> fillTargets(List<Integer> homes, boolean fillEmpty, Predicate<Integer> disallowedHotbar) {
+        List<Integer> targets = refillableHomes(homes, disallowedHotbar);
+        if (targets == null || !fillEmpty) {
+            return targets;
+        }
+        for (int i = 1; i < 8; i++) { // 0 and 8 stay reserved for the sword/pickaxe and throwaway
+            if (!targets.contains(i) && ctx.player().getInventory().getNonEquipmentItems().get(i).isEmpty() && !reservedForTool(i) && !disallowedHotbar.test(i) && !hotbarSlotBusy(i)) {
+                targets.add(i);
+            }
+        }
+        return targets;
+    }
+
+    private void fillSlots(List<Integer> inMainInvy, List<Integer> targets) {
         int moves = Math.min(targets.size(), inMainInvy.size());
         for (int m = 0; m < moves; m++) {
             clickSwap(inMainInvy.get(m), targets.get(m));
         }
         ticksSinceLastInventoryMove = 0;
         lastTickRequestedMove = null;
-        return true;
     }
 
     /**
