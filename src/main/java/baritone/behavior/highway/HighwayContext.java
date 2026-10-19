@@ -569,6 +569,48 @@ public class HighwayContext {
         }
     }
 
+    // --- Obsidian threshold drop ------------------------------------------------------------------
+
+    /**
+     * Paving lowers the obsidian count by a few blocks a tick: this tick's places, plus a lagging slot
+     * echo catching up on the ones still in flight. A bigger one-tick drop is a stack the count lost
+     * for a moment, like the last stack being swapped onto the hotbar.
+     */
+    private static final int MAX_OBSIDIAN_SPENT_PER_TICK = 16;
+    private int lastObsidianCount = -1;
+    private boolean obsidianDroppedSuddenly = false;
+
+    public int getObsidianCountInventory() {
+        return getItemCountInventory(Item.getId(Blocks.OBSIDIAN.asItem())) + getItemCountInventory(Item.getId(Blocks.CRYING_OBSIDIAN.asItem()));
+    }
+
+    private void tickObsidianCount() {
+        int count = getObsidianCountInventory();
+        if (lastObsidianCount - count > MAX_OBSIDIAN_SPENT_PER_TICK && count <= settings.highwayObsidianThreshold.value) {
+            obsidianDroppedSuddenly = true;
+        }
+        lastObsidianCount = count;
+    }
+
+    /**
+     * Whether the obsidian count jumped under the threshold rather than being spent down to it. Only
+     * a jump needs the threshold confirm: the builder keeps paving while a confirm runs, and that
+     * spends everything under the threshold before the confirm is over.
+     */
+    public boolean obsidianDroppedSuddenly() {
+        return obsidianDroppedSuddenly;
+    }
+
+    /** The obsidian threshold is no longer tripped, so whatever jump it was confirming has recovered */
+    public void clearObsidianDrop() {
+        obsidianDroppedSuddenly = false;
+    }
+
+    public void resetObsidianDrop() {
+        lastObsidianCount = -1;
+        obsidianDroppedSuddenly = false;
+    }
+
     public int walkBackTimer() {
         return walkBackTimer;
     }
@@ -1966,6 +2008,7 @@ public class HighwayContext {
         checkBackTimer++;
         stuckTimer++;
         tickContainerSync();
+        tickObsidianCount();
         if (thiefHuntFailCooldown > 0) {
             thiefHuntFailCooldown--;
             if (thiefHuntFailCooldown == 0) {

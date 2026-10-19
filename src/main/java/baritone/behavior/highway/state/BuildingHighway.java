@@ -130,16 +130,18 @@ public class BuildingHighway extends State {
         }
 
         // TODO: Change shulker threshold from 0 to a customizable value
-        int obsidian = getObsidianCountInventory(context);
+        int obsidian = context.getObsidianCountInventory();
         int runNeed = obsidian <= context.settings().highwayObsidianThreshold.value && context.paving() ? context.runObsidianNeed(obsidian) : -1;
         if (obsidian <= context.settings().highwayObsidianThreshold.value && context.paving() && (runNeed < 0 || obsidian < runNeed)) {
             int runChests = runNeed < 0 ? -1 : HighwayContext.chestsForObsidian(runNeed, obsidian);
             boolean looseChests = context.looseChestsCoverRun(runChests);
             boolean fetchShulker = !looseChests && context.getShulkerCountInventory(ShulkerType.EnderChest) == 0;
             // The count reads near zero for a tick or two while our last stack is swapped onto the
-            // hotbar, and a fetch has the shulker count to trust as well. One confirm covers the whole
-            // decision: two in a row would keep resetting each other's key.
-            if (!context.thresholdConfirmed(fetchShulker ? "Ender chest shulker count" : "Obsidian count")) {
+            // hotbar, so a jump under the threshold is confirmed first. One confirm covers the whole
+            // decision: two in a row would keep resetting each other's key. A count spent down to the
+            // threshold acts at once, or the builder paves the rest away while the confirm runs.
+            if (!context.inventorySynced()
+                    || (context.obsidianDroppedSuddenly() && !context.thresholdConfirmed(fetchShulker ? "Ender chest shulker count" : "Obsidian count"))) {
                 return;
             }
             // A farm with nowhere to put its drops would cycle the box forever: place, loot nothing, mine, repeat.
@@ -169,6 +171,7 @@ public class BuildingHighway extends State {
         }
         context.clearThresholdConfirm("Obsidian count");
         context.clearThresholdConfirm("Ender chest shulker count");
+        context.clearObsidianDrop();
 
         // Digging: keep loose ender chests topped up for storage access (paving refills them via the obsidian farm above).
         // Cap the threshold below a full stack: a refill tops us up to ~64, and topping fits a single slot (<=64), so a
@@ -379,9 +382,5 @@ public class BuildingHighway extends State {
                 return;
             }
         }
-    }
-
-    private int getObsidianCountInventory(HighwayContext context) {
-        return context.getItemCountInventory(Item.getId(Blocks.OBSIDIAN.asItem())) + context.getItemCountInventory(Item.getId(Blocks.CRYING_OBSIDIAN.asItem()));
     }
 }
