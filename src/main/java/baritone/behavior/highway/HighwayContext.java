@@ -5658,18 +5658,39 @@ public class HighwayContext {
 
     public boolean canWalkThroughAhead() {
         BetterBlockPos feet = playerContext.playerFeet();
-        int x;
-        int z;
+        int stepX;
+        int stepZ;
         if (pattern.isCustom()) {
             Vec3i s1 = pattern.worldStep(sliceIndexNear(feet.x, feet.z));
-            x = feet.x + s1.getX();
-            z = feet.z + s1.getZ();
+            stepX = s1.getX();
+            stepZ = s1.getZ();
         } else {
-            x = feet.x + highwayDirection.getX();
-            z = feet.z + highwayDirection.getZ();
+            stepX = highwayDirection.getX();
+            stepZ = highwayDirection.getZ();
         }
-        return MovementHelper.canWalkThrough(baritone.bsi, x, feet.y, z)
-                && MovementHelper.canWalkThrough(baritone.bsi, x, feet.y + 1, z);
+        if (!bodyPassable(feet.x + stepX, feet.x + stepX, feet.z + stepZ, feet.z + stepZ, feet.y)) {
+            return false;
+        }
+        AABB box = playerContext.player().getBoundingBox();
+        int minX = Mth.floor(box.minX + 1.0E-7);
+        int maxX = Mth.floor(box.maxX - 1.0E-7);
+        int minZ = Mth.floor(box.minZ + 1.0E-7);
+        int maxZ = Mth.floor(box.maxZ - 1.0E-7);
+        boolean xOpen = stepX == 0 || bodyPassable(feet.x + stepX, feet.x + stepX, minZ, maxZ, feet.y);
+        boolean zOpen = stepZ == 0 || bodyPassable(minX, maxX, feet.z + stepZ, feet.z + stepZ, feet.y);
+        return stepX != 0 && stepZ != 0 ? xOpen || zOpen : xOpen && zOpen;
+    }
+
+    private boolean bodyPassable(int minX, int maxX, int minZ, int maxZ, int feetY) {
+        for (int x = minX; x <= maxX; x++) {
+            for (int z = minZ; z <= maxZ; z++) {
+                if (!MovementHelper.canWalkThrough(baritone.bsi, x, feetY, z)
+                        || !MovementHelper.canWalkThrough(baritone.bsi, x, feetY + 1, z)) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     public boolean isPlayerInPortal() {

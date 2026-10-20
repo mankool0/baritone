@@ -730,7 +730,14 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         } else if (!highwayContext.canWalkThroughAhead()) {
             // a solid at body height on an all-correct stretch is schematic-valid (the
             // ledge of a paved section, the wall of a pocket in the floor) and will never
-            // be dug; the creep can't jump it, so release and let the builder path instead
+            // be dug; the creep can't jump it, so release and let the builder path instead.
+            // Vanilla moves the hitbox one axis at a time, so it's not only the cell ahead
+            // of our feet: on a straight, the cell ahead of any column the hitbox overlaps
+            // stops it too. On a diagonal, the hitbox cuts the corner through one of the two
+            // cells beside the one ahead, the way a diagonal movement does, and with both
+            // solid it's stuck in the corner. A narrower road already paved inside a dug lane
+            // leaves a column like that beside it: its obsidian on one side, the rail
+            // column's netherrack at feet level on the other.
             return "blocked at body height ahead";
         } else if (!highwayContext.noPortalAhead()) {
             // never creep into a lit portal waiting for its frame to be mined
