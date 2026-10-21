@@ -20,6 +20,7 @@ package baritone.api.behavior;
 import baritone.api.schematic.ISchematic;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
+import net.minecraft.world.phys.Vec3;
 
 public interface INetherHighwayBuilderBehavior extends IBehavior {
     boolean isBuildingHighwayState();
@@ -45,6 +46,11 @@ public interface INetherHighwayBuilderBehavior extends IBehavior {
      * Whether the given block is in the walk lane rather than one of the rail columns beside it.
      */
     boolean inWalkLane(int x, int z);
+
+    /**
+     * A block's length straight down the highway, the way the walk creep walks it.
+     */
+    Vec3 highwayHeading();
 
     boolean isHighwayActive();
 

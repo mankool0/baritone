@@ -745,6 +745,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         } else if (baritone.getInventoryPauserProcess().calmPausePending()) {
             // release the key while an inventory move waits for a tick without movement input
             return "inventory pause";
+        } else if (baritone.getBuilderProcess().placeInFlightLeftBehind(highwayContext.highwayHeading())) {
+            // a block further on and the printer couldn't place it again if the server turns it down
+            return "waiting on a place behind";
         } else if (pathing) {
             // while a segment executes the path executor owns the movement keys; forcing
             // the walk key under it would shove the player off the moves it planned
@@ -861,6 +864,11 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     @Override
     public boolean inWalkLane(int x, int z) {
         return highwayContext.inWalkLane(x, z);
+    }
+
+    @Override
+    public Vec3 highwayHeading() {
+        return highwayContext.highwayHeading();
     }
 
     @Override

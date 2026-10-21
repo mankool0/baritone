@@ -5882,15 +5882,21 @@ public class HighwayContext {
         return (float) Math.toDegrees(Math.atan2(-highwayDirection.getX(), highwayDirection.getZ()));
     }
 
-    public void faceHighwayDirection() {
+    /** A block's length straight down the highway, the way the walk creep walks it. */
+    public Vec3 highwayHeading() {
         double dirX = pattern.isCustom() ? pattern.periodWorldX() : highwayDirection.getX();
         double dirZ = pattern.isCustom() ? pattern.periodWorldZ() : highwayDirection.getZ();
         double len = Math.sqrt(dirX * dirX + dirZ * dirZ);
-        if (len == 0) {
+        return len == 0 ? Vec3.ZERO : new Vec3(dirX / len, 0, dirZ / len);
+    }
+
+    public void faceHighwayDirection() {
+        Vec3 heading = highwayHeading();
+        if (heading.lengthSqr() == 0) {
             return;
         }
-        dirX /= len;
-        dirZ /= len;
+        double dirX = heading.x;
+        double dirZ = heading.z;
         float yaw = (float) Math.toDegrees(Math.atan2(-dirX, dirZ));
 
         // Both schematic layouts put the walk lane at cross-axis offsets [1, highwayWidth] from

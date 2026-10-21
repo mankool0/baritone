@@ -1076,6 +1076,63 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                 || box.distanceToSqr(new Vec3(feet.x, crouchingEye, feet.z)) <= reachSq);
     }
 
+    /**
+     * Whether walking {@code step} on would take a place the server hasn't answered yet out of the
+     * printer's reach, while it's still in reach from here. Walking on only takes us further from
+     * the ones behind us, so only those count.
+     * <p>
+     * A block we walked back for goes in at the edge of reach, and the moment it's predicted there's
+     * nothing left behind us, so the creep or the next path sets off at once. If the server turns it
+     * down, we're out of reach by the time we hear, and we walk back for it all over again. Waiting
+     * out the round trip lets the printer place it again from where we stand.
+     */
+    public boolean placeInFlightLeftBehind(Vec3 step) {
+        List<BlockPos> targets = ((IClientLevel) ctx.world()).getPendingPlaces().targetsInFlight();
+        if (targets.isEmpty()) {
+            return false;
+        }
+        Vec3 feet = ctx.player().position();
+        Vec3 next = feet.add(step);
+        double reach = ctx.playerController().getBlockReachDistance();
+        double reachSq = reach * reach;
+        BlockStateInterface bsi = null;
+        for (BlockPos target : targets) {
+            if ((target.getX() + 0.5 - feet.x) * step.x + (target.getZ() + 0.5 - feet.z) * step.z >= 0) {
+                continue;
+            }
+            if (bsi == null) {
+                bsi = new BlockStateInterface(ctx);
+            }
+            if (printerCanPlaceFrom(bsi, target, feet, reachSq) && !printerCanPlaceFrom(bsi, target, next, reachSq)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether the no-rotation printer has a face to click for a block in {@code target} from a
+     * player standing at {@code feet}, the same faces it tries.
+     */
+    private boolean printerCanPlaceFrom(BlockStateInterface bsi, BlockPos target, Vec3 feet, double reachSq) {
+        for (Direction d : Direction.values()) {
+            BetterBlockPos neighbor = BetterBlockPos.from(target.relative(d));
+            if (MovementHelper.canPlaceAgainst(bsi, neighbor) && !printerAvoidClicking(bsi.get0(neighbor))
+                    && printerPlaceReaches(neighbor, d.getOpposite(), feet, reachSq)) {
+                return true;
+            }
+        }
+        if (Baritone.settings().printerAirPlace.value) {
+            BetterBlockPos cell = BetterBlockPos.from(target);
+            for (Direction face : Direction.values()) {
+                if (printerPlaceReaches(cell, face, feet, reachSq)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private void printerResetIdle(String reason) {
         printerIdleRank = 0;
         printerIdleReason = reason;
@@ -2022,6 +2079,10 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                 && !(highway.needsLateralTraverses() && baritone.getPathingBehavior().isPathing())
                 && isSafeToCancel
                 && (printerAction.acted() || highway.isEndDistanceWalkHeld() || printerBlocked)) {
+            return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
+        }
+        if (highway.isBuildingHighwayState() && isSafeToCancel && placeInFlightLeftBehind(highway.highwayHeading())) {
+            // the creep waits for the same answer, and a path on down the highway would leave it just the same
             return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
         }
         // Aim at the strip we're standing in before anything further across the width, so a sweep

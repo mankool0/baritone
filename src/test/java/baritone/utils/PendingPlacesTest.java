@@ -240,4 +240,20 @@ public class PendingPlacesTest {
         now[0] = 2_500_000_000L;
         assertEquals(new PendingPlaces.Unanswered(1, 0, 0), pending.takeUnanswered());
     }
+
+    @Test
+    public void targetsStayInFlightUntilAckedOrLost() {
+        long[] now = {0};
+        PendingPlaces pending = new PendingPlaces(() -> now[0]);
+        ItemStack stack = new ItemStack(Items.OBSIDIAN, 10);
+        pending.onUse(SLOT, 1, stack, 10, TARGET, 1);
+        pending.onUse(SLOT, 2, stack, 9, TARGET.east(), 2);
+        // answered but not acked yet: the client still shows its own prediction there
+        pending.onServerState(TARGET);
+        assertEquals(List.of(TARGET, TARGET.east()), pending.targetsInFlight());
+        pending.onAck(1);
+        assertEquals(List.of(TARGET.east()), pending.targetsInFlight());
+        now[0] = 2_500_000_000L;
+        assertTrue(pending.targetsInFlight().isEmpty());
+    }
 }

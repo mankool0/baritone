@@ -21,6 +21,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.ItemStack;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.function.LongSupplier;
 
@@ -191,6 +193,19 @@ public final class PendingPlaces {
             awaitingAnswer.removeFirst();
             dropped++;
         }
+    }
+
+    /**
+     * @return where the uses the server hasn't acked yet went: the block next to each one's clicked
+     * face. Once a use is acked, the client shows whatever the server made of it there.
+     */
+    public List<BlockPos> targetsInFlight() {
+        dropLost();
+        List<BlockPos> targets = new ArrayList<>(unacked.size());
+        for (Use use : unacked) {
+            targets.add(BlockPos.of(use.target));
+        }
+        return targets;
     }
 
     /**
