@@ -5442,6 +5442,11 @@ public class HighwayContext {
         endStallFeet = null;
     }
 
+    /** Whether a builder restarted during the current {@link #endStall} ran out of work here as well */
+    public boolean endStallRestarted() {
+        return endStallFeet != null && endStallLastRestart > endStallSince;
+    }
+
     public void stopTravelTowardsEnd() {
         if (!travellingToEnd) {
             return;

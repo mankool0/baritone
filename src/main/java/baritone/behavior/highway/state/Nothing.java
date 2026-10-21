@@ -106,7 +106,12 @@ public class Nothing extends State {
         ISchematic buildSchem = context.schematicForOrigin(buildOrigin);
         int lookahead = context.settings().highwayPrinterLookahead.value;
         int slicesToEnd = context.settings().buildRepeatCount.value;
-        boolean nearEnd = slicesToEnd != -1 && slicesToEnd <= context.highwayCheckBackDistance() + 2 * lookahead + 2;
+        // The windows stop short of the end, leaving the last slices to a single-slice restart once
+        // we're close. On a stretch that's already built nothing walks us that close: the travel
+        // front parks us short of the first unbuilt cell, which can be in those very slices, so a
+        // stall short of the end goes over to single slices as well.
+        boolean nearEnd = slicesToEnd != -1 && (slicesToEnd <= context.highwayCheckBackDistance() + 2 * lookahead + 2
+                || context.endStallRestarted());
         // A custom-pattern build repeats one slice at a time: a straight lookahead window can't
         // follow the jogs, and its internal shape would depend on the pattern phase.
         if (context.settings().printer.value && lookahead > 1 && !nearEnd && !context.pattern().isCustom()) {
