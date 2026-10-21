@@ -48,8 +48,10 @@ public abstract class MixinPlayerController implements IPlayerControllerMP {
     private Minecraft minecraft;
 
     @Unique
-    private int useSlot = -1;
+    private int useSlot;
 
+    // set only while a main hand use is being tracked; a null default needs no field initialiser,
+    // which Mixin drops from the line-number-stripped obfuscated jars
     @Unique
     private ItemStack useStack;
 
@@ -110,7 +112,7 @@ public abstract class MixinPlayerController implements IPlayerControllerMP {
             at = @At("HEAD")
     )
     private void onUseItemOnHead(LocalPlayer player, InteractionHand hand, BlockHitResult result, CallbackInfoReturnable<InteractionResult> cir) {
-        useSlot = -1;
+        useStack = null;
         ClientLevel level = minecraft.level;
         if (level == null || hand != InteractionHand.MAIN_HAND) {
             return;
@@ -127,14 +129,13 @@ public abstract class MixinPlayerController implements IPlayerControllerMP {
     )
     private void onUseItemOnReturn(LocalPlayer player, InteractionHand hand, BlockHitResult result, CallbackInfoReturnable<InteractionResult> cir) {
         ClientLevel level = minecraft.level;
-        if (useSlot != -1 && level != null) {
+        if (useStack != null && level != null) {
             int sequence = ((IClientLevel) level).getPredictionHandler().currentSequence();
             // unchanged when the click was refused before anything went out
             if (sequence != useSequenceBefore) {
                 ((IClientLevel) level).getPendingPlaces().onUse(useSlot, sequence, useStack, useCount, result.getBlockPos().relative(result.getDirection()), player.tickCount);
             }
         }
-        useSlot = -1;
         useStack = null;
     }
 }

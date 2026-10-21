@@ -37,15 +37,26 @@ public abstract class MixinClientLevel implements IClientLevel {
     @Unique
     private int lastAckedSequence;
 
+    // No field initialisers: Mixin only merges them from a constructor with line numbers, which
+    // proguard strips from the obfuscated jars, so they'd silently stay null there.
     @Unique
-    private final PendingToolDamage pendingToolDamage = new PendingToolDamage();
+    private PendingToolDamage pendingToolDamage;
 
     @Unique
-    private final PendingPlaces pendingPlaces = new PendingPlaces();
+    private PendingPlaces pendingPlaces;
 
     @Accessor("blockStatePredictionHandler")
     @Override
     public abstract BlockStatePredictionHandler getPredictionHandler();
+
+    @Inject(
+            method = "<init>",
+            at = @At("RETURN")
+    )
+    private void onInit(CallbackInfo ci) {
+        pendingToolDamage = new PendingToolDamage();
+        pendingPlaces = new PendingPlaces();
+    }
 
     // Called from the packet handler on the main thread, so it lands in order with the inventory
     // updates the server sent ahead of the ack.
