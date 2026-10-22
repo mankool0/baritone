@@ -94,5 +94,11 @@ public interface INetherHighwayBuilderBehavior extends IBehavior {
 
     void stop();
 
+    /**
+     * {@link #stop()} once the builder is paused or in a state that has nothing of its own set
+     * down (mid-dig, mid-pave), so whoever sends it need not watch the state. A new build cancels it.
+     */
+    void stopWhenSafe();
+
     void printStatus();
 }

@@ -145,7 +145,16 @@ public class HighwayBuilderCommands {
         netherStopCommand = new Command(baritone, "nhwstop") {
             @Override
             public void execute(String label, IArgConsumer args) throws CommandException {
-                args.requireMax(0);
+                args.requireMax(1);
+                if (args.hasAny()) {
+                    String mode = args.getString();
+                    if (!mode.equalsIgnoreCase("safe")) {
+                        logDirect("Unknown nhwstop mode '" + mode + "' - not stopping. Did you mean 'nhwstop safe'?");
+                        return;
+                    }
+                    baritone.getNetherHighwayBuilderBehavior().stopWhenSafe();
+                    return;
+                }
                 logDirect("Stopping the nether highway builder");
                 baritone.getNetherHighwayBuilderBehavior().stop();
             }
@@ -166,7 +175,8 @@ public class HighwayBuilderCommands {
                         "Tell Baritone to stop building the nether highway",
                         "",
                         "Usage:",
-                        "> nhwstop - Stop the building"
+                        "> nhwstop - Stop the building",
+                        "> nhwstop safe - Stop once nothing of the builder's is set down (mid-dig, mid-pave or paused)"
                 );
             }
         };

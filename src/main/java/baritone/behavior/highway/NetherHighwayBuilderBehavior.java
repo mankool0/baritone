@@ -86,6 +86,21 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     private int edgeGiveUpTicks;
     private Vec3 edgeLastPos;
 
+    /**
+     * States {@link #stopWhenSafe} stops in: nothing of the builder's is set down. Stopped mid-farm
+     * or with a shulker or ender chest out, it leaves them there. Hive's SAFE_STOP_STATES.
+     */
+    static final Set<HighwayState> SAFE_STOP_STATES = EnumSet.of(
+            HighwayState.Nothing, HighwayState.BuildingHighway, HighwayState.InQueue,
+            HighwayState.FloatingFixPrep, HighwayState.FloatingFix,
+            HighwayState.LiquidRemovalPrep, HighwayState.LiquidRemovalPrepWait,
+            HighwayState.BoatRemoval, HighwayState.MobCombat, HighwayState.MobCombatReturn,
+            HighwayState.PortalEscape);
+    /** A safe stop still waiting after this long stops anyway: hive's SAFE_STOP_MAX_SECONDS. */
+    static final int SAFE_STOP_MAX_TICKS = 20 * 900;
+    private boolean stopWhenSafe = false;
+    private int stopWhenSafeTicks;
+
     /** Dimension the build was started in; a mismatch means a portal teleported us away. */
     private ResourceKey<Level> startDimension = null;
     private boolean wrongDimension = false;
@@ -336,6 +351,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     }
 
     private void teardown() {
+        stopWhenSafe = false;
         highwayContext.clearThresholdConfirm();
         wrongDimension = false;
         highwayContext.resetRecovery(); // held keys, suppressHitResult, and settings (e.g. allowSwimThroughLava) overridden during recovery
@@ -582,6 +598,40 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         highwayContext.setPaused(true);
     }
 
+    @Override
+    public void stopWhenSafe() {
+        if (safeToStop()) {
+            stop();
+            return;
+        }
+        if (!stopWhenSafe) {
+            Helper.HELPER.logDirect("Stopping the nether highway builder once it is safe - now at state "
+                    + highwayContext.currentState().getState());
+            stopWhenSafeTicks = 0;
+        }
+        stopWhenSafe = true;
+    }
+
+    private boolean safeToStop() {
+        return highwayContext.paused() || highwayContext.schematic() == null
+                || SAFE_STOP_STATES.contains(highwayContext.currentState().getState());
+    }
+
+    /** True when a pending {@link #stopWhenSafe} stopped the builder this tick. */
+    private boolean stopIfSafe() {
+        if (safeToStop()) {
+            stop();
+            return true;
+        }
+        if (++stopWhenSafeTicks >= SAFE_STOP_MAX_TICKS) {
+            Helper.HELPER.logDirect("Still at state " + highwayContext.currentState().getState() + " after "
+                    + SAFE_STOP_MAX_TICKS / 20 + "s - stopping anyway");
+            stop();
+            return true;
+        }
+        return false;
+    }
+
     /**
      * The tallies nhwstatus prints, for the stretch since they were last read, so runs nobody
      * watched can be gone over from the log. Reading them resets them.
@@ -623,6 +673,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
     @Override
     public void onTick(TickEvent event) {
+        if (stopWhenSafe && event.getType() == TickEvent.Type.IN && ctx.player() != null && stopIfSafe()) {
+            return;
+        }
         if (highwayContext.paused() || highwayContext.schematic() == null || ctx.player() == null || ctx.player().getInventory().isEmpty() || event.getType() == TickEvent.Type.OUT) {
             setWalkForward(false); // never leave the walk key latched while the state machine isn't driving
             if (ctx.player() != null && event.getType() != TickEvent.Type.OUT) {
