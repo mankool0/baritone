@@ -2161,6 +2161,23 @@ public final class Settings {
     public final Setting<Boolean> highwayRailHigh = new Setting<>(true);
 
     /**
+     * Area clearing: the floor row (highwayLowestY + 1) is air like the rows above it - dug, obsidian
+     * included, never placed - and there are no rail columns, whatever highwayRail says. The bot
+     * walks on highwayLowestY, which the support strip still bridges.
+     */
+    public final Setting<Boolean> highwayExcavate = new Setting<>(false);
+
+    /**
+     * World boxes that override the highway schematic, read at nhwbuild: {@code kind x1 y1 z1 x2 y2 z2}
+     * entries joined by {@code ;}, inclusive, low corner first. {@code skip} leaves the cells out
+     * (never dug or placed, support strip included); {@code storage} counts air, an ender chest or
+     * any shulker box as correct and digs anything else. Applies on every leg it is set for, paving
+     * or not. A value that doesn't parse pauses the build. A String because list settings split on
+     * commas.
+     */
+    public final Setting<String> highwayCellOverrides = new Setting<>("");
+
+    /**
      * If not -1 will keep this distance, in blocks along the highway, from the end of the highway
      * Useful for digging small tunnels quicker
      */

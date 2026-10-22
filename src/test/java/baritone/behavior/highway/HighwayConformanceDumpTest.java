@@ -30,6 +30,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -38,6 +39,7 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -66,6 +68,7 @@ public class HighwayConformanceDumpTest {
 
     private static final Gson COMPACT = new Gson();
     private static final Gson PRETTY = new GsonBuilder().setPrettyPrinting().create();
+    private static final String SOURCE = gitSource();
 
     @BeforeClass
     public static void bootstrap() {
@@ -104,7 +107,7 @@ public class HighwayConformanceDumpTest {
         assertEquals("2 widths x 8 directions x 5 rail combos x pave/dig x 4 slices", 2 * 8 * 5 * 2 * 4, result.cases.size());
         assertEquals("the run leaves the settings as it found them", stock, Profile.of(settings));
         assertTrue(settings.highwayRail.value && settings.highwayRailLow.value && settings.highwayRailHigh.value);
-        write("nhwdump.json", PRETTY.toJson(HighwayConformanceDump.document(settings, result)));
+        write("nhwdump.json", PRETTY.toJson(HighwayConformanceDump.document(SOURCE, settings, result)));
     }
 
     /**
@@ -126,7 +129,7 @@ public class HighwayConformanceDumpTest {
         assertEquals(Collections.emptyList(), result.failures);
         assertEquals(profiles.size() * 8 * 5 * ts.length, result.cases.size());
         assertEquals(before, Profile.of(settings));
-        write("nhwdump-profiles.json", COMPACT.toJson(HighwayConformanceDump.document(settings, result)));
+        write("nhwdump-profiles.json", COMPACT.toJson(HighwayConformanceDump.document(SOURCE, settings, result)));
     }
 
     /**
@@ -161,7 +164,42 @@ public class HighwayConformanceDumpTest {
         assertTrue(settings.highwayRail.value && settings.highwayRailLow.value && settings.highwayRailHigh.value);
 
         assertEquals(Collections.emptyList(), HighwayConformanceDump.checkPatternCases(result.cases));
-        write("nhwdump-patterns.json", COMPACT.toJson(HighwayConformanceDump.patternDocument(settings, result)));
+        write("nhwdump-patterns.json", COMPACT.toJson(HighwayConformanceDump.patternDocument(SOURCE, settings, result)));
+    }
+
+    /**
+     * The area-clearing lanes (highwayExcavate), for the server to pin its lane target to: air from
+     * the floor row up, dig and pave alike, and no rail columns. The overrides are world boxes the
+     * server writes itself, so there is nothing of them to dump.
+     */
+    @Test
+    public void theExcavatedLanesPassTheirSelfChecks() throws IOException {
+        Settings settings = TestSettings.fresh();
+        Profile before = Profile.of(settings);
+        Result result = HighwayConformanceDump.run(settings, HighwayConformanceDump.EXCAVATE_PROFILES, HighwayConformanceDump.DEFAULT_TS, true);
+        assertEquals(Collections.emptyList(), result.failures);
+        assertEquals("2 widths x 8 directions x railless x pave/dig x 4 slices", 2 * 8 * 2 * 4, result.cases.size());
+        assertEquals("the run leaves the settings as it found them", before, Profile.of(settings));
+        assertFalse(settings.highwayExcavate.value);
+
+        // +Z, nine wide, t = 0: x -5..3, y 120..122, all air
+        Settings lane = TestSettings.fresh();
+        lane.highwayWidth.value = 9;
+        lane.highwayHeight.value = 3;
+        lane.highwayLowestY.value = 119;
+        lane.highwayMainY.value = 120;
+        lane.highwayRail.value = false;
+        lane.highwayExcavate.value = true;
+        CompositeSchematic schem = NetherHighwayBuilderBehavior.composeHighwaySchematic(new Vec3i(0, 0, 1), false, lane);
+        List<int[]> targets = HighwayConformanceDump.projectSlice(schem, -6, 119, 0);
+        assertEquals(27, targets.size());
+        for (int x = -5; x <= 3; x++) {
+            for (int y = 120; y <= 122; y++) {
+                assertTrue(x + " " + y, contains(targets, x, y, 0, 0));
+            }
+        }
+
+        write("nhwdump-excavate.json", PRETTY.toJson(HighwayConformanceDump.document(SOURCE, settings, result)));
     }
 
     static List<Profile> sweep() {
@@ -185,6 +223,36 @@ public class HighwayConformanceDumpTest {
 
     private static boolean contains(List<int[]> targets, int x, int y, int z, int req) {
         return targets.stream().anyMatch(t -> Arrays.equals(t, new int[]{x, y, z, req}));
+    }
+
+    /**
+     * The branch and commit the dump is taken from, {@code -dirty} when the working tree differs
+     * from that commit (untracked files included: new sources change the dump too).
+     */
+    private static String gitSource() {
+        String branch = git("rev-parse", "--abbrev-ref", "HEAD");
+        String commit = git("rev-parse", "--short=8", "HEAD");
+        String status = git("status", "--porcelain");
+        if (branch == null || commit == null || status == null) {
+            return "mankool0/baritone @ unknown";
+        }
+        return "mankool0/baritone @ " + branch + " " + commit + (status.isEmpty() ? "" : "-dirty");
+    }
+
+    private static String git(String... args) {
+        List<String> command = new ArrayList<>();
+        command.add("git");
+        command.addAll(Arrays.asList(args));
+        try {
+            Process git = new ProcessBuilder(command).redirectError(ProcessBuilder.Redirect.DISCARD).start();
+            String out = new String(git.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+            return git.waitFor() == 0 ? out : null;
+        } catch (IOException e) {
+            return null;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
     }
 
     private static void write(String name, String json) throws IOException {

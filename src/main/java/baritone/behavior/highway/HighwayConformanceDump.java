@@ -53,6 +53,12 @@ public final class HighwayConformanceDump {
      */
     public static final boolean[][] RAIL_COMBOS = {{true, true, true}, {true, true, false}, {true, false, true}, {true, false, false}, {false, true, true}};
 
+    /** An excavated road has no rail columns whatever highwayRail says, so only the railless combo is dumped. */
+    public static final boolean[][] EXCAVATE_COMBOS = {{false, true, true}};
+
+    /** The area-clearing lanes: nine wide and the narrower ones, three tall, floor row one above the highways'. */
+    public static final List<Profile> EXCAVATE_PROFILES = List.of(new Profile(119, 120, 9, 3, true), new Profile(119, 120, 7, 3, true));
+
     /** The two widths in service: stock, and the one the diagonals run at. */
     public static final int[] DEFAULT_WIDTHS = {4, 7};
 
@@ -76,22 +82,27 @@ public final class HighwayConformanceDump {
     private HighwayConformanceDump() {}
 
     /**
-     * The four integers that shape a road. The schematic never reads mainY (the floor is
-     * lowestY + 1 by construction) but the rest of the builder stands on it, so it is recorded to
-     * keep the artifact self-describing.
+     * The four integers that shape a road, and whether it is excavated (highwayExcavate). The
+     * schematic never reads mainY (the floor is lowestY + 1 by construction) but the rest of the
+     * builder stands on it, so it is recorded to keep the artifact self-describing.
      */
-    public record Profile(int lowestY, int mainY, int width, int height) {
+    public record Profile(int lowestY, int mainY, int width, int height, boolean excavate) {
+
+        public Profile(int lowestY, int mainY, int width, int height) {
+            this(lowestY, mainY, width, height, false);
+        }
 
         public static Profile of(Settings settings) {
-            return new Profile(settings.highwayLowestY.value, settings.highwayMainY.value, settings.highwayWidth.value, settings.highwayHeight.value);
+            return new Profile(settings.highwayLowestY.value, settings.highwayMainY.value, settings.highwayWidth.value, settings.highwayHeight.value,
+                    settings.highwayExcavate.value);
         }
 
         public Profile withWidth(int newWidth) {
-            return new Profile(lowestY, mainY, newWidth, height);
+            return new Profile(lowestY, mainY, newWidth, height, excavate);
         }
 
         public String describe() {
-            return "width=" + width + " height=" + height + " lowestY=" + lowestY + " mainY=" + mainY;
+            return "width=" + width + " height=" + height + " lowestY=" + lowestY + " mainY=" + mainY + (excavate ? " excavate" : "");
         }
     }
 
@@ -120,13 +131,15 @@ public final class HighwayConformanceDump {
                 settings.highwayMainY.value = profile.mainY();
                 settings.highwayWidth.value = profile.width();
                 settings.highwayHeight.value = profile.height();
+                settings.highwayExcavate.value = profile.excavate();
+                boolean[][] combos = profile.excavate() ? EXCAVATE_COMBOS : RAIL_COMBOS;
 
                 Map<String, List<int[]>> targetsByCase = new HashMap<>();
                 Map<String, int[]> anchorsByCase = new HashMap<>();
                 for (int[] dir : DIRECTIONS) {
                     Vec3i direction = new Vec3i(dir[0], 0, dir[1]);
                     boolean groupA = NetherHighwayBuilderBehavior.isGroupA(direction);
-                    for (boolean[] combo : RAIL_COMBOS) {
+                    for (boolean[] combo : combos) {
                         settings.highwayRail.value = combo[0];
                         settings.highwayRailLow.value = combo[1];
                         settings.highwayRailHigh.value = combo[2];
@@ -151,7 +164,7 @@ public final class HighwayConformanceDump {
                         }
                     }
                 }
-                result.failures.addAll(selfCheck(targetsByCase, anchorsByCase, profile, ts));
+                result.failures.addAll(selfCheck(targetsByCase, anchorsByCase, profile, ts, combos));
             }
         } finally {
             saved.restore(settings);
@@ -159,10 +172,14 @@ public final class HighwayConformanceDump {
         return result;
     }
 
-    /** The artifact: the (restored) settings the dump was taken under, and every case. */
-    public static JsonObject document(Settings settings, Result result) {
+    /**
+     * The artifact: where the dump was taken ({@code source}, such as
+     * {@code mankool0/baritone @ 1.21.11-highway 80143333}), the (restored) settings it was taken
+     * under, and every case.
+     */
+    public static JsonObject document(String source, Settings settings, Result result) {
         JsonObject root = new JsonObject();
-        root.addProperty("source", "mankool0/baritone @ 1.21.4-highway");
+        root.addProperty("source", source);
         root.add("settings", settingsJson(settings));
         root.addProperty("dig_cases_emitted", result.digEmitted);
         root.add("cases", result.cases);
@@ -230,6 +247,9 @@ public final class HighwayConformanceDump {
         caseJson.addProperty("height", profile.height());
         caseJson.addProperty("lowest_y", profile.lowestY());
         caseJson.addProperty("main_y", profile.mainY());
+        if (profile.excavate()) {
+            caseJson.addProperty("excavate", true); // only where set, so the other artifacts stay byte-identical
+        }
         caseJson.addProperty("pave", pave);
         caseJson.addProperty("t", t);
         JsonArray anchorJson = new JsonArray();
@@ -276,14 +296,14 @@ public final class HighwayConformanceDump {
      * Properties of the geometry that hold at every profile, checked against the dump itself so a
      * broken projection cannot produce a plausible-looking artifact.
      */
-    private static List<String> selfCheck(Map<String, List<int[]>> targetsByCase, Map<String, int[]> anchorsByCase, Profile profile, int[] ts) {
+    private static List<String> selfCheck(Map<String, List<int[]>> targetsByCase, Map<String, int[]> anchorsByCase, Profile profile, int[] ts, boolean[][] combos) {
         List<String> failures = new ArrayList<>();
         int width = profile.width();
         int height = profile.height();
         for (int[] dir : DIRECTIONS) {
             boolean groupA = NetherHighwayBuilderBehavior.isGroupA(new Vec3i(dir[0], 0, dir[1]));
-            for (boolean[] combo : RAIL_COMBOS) {
-                boolean rails = combo[0];
+            for (boolean[] combo : combos) {
+                boolean rails = combo[0] && !profile.excavate();
                 int nRails = rails ? (combo[1] ? 1 : 0) + (combo[2] ? 1 : 0) : 0;
                 for (int t : ts) {
                     String where = "dir " + dir[0] + " " + dir[1] + " rail=" + combo[0] + " railLow=" + combo[1] + " railHigh=" + combo[2] + " " + profile.describe() + " t=" + t;
@@ -306,7 +326,8 @@ public final class HighwayConformanceDump {
                     long obsidian = paveTargets.stream().filter(target -> target[3] == 1).count();
                     long air = paveTargets.size() - obsidian;
                     long expectedTotal = (long) height * width + (rails ? 6 : 0);
-                    long expectedObsidian = width + nRails;
+                    // excavated: the floor row is air like the rows above it
+                    long expectedObsidian = profile.excavate() ? 0 : width + nRails;
                     if (paveTargets.size() != expectedTotal || obsidian != expectedObsidian) {
                         failures.add("cell counts at " + where + ": got " + obsidian + " obsidian + " + air + " air, expected "
                                 + expectedObsidian + " + " + (expectedTotal - expectedObsidian));
@@ -344,6 +365,16 @@ public final class HighwayConformanceDump {
                         }
                     }
 
+                    // 5a. an excavated road models the floor row up, all of it air, and nothing below
+                    if (profile.excavate()) {
+                        for (int[] target : paveTargets) {
+                            if (target[1] < profile.lowestY() + 1 || target[1] > profile.lowestY() + height) {
+                                failures.add("excavated cell at y=" + target[1] + " outside the floor row up at " + where);
+                                break;
+                            }
+                        }
+                    }
+
                     // 5. the Y placement the rest of the builder stands on: the floor is one
                     // above lowestY (highwayFloorY, computeRecoveryTarget) and a rail one above
                     // that. A profile whose mainY is not lowestY + 1 builds one road and walks
@@ -364,7 +395,7 @@ public final class HighwayConformanceDump {
         }
 
         // 6. group A and group B are transposes: (1,0) and (0,1) give the same shape with X and Z swapped
-        for (boolean[] combo : RAIL_COMBOS) {
+        for (boolean[] combo : combos) {
             for (int t : ts) {
                 List<int[]> alongX = targetsByCase.get(caseKey(new int[]{1, 0}, combo, true, t));
                 List<int[]> alongZ = targetsByCase.get(caseKey(new int[]{0, 1}, combo, true, t));
@@ -400,6 +431,7 @@ public final class HighwayConformanceDump {
                 settings.highwayMainY.value = profile.mainY();
                 settings.highwayWidth.value = profile.width();
                 settings.highwayHeight.value = profile.height();
+                settings.highwayExcavate.value = profile.excavate();
 
                 for (String pattern : PATTERNS) {
                     for (int[] dir : QUADRANTS) {
@@ -454,9 +486,9 @@ public final class HighwayConformanceDump {
     }
 
     /** The pattern artifact: the straight-road document plus the projection tables. */
-    public static JsonObject patternDocument(Settings settings, Result result) {
+    public static JsonObject patternDocument(String source, Settings settings, Result result) {
         JsonObject root = new JsonObject();
-        root.addProperty("source", "mankool0/baritone @ 1.21.4-highway");
+        root.addProperty("source", source);
         root.add("settings", settingsJson(settings));
         root.addProperty("dig_cases_emitted", result.digEmitted);
         root.add("projections", result.projections);
@@ -588,7 +620,7 @@ public final class HighwayConformanceDump {
     /** The settings the matrix overwrites, so the caller gets them back whatever happens. */
     private static final class Saved {
         private final int lowestY, mainY, width, height;
-        private final boolean rail, railLow, railHigh;
+        private final boolean rail, railLow, railHigh, excavate;
 
         Saved(Settings s) {
             lowestY = s.highwayLowestY.value;
@@ -598,6 +630,7 @@ public final class HighwayConformanceDump {
             rail = s.highwayRail.value;
             railLow = s.highwayRailLow.value;
             railHigh = s.highwayRailHigh.value;
+            excavate = s.highwayExcavate.value;
         }
 
         void restore(Settings s) {
@@ -608,6 +641,7 @@ public final class HighwayConformanceDump {
             s.highwayRail.value = rail;
             s.highwayRailLow.value = railLow;
             s.highwayRailHigh.value = railHigh;
+            s.highwayExcavate.value = excavate;
         }
     }
 }

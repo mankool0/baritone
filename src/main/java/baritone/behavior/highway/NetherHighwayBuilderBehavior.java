@@ -27,6 +27,7 @@ import baritone.api.event.events.SprintStateEvent;
 import baritone.api.event.events.TickEvent;
 import baritone.api.event.events.type.EventState;
 import baritone.api.pathing.goals.*;
+import baritone.api.schematic.CellOverrides;
 import baritone.api.schematic.CompositeSchematic;
 import baritone.api.schematic.ISchematic;
 import baritone.api.schematic.WhiteBlackSchematic;
@@ -154,6 +155,16 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             direct = new Vec3i(Integer.signum(direct.getX()), 0, Integer.signum(direct.getZ()));
         }
         teardown(); // nhwbuild is a restart, not an overlay: nothing the last build held survives it
+        CellOverrides cellOverrides;
+        try {
+            cellOverrides = CellOverrides.parse(settings.highwayCellOverrides.value);
+        } catch (IllegalArgumentException e) {
+            // built without, a lane would dig the rails it was told to keep
+            highwayContext.setCellOverrides(CellOverrides.NONE);
+            highwayContext.pause("highwayCellOverrides rejected, " + e.getMessage());
+            return;
+        }
+        highwayContext.setCellOverrides(cellOverrides);
         highwayContext.resetStateDwell(); // per build, so a stop leaves the last run's timings readable
         highwayContext.setHighwayDirection(direct);
         highwayContext.setPaving(pave);
@@ -177,7 +188,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
         int highwayWidth = settings.highwayWidth.value;
         int highwayHeight = settings.highwayHeight.value;
-        boolean highwayRail = settings.highwayRail.value;
+        boolean highwayRail = hasRails(settings);
         boolean railLow = highwayRail && settings.highwayRailLow.value;
         boolean railHigh = highwayRail && settings.highwayRailHigh.value;
         int highwayWidthOffset = -((Math.round(highwayWidth / 2.0f)) + 1);
@@ -298,7 +309,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         Helper.HELPER.logDirect("Profile: width=" + highwayWidth + " height=" + highwayHeight
                 + " y=" + settings.highwayLowestY.value + "/" + settings.highwayMainY.value
                 + " rails=" + (railLow ? "low" : "") + (railHigh ? "high" : "")
-                + (!railLow && !railHigh ? "none" : ""));
+                + (!railLow && !railHigh ? "none" : "")
+                + (settings.highwayExcavate.value ? " excavate" : "")
+                + (cellOverrides.isEmpty() ? "" : " overrides=" + cellOverrides.size()));
         Helper.HELPER.logDirect("Building from " + highwayContext.originBuild().toString());
         settings.buildRepeat.value = new Vec3i(highwayContext.highwayDirection().getX(), 0, highwayContext.highwayDirection().getZ());
 
@@ -339,6 +352,11 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         highwayContext.setOriginBuild(null);
         highwayContext.setEndPos(null);
         settings.buildRepeatCount.value = -1; // Nothing clamps it while an end is set
+    }
+
+    /** Whether the profile models rail columns: an excavated road has none. */
+    public static boolean hasRails(Settings settings) {
+        return settings.highwayRail.value && !settings.highwayExcavate.value;
     }
 
     /** +X, -X, +X+Z, -X-Z: the schematic is 1 wide in X and extends in Z; the cross-axis is Z. */
@@ -418,10 +436,16 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         int highwayHeight = settings.highwayHeight.value;
         int supportWidth = settings.highwaySupportWidth.value;
         int supportOffset = settings.highwaySupportOffset.value;
-        boolean rails = settings.highwayRail.value;
+        boolean excavate = settings.highwayExcavate.value;
+        boolean rails = hasRails(settings);
         boolean railLow = rails && settings.highwayRailLow.value;
         boolean railHigh = rails && settings.highwayRailHigh.value;
         boolean diag = Math.abs(direction.getX()) == Math.abs(direction.getZ()) && Math.abs(direction.getZ()) == 1;
+        // an excavated floor row is the dig profile's, minus the obsidian
+        boolean paveFloor = pave && !excavate;
+        java.util.List<BlockState> floorKeeps = excavate
+                ? Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState())
+                : Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.OBSIDIAN.defaultBlockState(), Blocks.CRYING_OBSIDIAN.defaultBlockState());
 
         ISchematic obsidSchemBot;
         WhiteBlackSchematic topAir;
@@ -453,7 +477,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         // +X, -X, +X +Z, -X -Z
         if (groupA) {
             topAir = new WhiteBlackSchematic(1, highwayHeight - 1, highwayWidth, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
-            if (pave) {
+            if (paveFloor) {
                 obsidSchemBot = new WhiteBlackSchematic(1, 1, highwayWidth, Arrays.asList(Blocks.OBSIDIAN.defaultBlockState(), Blocks.CRYING_OBSIDIAN.defaultBlockState()), Blocks.OBSIDIAN.defaultBlockState(), true, false, false);
 
                 if (diag && (railLow || railHigh)) {
@@ -467,7 +491,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     }
                 }
             } else {
-                obsidSchemBot = new WhiteBlackSchematic(1, 1, highwayWidth, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.OBSIDIAN.defaultBlockState(), Blocks.CRYING_OBSIDIAN.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false); // Allow only air and obsidian
+                obsidSchemBot = new WhiteBlackSchematic(1, 1, highwayWidth, floorKeeps, Blocks.AIR.defaultBlockState(), true, false, false); // Allow only air, and obsidian unless excavating
                 supportNetherRack = new WhiteBlackSchematic(1, 1, supportWidth, HighwayContext.blackListBlocks, Blocks.NETHERRACK.defaultBlockState(), false, true, true); // Allow everything other than air and lava
                 if (supportWidth + 2 <= highwayWidth) {
                     fullSchem.put(noLavaBotSides, 0, 0, 1);
@@ -498,7 +522,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         // +Z, -Z, +X -Z, -X +Z
         else if (groupB) {
             topAir = new WhiteBlackSchematic(highwayWidth, highwayHeight - 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
-            if (pave) {
+            if (paveFloor) {
                 obsidSchemBot = new WhiteBlackSchematic(highwayWidth, 1, 1, Arrays.asList(Blocks.OBSIDIAN.defaultBlockState(), Blocks.CRYING_OBSIDIAN.defaultBlockState()), Blocks.OBSIDIAN.defaultBlockState(), true, false, false);
 
                 if (diag && (railLow || railHigh)) {
@@ -512,7 +536,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     }
                 }
             } else {
-                obsidSchemBot = new WhiteBlackSchematic(highwayWidth, 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.OBSIDIAN.defaultBlockState(), Blocks.CRYING_OBSIDIAN.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false); // Allow only air and obsidian
+                obsidSchemBot = new WhiteBlackSchematic(highwayWidth, 1, 1, floorKeeps, Blocks.AIR.defaultBlockState(), true, false, false); // Allow only air, and obsidian unless excavating
                 supportNetherRack = new WhiteBlackSchematic(supportWidth, 1, 1, HighwayContext.blackListBlocks, Blocks.NETHERRACK.defaultBlockState(), false, true, true); // Allow everything other than air and lava
                 if (supportWidth + 2 <= highwayWidth) {
                     fullSchem.put(noLavaBotSides, 1, 0, 0);
@@ -873,7 +897,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
     @Override
     public boolean needsLateralTraverses() {
-        int crossWidth = settings.highwayWidth.value + (settings.highwayRail.value ? 2 : 0);
+        int crossWidth = settings.highwayWidth.value + (hasRails(settings) ? 2 : 0);
         return crossWidth > 2 * settings.blockReachDistance.value;
     }
 

@@ -21,6 +21,7 @@ import baritone.Baritone;
 import baritone.api.BaritoneAPI;
 import baritone.api.Settings;
 import baritone.api.pathing.goals.*;
+import baritone.api.schematic.CellOverrides;
 import baritone.api.schematic.CompositeSchematic;
 import baritone.api.schematic.ISchematic;
 import baritone.api.schematic.WhiteBlackSchematic;
@@ -252,6 +253,8 @@ public class HighwayContext {
     private CompositeSchematic schematic;
     /** Per-slice cross-sections for an angled build with rails; null when every slice is the same. */
     private CompositeSchematic[] patternSchematics;
+    /** highwayCellOverrides as parsed at nhwbuild; NONE off a lane. */
+    private CellOverrides cellOverrides = CellOverrides.NONE;
     private WhiteBlackSchematic liqCheckSchem;
     private BetterBlockPos originBuild;
     private BetterBlockPos firstStartingPos;
@@ -782,6 +785,19 @@ public class HighwayContext {
         this.schematic = schematic;
     }
 
+    public CellOverrides cellOverrides() {
+        return cellOverrides;
+    }
+
+    public void setCellOverrides(CellOverrides cellOverrides) {
+        this.cellOverrides = cellOverrides == null ? CellOverrides.NONE : cellOverrides;
+    }
+
+    /** {@code schematic} with the cell overrides applied, its origin at {@code origin}. */
+    public CompositeSchematic bindCellOverrides(CompositeSchematic schematic, Vec3i origin) {
+        return cellOverrides.bind(schematic, origin);
+    }
+
     public void setOriginBuild(BetterBlockPos originBuild) {
         this.originBuild = originBuild;
     }
@@ -967,12 +983,20 @@ public class HighwayContext {
         return patternSchematics[(pattern.ownsLowRail(t) ? 1 : 0) | (pattern.ownsHighRail(t) ? 2 : 0)];
     }
 
-    /** {@link #schematicForSlice} for the slice a build origin anchors, for the builder's repeats. */
+    /**
+     * {@link #schematicForSlice} for slice {@code t} anchored at {@code slicePos}, with the cell
+     * overrides applied. What every scan has to query: the overrides are world boxes.
+     */
+    public CompositeSchematic schematicForSlice(int t, BlockPos slicePos) {
+        return cellOverrides.bind(schematicForSlice(t), slicePos);
+    }
+
+    /** The slice a build origin anchors, as the builder builds it there. */
     public CompositeSchematic schematicForOrigin(BlockPos origin) {
         if (patternSchematics == null) {
-            return schematic;
+            return cellOverrides.bind(schematic, origin);
         }
-        return schematicForSlice(sliceIndexOf(origin, originVector));
+        return schematicForSlice(sliceIndexOf(origin, originVector), origin);
     }
 
     /**
@@ -1702,6 +1726,9 @@ public class HighwayContext {
                         int blockZ = z + curPos.getZ();
                         if (!baritone.bsi.worldContainsLoadedChunk(blockX, blockZ)) {
                             continue;
+                        }
+                        if (cellOverrides.kindAt(blockX, blockY, blockZ) != null) {
+                            continue; // another road's storage, not our lost box
                         }
                         if (shulkerBlockList.contains(playerContext.world().getBlockState(new BlockPos(blockX, blockY, blockZ)).getBlock())) {
                             return new BlockPos(blockX, blockY, blockZ);
@@ -3410,7 +3437,7 @@ public class HighwayContext {
             BlockPos curPos = pattern.isCustom()
                     ? startPos.offset(sliceDelta(scanT0, i))
                     : startPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
-            CompositeSchematic sliceSchem = schematicForSlice(scanT0 + i);
+            CompositeSchematic sliceSchem = schematicForSlice(scanT0 + i, curPos);
             for (int y = 0; y < schematic.heightY(); y++) {
                 for (int z = 0; z < schematic.lengthZ(); z++) {
                     for (int x = 0; x < schematic.widthX(); x++) {
@@ -3696,7 +3723,7 @@ public class HighwayContext {
             return false;
         }
 
-        if (isShulkerSpotKnownBad(placeLoc) || !shulkerColumnWorkable(placeLoc)) {
+        if (isShulkerSpotKnownBad(placeLoc) || !shulkerColumnWorkable(placeLoc) || !sideStorageColumnFree(placeLoc)) {
             return false;
         }
         if (!hasFloorUnder(placeLoc) && !canBuildFloorAt(placeLoc.below())) {
@@ -3849,13 +3876,32 @@ public class HighwayContext {
         return playerContext.world().noBlockCollision(null, lid);
     }
 
-    /** A cell a box can sit in or open into: already clear, or something the builder can dig out. */
+    /**
+     * A cell a box can sit in or open into: already clear, or something the builder can dig out,
+     * and not one another road keeps (highwayCellOverrides).
+     */
     private boolean clearOrClearable(BlockPos pos) {
         BlockState state = playerContext.world().getBlockState(pos);
-        if (state.getFluidState().is(FluidTags.LAVA)) {
+        if (state.getFluidState().is(FluidTags.LAVA) || cellOverrides.kindAt(pos.getX(), pos.getY(), pos.getZ()) != null) {
             return false;
         }
         return state.canBeReplaced() || state.getDestroySpeed(playerContext.world(), pos) >= 0;
+    }
+
+    /**
+     * The side-storage lane runs outside our corridor, where no override names another road's
+     * cells, and on a lane at rail height: obsidian or a box in the column is a crossing road's
+     * rail or side storage, which placing there would dig.
+     */
+    private boolean sideStorageColumnFree(BlockPos placeLoc) {
+        for (BlockPos pos : new BlockPos[]{placeLoc, placeLoc.above()}) {
+            BlockState state = playerContext.world().getBlockState(pos);
+            if (state.is(Blocks.OBSIDIAN) || state.is(Blocks.CRYING_OBSIDIAN) || state.is(Blocks.ENDER_CHEST)
+                    || shulkerBlockList.contains(state.getBlock())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private boolean shulkerColumnWorkable(BlockPos placeLoc) {
@@ -5124,7 +5170,7 @@ public class HighwayContext {
             }
             double slicePerp = perpBase + (-delta.getX() * headZ + delta.getZ() * headX);
             BlockPos curPos = startCheckPos.offset(delta);
-            CompositeSchematic sliceSchem = schematicForSlice(scanT0 + i);
+            CompositeSchematic sliceSchem = schematicForSlice(scanT0 + i, curPos);
             for (int y = 0; y < schematic.heightY(); y++) {
                 for (int z = 0; z < schematic.lengthZ(); z++) {
                     for (int x = 0; x < schematic.widthX(); x++) {
@@ -5187,7 +5233,7 @@ public class HighwayContext {
      * valid by the block above them, and cells the builder leaves alone count as correct.
      */
     private CellScan cellScan(BlockPos slicePos, int x, int y, int z) {
-        return cellScan(schematic, slicePos, x, y, z);
+        return cellScan(cellOverrides.bind(schematic, slicePos), slicePos, x, y, z);
     }
 
     /** {@link #cellScan(BlockPos, int, int, int)} against one slice's own schematic, for angled patterns. */
@@ -5257,7 +5303,7 @@ public class HighwayContext {
             BlockPos curPos = pattern.isCustom()
                     ? startCheckPos.offset(sliceDelta(scanT0, i))
                     : startCheckPos.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
-            CompositeSchematic sliceSchem = schematicForSlice(scanT0 + i);
+            CompositeSchematic sliceSchem = schematicForSlice(scanT0 + i, curPos);
             for (int y = 0; y < schematic.heightY(); y++) {
                 for (int z = 0; z < schematic.lengthZ(); z++) {
                     if (crossZ && (z < crossLo || z > crossHi)) {
@@ -6077,7 +6123,7 @@ public class HighwayContext {
             if (front != null && front.passed(curPos, schematic)) {
                 break;
             }
-            CompositeSchematic sliceSchem = schematicForSlice(scanT0 + i);
+            CompositeSchematic sliceSchem = schematicForSlice(scanT0 + i, curPos);
             for (int y = 0; y < schematic.heightY(); y++) {
                 for (int z = 0; z < schematic.lengthZ(); z++) {
                     for (int x = 0; x < schematic.widthX(); x++) {
@@ -6343,7 +6389,7 @@ public class HighwayContext {
             BlockPos anchor = pattern.isCustom()
                     ? start.offset(sliceDelta(t0, i))
                     : start.offset(i * highwayDirection.getX(), 0, i * highwayDirection.getZ());
-            CompositeSchematic slice = schematicForSlice(t0 + i);
+            CompositeSchematic slice = schematicForSlice(t0 + i, anchor);
             for (int y = 0; y < slice.heightY(); y++) {
                 for (int z = 0; z < slice.lengthZ(); z++) {
                     for (int x = 0; x < slice.widthX(); x++) {

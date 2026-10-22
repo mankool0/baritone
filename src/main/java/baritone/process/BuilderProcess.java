@@ -136,6 +136,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private String name;
     private ISchematic realSchematic;
     private ISchematic schematic;
+    /** The schematic as handed in when its cell overrides are world boxes, rebound wherever the origin moves. */
+    private CellOverrideSchematic boundSchematic;
     private Vec3i origin;
     private int ticks;
     private boolean paused;
@@ -367,6 +369,11 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             z += schematic.lengthZ();
         }
         this.origin = new Vec3i(x, y, z);
+        this.boundSchematic = null;
+        if (schematic instanceof CellOverrideSchematic bound) {
+            this.boundSchematic = bound.at(this.origin);
+            this.schematic = wrapForBuild(boundSchematic);
+        }
         this.paused = false;
         this.layer = Baritone.settings().startAtLayer.value;
         this.stopAtHeight = schematic.heightY();
@@ -1801,16 +1808,24 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                 step = highwayRepeat.repeatAdvance(new BlockPos(origin));
             }
             origin = new BlockPos(origin).offset(step);
+            ISchematic nextSlice = null;
             if (patternRepeat) {
                 // ... and so is the cross-section: with rails on, the slices sharing a driving-axis
                 // coordinate split the rail columns between them.
-                ISchematic nextSlice = highwayRepeat.schematicForOrigin(new BlockPos(origin));
-                if (nextSlice != null) {
-                    if (realSchematic != null) {
-                        realSchematic = wrapForBuild(nextSlice); // buildInLayers rewraps this next tick
-                    } else {
-                        schematic = wrapForBuild(nextSlice);
-                    }
+                nextSlice = highwayRepeat.schematicForOrigin(new BlockPos(origin));
+            }
+            if (nextSlice == null && boundSchematic != null) {
+                nextSlice = boundSchematic; // the overrides are world boxes, so the next copy needs its own
+            }
+            if (nextSlice != null) {
+                boundSchematic = nextSlice instanceof CellOverrideSchematic bound ? bound.at(origin) : null;
+                if (boundSchematic != null) {
+                    nextSlice = boundSchematic;
+                }
+                if (realSchematic != null) {
+                    realSchematic = wrapForBuild(nextSlice); // buildInLayers rewraps this next tick
+                } else {
+                    schematic = wrapForBuild(nextSlice);
                 }
             }
             if (!Baritone.settings().buildRepeatSneaky.value) {
@@ -2805,6 +2820,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         name = null;
         schematic = null;
         realSchematic = null;
+        boundSchematic = null;
         layer = Baritone.settings().startAtLayer.value;
         numRepeats = 0;
         paused = false;
@@ -2959,6 +2975,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         private int originY;
         private int originZ;
         private Long2ObjectMap<CompletedWatch> watched;
+        private CellOverrides overrides;
         private final boolean highwayRoad;
         /** {@link BuilderProcess#entityHole} as {@code longHash}es, set by {@link #updateEntityHoles} before any path is planned with this. */
         private LongSet entityHoleCells = LongSets.EMPTY_SET;
@@ -2985,6 +3002,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             this.originY = origin.getY();
             this.originZ = origin.getZ();
             this.watched = snapshotCompletedWatch();
+            this.overrides = boundSchematic == null ? CellOverrides.NONE : boundSchematic.overrides();
             return this;
         }
 
@@ -3059,6 +3077,12 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         @Override
         public double breakCostMultiplierAt(int x, int y, int z, BlockState current) {
             if ((!allowBreak && !allowBreakAnyway.contains(current.getBlock())) || isPossiblyProtected(x, y, z)) {
+                return COST_INF;
+            }
+            CellOverrides.Kind kind = overrides.kindAt(x, y, z);
+            if (kind == CellOverrides.Kind.SKIP || kind == CellOverrides.Kind.STORAGE && CellOverrides.isStorageBlock(current)) {
+                // Another road's rail, floor or chest. A storage cell holding anything else is dug
+                // by the schematic, so a path may go through it.
                 return COST_INF;
             }
             BlockState sch = getSchematic(x, y, z, current);

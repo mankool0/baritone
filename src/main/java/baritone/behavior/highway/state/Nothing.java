@@ -23,6 +23,7 @@ import baritone.api.utils.BetterBlockPos;
 import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.LookaheadWindow;
+import baritone.behavior.highway.NetherHighwayBuilderBehavior;
 import baritone.behavior.highway.enums.HighwayState;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.LocationType;
@@ -118,11 +119,11 @@ public class Nothing extends State {
             int stepX = context.highwayDirection().getX();
             int stepZ = context.highwayDirection().getZ();
             // digging has no rails to place, and digs don't care which way the face looks
-            int laneLead = context.paving() && context.settings().highwayRail.value ? LookaheadWindow.PAVING_LANE_LEAD : 0;
+            int laneLead = context.paving() && NetherHighwayBuilderBehavior.hasRails(context.settings()) ? LookaheadWindow.PAVING_LANE_LEAD : 0;
             LookaheadWindow window = LookaheadWindow.of(context.schematic(), stepX, stepZ, lookahead,
                     laneLead, context.settings().highwayWidth.value);
-            buildSchem = window.schematic();
             buildOrigin = buildOrigin.offset(window.originShift());
+            buildSchem = context.bindCellOverrides(window.schematic(), buildOrigin);
             // the builder only repeats once the whole region is correct, so advance by the full
             // window width or each repeat would just re-expose slices it already built
             context.settings().buildRepeat.value = new Vec3i(stepX * lookahead, 0, stepZ * lookahead);
