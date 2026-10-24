@@ -263,6 +263,8 @@ public class HighwayContext {
     private Vec3 liqOriginVector = new Vec3(0, 0, 0);
     private Vec3 backPathOriginVector = new Vec3(0, 0, 0);
     private Vec3 eChestEmptyShulkOriginVector = new Vec3(0, 0, 0);
+    // the side-storage line mirrored to the road's other side, c=W+2
+    private Vec3 farSideStorageOriginVector = new Vec3(0, 0, 0);
     private Vec3i highwayDirection = new Vec3i(1, 0, -1);
     private HighwayPattern pattern = HighwayPattern.NONE;
     private boolean paving = false;
@@ -844,6 +846,10 @@ public class HighwayContext {
 
     public void seteChestEmptyShulkOriginVector(Vec3 eChestEmptyShulkOriginVector) {
         this.eChestEmptyShulkOriginVector = eChestEmptyShulkOriginVector;
+    }
+
+    public void setFarSideStorageOriginVector(Vec3 farSideStorageOriginVector) {
+        this.farSideStorageOriginVector = farSideStorageOriginVector;
     }
 
     public WhiteBlackSchematic liqCheckSchem() {
@@ -3676,23 +3682,36 @@ public class HighwayContext {
     }
 
     public BlockPos findSafeSideStorageSpot(int minBack, int maxBack) {
-        BlockPos behind = scanSideStorageSpots(minBack, maxBack, -1);
+        BlockPos behind = scanSideStorageSpots(eChestEmptyShulkOriginVector, minBack, maxBack, -1);
         if (behind != null) {
             return behind;
         }
         // Nothing usable behind us. At a crossing with another highway the side lane is that
         // highway's corridor rather than our own rail: open air with nothing to set a box on and no
         // floor to stand on. Look the same distance ahead along our own highway instead.
-        return scanSideStorageSpots(minBack, maxBack, 1);
+        BlockPos ahead = scanSideStorageSpots(eChestEmptyShulkOriginVector, minBack, maxBack, 1);
+        if (ahead != null || pattern.isCustom()) {
+            // an angled pattern's lane steps follow the low side's slices, which aren't the far side's
+            return ahead;
+        }
+        // A road can run right alongside ours, its rail in our side-storage column the whole way,
+        // like the road an area-clearing lane is cut next to. Try the same column on our other side.
+        behind = scanSideStorageSpots(farSideStorageOriginVector, minBack, maxBack, -1);
+        if (behind != null) {
+            return behind;
+        }
+        return scanSideStorageSpots(farSideStorageOriginVector, minBack, maxBack, 1);
     }
 
     /**
-     * Walks the side-storage line looking for a usable spot, {@code sign} -1 back along the highway
+     * Walks a side-storage line looking for a usable spot, {@code sign} -1 back along the highway
      * and +1 ahead of us.
+     *
+     * @param line a point on the line: this side's or the far side's
      */
-    private BlockPos scanSideStorageSpots(int minDist, int maxDist, int sign) {
+    private BlockPos scanSideStorageSpots(Vec3 line, int minDist, int maxDist, int sign) {
         Vec3 direction = new Vec3(highwayDirection.getX(), highwayDirection.getY(), highwayDirection.getZ());
-        Vec3 origin = new Vec3(eChestEmptyShulkOriginVector.x, eChestEmptyShulkOriginVector.y, eChestEmptyShulkOriginVector.z);
+        Vec3 origin = new Vec3(line.x, line.y, line.z);
         // Project our feet once and walk the line in slices from there. Projecting every candidate
         // instead ran each one through the build's start and end clamps: on a short run they all
         // collapsed onto the first and last slice, and the pavement behind the start never got

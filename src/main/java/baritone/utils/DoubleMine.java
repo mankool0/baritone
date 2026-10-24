@@ -138,6 +138,13 @@ public final class DoubleMine implements AbstractGameEventListener {
         return regular != null;
     }
 
+    /**
+     * @return whether a block is parked in the delayed slot, which the server finishes wherever we are
+     */
+    public boolean parking() {
+        return parked != null;
+    }
+
     public boolean isMining(BlockPos pos) {
         return regular != null && regular.pos.equals(pos) || parked != null && parked.pos.equals(pos);
     }

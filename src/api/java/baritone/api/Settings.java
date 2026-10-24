@@ -2325,8 +2325,10 @@ public final class Settings {
      * once: one is left for the server to finish on its own while the next is dug normally, and
      * each normal dig is finished at 70% of its break time (the server accepts that). Digs are sent
      * as packets, so the crosshair doesn't have to stay on the block. About twice as fast as
-     * vanilla through a wall of obsidian. Anticheats that time digs, such as Grim's FastBreak
-     * check, cancel these breaks.
+     * vanilla through a wall of obsidian. When more such blocks are just out of reach, the bot first
+     * walks to a spot a few blocks away that has the most of them in reach, rather than digging
+     * them one at a time from the edge of reach. Anticheats that time digs, such as Grim's
+     * FastBreak check, cancel these breaks.
      */
     public final Setting<Boolean> builderDoubleMine = new Setting<>(false);
 

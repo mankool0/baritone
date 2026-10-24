@@ -73,8 +73,11 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     private final SetbackTally setbacks = new SetbackTally();
 
     private boolean walkKeyHeld = false;
+    // the creep let go only because the build front is too far ahead for it, last tick
+    private boolean frontBeyondCreep = false;
 
     private static final String FRONT_TOO_CLOSE = "front too close";
+    private static final String FRONT_TOO_FAR = "front too far";
     private static final String NO_FLOOR_AHEAD = "no floor ahead";
     /** Ticks pressed against an edge with nothing placed before the creep lets go of it */
     private static final int EDGE_STILL_TICKS = 20;
@@ -297,6 +300,12 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         highwayContext.setPatternSchematics(parsedPattern.isCustom() && highwayRail
                 ? composePatternSchematics(highwayContext.highwayDirection(), groupA, groupB, pave, settings)
                 : null);
+        // Side storage is one column below the cross-section's first, so the same column past its
+        // last (W+1, a rail or the lane's wall) is W+3 further on along the cross axis
+        Vec3 storageLine = highwayContext.eChestEmptyShulkOriginVector();
+        highwayContext.setFarSideStorageOriginVector(groupA
+                ? storageLine.add(0, 0, highwayWidth + 3)
+                : storageLine.add(highwayWidth + 3, 0, 0));
 
         Vec3 origin = new Vec3(highwayContext.originVector().x, highwayContext.originVector().y, highwayContext.originVector().z);
         Vec3 direction = new Vec3(highwayContext.highwayDirection().getX(), highwayContext.highwayDirection().getY(), highwayContext.highwayDirection().getZ());
@@ -673,6 +682,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
     @Override
     public void onTick(TickEvent event) {
+        frontBeyondCreep = false; // only a tick that evaluates the creep says otherwise
         if (stopWhenSafe && event.getType() == TickEvent.Type.IN && ctx.player() != null && stopIfSafe()) {
             return;
         }
@@ -756,6 +766,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             // both sides of these comparisons are blocks along the highway, including creepMaxOvershoot
             int frontDistance = highwayContext.getHighwayFrontDistance();
             String walkBlocker = creepBlocker(frontDistance, pathing, builderAim, false);
+            frontBeyondCreep = walkBlocker == FRONT_TOO_FAR;
             // read every tick, so a tick the builder didn't run never counts
             boolean printerOutOfReach = baritone.getBuilderProcess().consumePrinterOutOfReach();
             boolean toEdge = false;
@@ -801,7 +812,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             return FRONT_TOO_CLOSE;
         } else if (frontDistance >= settings.highwayEndDistance.value + highwayContext.creepMaxOvershoot()) {
             // only creep while the build front is right in front of us
-            return "front too far";
+            return FRONT_TOO_FAR;
         } else if (!toEdge && !highwayContext.canWalkOnFloorAhead()) {
             return NO_FLOOR_AHEAD;
         } else if (!highwayContext.canWalkThroughAhead()) {
@@ -926,6 +937,11 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     @Override
     public boolean isEndDistanceWalkHeld() {
         return walkKeyHeld;
+    }
+
+    @Override
+    public boolean isBuildFrontBeyondCreep() {
+        return frontBeyondCreep;
     }
 
     @Override

@@ -80,6 +80,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.item.context.UseOnContext;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.AirBlock;
 import net.minecraft.world.level.block.AnvilBlock;
 import net.minecraft.world.level.block.BedBlock;
@@ -198,6 +199,23 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private static final int PRINTER_MAX_BREAK_STARVATION = 20;
 
     /**
+     * How far, along either axis, {@link #doubleMineStand} looks for a block to stand in.
+     */
+    private static final int DOUBLE_MINE_STAND_RADIUS = 4;
+
+    /**
+     * How much less than the reach a stand counts on: a path ends anywhere in the block, not at its
+     * centre, which the count measures from.
+     */
+    private static final double DOUBLE_MINE_STAND_REACH_MARGIN = 0.3;
+
+    /**
+     * How long the walk to a stand may take before we dig from wherever we've got to. A few blocks
+     * of walking is some 20 ticks.
+     */
+    private static final int DOUBLE_MINE_MAX_STAND_TICKS = 60;
+
+    /**
      * How many nodes ahead on the current path the printer treats as off limits for breaking, and
      * how many movements ahead the builder won't place into.
      */
@@ -234,6 +252,11 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private boolean legitSlowBreakLastTick;
     private BetterBlockPos legitAimTargetLastTick;
     private final DoubleMine doubleMine;
+    // where we're walking to so DoubleMine has more in reach, and for how long
+    private BetterBlockPos doubleMineStand;
+    private int doubleMineStandTicks;
+    // a walk to a stand ended, so dig from here whatever it reaches rather than look for another
+    private boolean doubleMineStandSettled;
     private final PlaceRateLimiter placeRateLimiter = new PlaceRateLimiter();
     // why printerPlacesLeft allowed none this tick
     private String printerPlaceHold;
@@ -550,7 +573,10 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         return state;
     }
 
-    private List<Optional<Tuple<BetterBlockPos, Rotation>>> toBreakNearPlayer(BuilderCalculationContext bcc) {
+    /**
+     * @param outOfReach collects the blocks the scan would break that aren't in reach from here
+     */
+    private List<Optional<Tuple<BetterBlockPos, Rotation>>> toBreakNearPlayer(BuilderCalculationContext bcc, List<BetterBlockPos> outOfReach) {
         BetterBlockPos center = ctx.playerFeet();
         BetterBlockPos pathStart = baritone.getPathingBehavior().pathStart();
         List<Optional<Tuple<BetterBlockPos, Rotation>>> toReturn = new ArrayList<>();
@@ -585,7 +611,11 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                     BlockState curr = bcc.bsi.get0(x, y, z);
                     if (!(curr.getBlock() instanceof AirBlock) && !(curr.getBlock() == Blocks.WATER || curr.getBlock() == Blocks.LAVA) && !valid(curr, desired, false)) {
                         Optional<Rotation> rot = RotationUtils.reachable(ctx, new BlockPos(x, y, z), ctx.playerController().getBlockReachDistance());
-                        rot.ifPresent(rotation -> toReturn.add(Optional.of(new Tuple<>(new BetterBlockPos(x, y, z), rotation))));
+                        if (rot.isPresent()) {
+                            toReturn.add(Optional.of(new Tuple<>(new BetterBlockPos(x, y, z), rot.get())));
+                        } else {
+                            outOfReach.add(new BetterBlockPos(x, y, z));
+                        }
                     }
                 }
             }
@@ -1636,18 +1666,153 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private List<Tuple<BetterBlockPos, Rotation>> doubleMineCandidates(BuilderCalculationContext bcc, List<Optional<Tuple<BetterBlockPos, Rotation>>> toBreak) {
         List<Tuple<BetterBlockPos, Rotation>> slow = new ArrayList<>();
         for (Optional<Tuple<BetterBlockPos, Rotation>> info : toBreak) {
-            if (info.isEmpty()) {
-                continue;
-            }
-            BetterBlockPos pos = info.get().getA();
-            float progress = printerBreakProgress(bcc.get(pos), pos);
-            // a start the client's own judgment has instant clears the block in an anticheat's
-            // copy of the world while the server is still digging it; the two agree again shortly
-            if (progress > 0 && progress < IPlayerController.SERVER_FINISH_DIG_PROGRESS && !printerClientInstant(bcc.get(pos), pos)) {
+            if (info.isPresent() && doubleMineDigs(bcc, info.get().getA())) {
                 slow.add(info.get());
             }
         }
         return slow;
+    }
+
+    private boolean doubleMineDigs(BuilderCalculationContext bcc, BetterBlockPos pos) {
+        BlockState state = bcc.get(pos);
+        float progress = printerBreakProgress(state, pos);
+        // a start the client's own judgment has instant clears the block in an anticheat's
+        // copy of the world while the server is still digging it; the two agree again shortly
+        return progress > 0 && progress < IPlayerController.SERVER_FINISH_DIG_PROGRESS && !printerClientInstant(state, pos);
+    }
+
+    /**
+     * Walks to a block that has more of DoubleMine's blocks in reach before it starts on them.
+     * Whatever moves us stops the moment the first of them comes into reach: the stationary dig
+     * cancels a path, and so does the printer's first break on the way. Started from there, one
+     * block is all the slots get, the rest a step out of reach. Closer in they're dug in pairs.
+     * <p>
+     * A block parked in the delayed slot finishes without us, so the walk may start while one is.
+     *
+     * @param mayChoose whether this tick may set off for a new stand: a tick the stationary dig
+     *                  would otherwise start on
+     * @return the path to the stand, or null to dig from here
+     */
+    private PathingCommand doubleMineStand(BuilderCalculationContext bcc, boolean calcFailed, boolean mayChoose,
+                                           List<Optional<Tuple<BetterBlockPos, Rotation>>> toBreak, List<BetterBlockPos> outOfReach) {
+        if (doubleMine.digging()) {
+            doubleMineStand = null;
+            doubleMineStandSettled = false;
+            return null;
+        }
+        BetterBlockPos feet = ctx.playerFeet();
+        if (doubleMineStand != null) {
+            boolean arrived = feet.equals(doubleMineStand) && ctx.player().onGround();
+            if (arrived || calcFailed || ++doubleMineStandTicks > DOUBLE_MINE_MAX_STAND_TICKS
+                    || feet.distSqr(doubleMineStand) > 4 * DOUBLE_MINE_STAND_RADIUS * DOUBLE_MINE_STAND_RADIUS) {
+                doubleMineStand = null;
+                doubleMineStandSettled = true;
+                return null;
+            }
+            return new PathingCommandContext(new GoalBlock(doubleMineStand), PathingCommandType.FORCE_REVALIDATE_GOAL_AND_PATH, bcc);
+        }
+        if (!mayChoose || doubleMineStandSettled) {
+            return null;
+        }
+        List<BetterBlockPos> targets = new ArrayList<>();
+        for (Optional<Tuple<BetterBlockPos, Rotation>> info : toBreak) {
+            if (info.isEmpty() || doubleMine.isMining(info.get().getA())) {
+                continue;
+            }
+            if (toBreakEntity.contains(info.get().getA())) {
+                return null; // an entity is waiting on that hole, and it has a stand of its own
+            }
+            if (doubleMineDigs(bcc, info.get().getA())) {
+                targets.add(info.get().getA());
+            }
+        }
+        int here = targets.size();
+        if (here == 0 && !doubleMine.parking()) {
+            return null; // nothing for the slots yet; the build's own goal brings us to it
+        }
+        for (BetterBlockPos pos : outOfReach) {
+            if (doubleMineDigs(bcc, pos)) {
+                targets.add(pos);
+            }
+        }
+        INetherHighwayBuilderBehavior highway = baritone.getNetherHighwayBuilderBehavior();
+        if (targets.size() == here || highway.isBuildingHighwayState() && placeInFlightLeftBehind(highway.highwayHeading())) {
+            return null;
+        }
+        BetterBlockPos best = bestDoubleMineStand(bcc, targets, here);
+        if (best == null) {
+            return null;
+        }
+        doubleMineStand = best;
+        doubleMineStandTicks = 0;
+        return new PathingCommandContext(new GoalBlock(best), PathingCommandType.FORCE_REVALIDATE_GOAL_AND_PATH, bcc);
+    }
+
+    /**
+     * @return the block near us with the most of the targets in reach, nearest first among equals,
+     * or null if none has more than {@code here}
+     */
+    private BetterBlockPos bestDoubleMineStand(BuilderCalculationContext bcc, List<BetterBlockPos> targets, int here) {
+        BetterBlockPos feet = ctx.playerFeet();
+        int y = standingY();
+        double reach = ctx.playerController().getBlockReachDistance() - DOUBLE_MINE_STAND_REACH_MARGIN;
+        double eyeHeight = ctx.player().getEyeHeight(Pose.STANDING);
+        INetherHighwayBuilderBehavior highway = baritone.getNetherHighwayBuilderBehavior();
+        boolean lane = highway.isBuildingHighwayState();
+        BetterBlockPos best = null;
+        int bestCount = here;
+        int bestDistSq = Integer.MAX_VALUE;
+        for (int dx = -DOUBLE_MINE_STAND_RADIUS; dx <= DOUBLE_MINE_STAND_RADIUS; dx++) {
+            for (int dz = -DOUBLE_MINE_STAND_RADIUS; dz <= DOUBLE_MINE_STAND_RADIUS; dz++) {
+                int x = feet.x + dx;
+                int z = feet.z + dz;
+                if (dx == 0 && dz == 0 || lane && !highway.inWalkLane(x, z) || entityHole.contains(new BetterBlockPos(x, y, z))
+                        || !MovementHelper.canWalkOn(bcc.bsi, x, y - 1, z)
+                        || !MovementHelper.canWalkThrough(bcc.bsi, x, y, z) || !MovementHelper.canWalkThrough(bcc.bsi, x, y + 1, z)) {
+                    continue;
+                }
+                Vec3 eye = new Vec3(x + 0.5, y + eyeHeight, z + 0.5);
+                int count = 0;
+                for (BetterBlockPos target : targets) {
+                    // what we'd stand on can't be dug from there
+                    if (!(target.x == x && target.z == z && target.y == y - 1) && reachableFrom(eye, target, reach)) {
+                        count++;
+                    }
+                }
+                int distSq = dx * dx + dz * dz;
+                if (count > bestCount || count == bestCount && best != null && distSq < bestDistSq) {
+                    best = new BetterBlockPos(x, y, z);
+                    bestCount = count;
+                    bestDistSq = distSq;
+                }
+            }
+        }
+        return best;
+    }
+
+    /**
+     * {@link RotationUtils#reachable}'s test, from an eye somewhere else: a ray at the block's
+     * centre or the centre of one of its faces hits it first, within reach.
+     */
+    private boolean reachableFrom(Vec3 eye, BlockPos pos, double reach) {
+        double cx = pos.getX() + 0.5;
+        double cy = pos.getY() + 0.5;
+        double cz = pos.getZ() + 0.5;
+        if (eye.distanceToSqr(cx, cy, cz) > (reach + 1) * (reach + 1)) {
+            return false;
+        }
+        BlockPos block = new BlockPos(pos.getX(), pos.getY(), pos.getZ());
+        for (Vec3 point : new Vec3[]{new Vec3(cx, cy, cz),
+                new Vec3(cx, cy - 0.5, cz), new Vec3(cx, cy + 0.5, cz),
+                new Vec3(cx, cy, cz - 0.5), new Vec3(cx, cy, cz + 0.5),
+                new Vec3(cx - 0.5, cy, cz), new Vec3(cx + 0.5, cy, cz)}) {
+            Vec3 end = eye.add(point.subtract(eye).normalize().scale(reach));
+            BlockHitResult hit = ctx.world().clip(new ClipContext(eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, ctx.player()));
+            if (hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(block)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -1841,7 +2006,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         }
         updateEntityHoles(bcc);
 
-        List<Optional<Tuple<BetterBlockPos, Rotation>>> toBreak = toBreakNearPlayer(bcc);
+        List<BetterBlockPos> outOfReach = new ArrayList<>();
+        List<Optional<Tuple<BetterBlockPos, Rotation>>> toBreak = toBreakNearPlayer(bcc, outOfReach);
 
         // The printer acts without stopping pathing; the stationary break/place paths below only
         // engage on ticks it didn't act, since they'd send conflicting packets otherwise.
@@ -1871,7 +2037,15 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             printerBreakStarvation = 0;
         }
 
-        if (!toBreak.isEmpty() && isSafeToCancel && ctx.player().onGround() && !printerAction.acted()) {
+        boolean stationary = isSafeToCancel && ctx.player().onGround() && !printerAction.acted();
+        if (Baritone.settings().builderDoubleMine.value) {
+            // ahead of the highway's hold-position gate as well, which cancels a path whenever the printer acts
+            PathingCommand toStand = doubleMineStand(bcc, calcFailed, stationary && !toBreak.isEmpty(), toBreak, outOfReach);
+            if (toStand != null) {
+                return toStand;
+            }
+        }
+        if (!toBreak.isEmpty() && stationary) {
             legitBreakSessionLastTick = true;
             if (Baritone.settings().builderDoubleMine.value) {
                 BlockPos mining = doubleMine.tick(doubleMineCandidates(bcc, toBreak));
@@ -1942,7 +2116,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
 
             return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
         }
-        if (toBreak.isEmpty() && isSafeToCancel && ctx.player().onGround() && !printerAction.acted()) {
+        if (toBreak.isEmpty() && stationary) {
             BetterBlockPos hidden = entityHoleOutOfSight(bcc);
             if (hidden != null) {
                 // Standing beside the hole is all its goal asks for, so no path will move us from here. But the bottom
@@ -2088,12 +2262,16 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
 
         INetherHighwayBuilderBehavior highway = baritone.getNetherHighwayBuilderBehavior();
         boolean printerBlocked = Baritone.settings().printer.value && !printerReady;
+        // A clear middle of the lane with work left beside it, like a road being widened, puts the
+        // front too far off for the creep, so our paths are all that moves us. Held while the printer
+        // works, they'd stop for every block that came into reach on the way.
+        boolean printerHolds = printerAction.acted() && !highway.isBuildFrontBeyondCreep();
         if (Baritone.settings().highwayEndDistance.value != -1
                 && highway.isBuildingHighwayState()
                 && !highway.isFixingInvalidBlocks()
                 && !(highway.needsLateralTraverses() && baritone.getPathingBehavior().isPathing())
                 && isSafeToCancel
-                && (printerAction.acted() || highway.isEndDistanceWalkHeld() || printerBlocked)) {
+                && (printerHolds || highway.isEndDistanceWalkHeld() || printerBlocked)) {
             return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
         }
         if (highway.isBuildingHighwayState() && isSafeToCancel && placeInFlightLeftBehind(highway.highwayHeading())) {
@@ -2118,6 +2296,10 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             }
         }
         if (goal == null) {
+            if (printerAction.acted()) {
+                // the printer may just have done the last of it, which only next tick's recalc sees
+                return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
+            }
             if (entityBlocked.stream().anyMatch(pos -> !boatBlocked.contains(pos))) {
                 // What's left is waiting on an entity: still falling through the hole we just dug,
                 // or walking off. A pause would sit idle long after it's gone, so check every tick.
@@ -2832,6 +3014,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         legitSlowBreakLastTick = false;
         legitAimTargetLastTick = null;
         doubleMine.reset();
+        doubleMineStand = null;
+        doubleMineStandSettled = false;
         printerBreakStarvation = 0;
         printerMovementForced = false;
         clearCompletedWatch();

@@ -27,6 +27,12 @@ public interface INetherHighwayBuilderBehavior extends IBehavior {
 
     boolean isEndDistanceWalkHeld();
 
+    /**
+     * Whether, on its last tick, the walk creep let go only because the build front is further
+     * ahead than it walks to. Getting there is then up to the builder's paths.
+     */
+    boolean isBuildFrontBeyondCreep();
+
     boolean isFixingInvalidBlocks();
 
     /**
