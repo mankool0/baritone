@@ -2198,7 +2198,9 @@ public final class Settings {
 
     /**
      * How many blocks below the highway walking level the player must be to count
-     * as having fallen off the highway and trigger fall recovery.
+     * as having fallen off the highway and trigger fall recovery. A path that walks down that far
+     * on purpose, e.g. into a ravine across the road to climb out on the far side, doesn't count
+     * unless it stops making progress or ends in lava.
      */
     public final Setting<Integer> highwayFallDetectThreshold = new Setting<>(5);
 

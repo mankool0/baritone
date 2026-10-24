@@ -20,6 +20,7 @@ package baritone.behavior.highway;
 import baritone.Baritone;
 import baritone.api.BaritoneAPI;
 import baritone.api.Settings;
+import baritone.api.pathing.calc.IPath;
 import baritone.api.pathing.goals.*;
 import baritone.api.schematic.CellOverrides;
 import baritone.api.schematic.CompositeSchematic;
@@ -33,6 +34,7 @@ import baritone.behavior.highway.enums.HighwayState;
 import baritone.behavior.highway.enums.ShulkerType;
 import baritone.behavior.highway.enums.LocationType;
 import baritone.pathing.movement.MovementHelper;
+import baritone.pathing.path.PathExecutor;
 import baritone.process.BuilderProcess;
 import baritone.utils.BrokenBlocks;
 import baritone.utils.EntityHole;
@@ -187,6 +189,11 @@ public class HighwayContext {
     // feet block and ticks spent on it while a path runs underneath the road, see trappedUnderRoad
     private BetterBlockPos underRoadLastFeet = null;
     private int underRoadStillTicks = 0;
+    // whether the path we were on as we went below the fall threshold planned that depth (null
+    // while above it), and the feet block and building ticks spent on it since, see fellOffHighway
+    private Boolean descentPlanned = null;
+    private BetterBlockPos descentLastFeet = null;
+    private int descentStillTicks = 0;
     private boolean recoveryHoldingJump = false; // here, not on FallRecovery: transitionTo throws the state object away, and a latched jump key would outlive it
     private Boolean recoverySwimThroughLavaSaved = null; // non-null while we've overridden allowSwimThroughLava for recovery
     private boolean invalidBlockFixActive = false;
@@ -1441,8 +1448,11 @@ public class HighwayContext {
                 && roadOverhead();
     }
 
-    /** How long a path may hold us on one block under the road before we count as sealed in anyway. */
-    private static final int UNDER_ROAD_STILL_TICKS = 100;
+    /**
+     * How long a path may hold us on one block under the road, or below the fall threshold, before
+     * we count as stuck there anyway.
+     */
+    private static final int TRANSIT_STILL_TICKS = 100;
 
     /**
      * {@link #sealedUnderHighway}, except while a path is carrying us through underneath the road.
@@ -1465,7 +1475,58 @@ public class HighwayContext {
             underRoadLastFeet = feet;
             underRoadStillTicks = 0;
         }
-        return ++underRoadStillTicks > UNDER_ROAD_STILL_TICKS;
+        return ++underRoadStillTicks > TRANSIT_STILL_TICKS;
+    }
+
+    /**
+     * Feet {@code highwayFallDetectThreshold} or more below the road, unless a path walked us down
+     * there on purpose. A ravine across the road that nothing bridges is crossed by walking down
+     * into it and up the far side, and pulling the bot back onto the near rim each time only starts
+     * the same walk again. Whether the descent was planned is judged once, as we go below, from the
+     * path we're on then, because one replanned after a real fall reaches down there too. Lava, or a
+     * walk that stops getting anywhere, still counts as having fallen. Run every tick so the descent
+     * is judged whatever state takes us down; only building ticks count towards a stall.
+     */
+    private boolean fellOffHighway(boolean building) {
+        BetterBlockPos feet = playerContext.playerFeet();
+        if (feet.y > highwayFeetY() - settings.highwayFallDetectThreshold.value) {
+            descentPlanned = null;
+            return false;
+        }
+        if (descentPlanned == null) {
+            descentPlanned = pathPlannedDepth(feet);
+            descentLastFeet = null;
+        }
+        if (!descentPlanned || playerContext.player().isInLava()) {
+            return true;
+        }
+        if (!building || !feet.equals(descentLastFeet)) {
+            descentLastFeet = feet;
+            descentStillTicks = 0;
+        }
+        return ++descentStillTicks > TRANSIT_STILL_TICKS;
+    }
+
+    /**
+     * True if the path we're following started on solid footing and goes as deep as our feet right
+     * where we are. A path replanned while we fall starts in mid-air.
+     */
+    private boolean pathPlannedDepth(BetterBlockPos feet) {
+        PathExecutor current = baritone.getPathingBehavior().getCurrent();
+        if (current == null) {
+            return false;
+        }
+        IPath path = current.getPath();
+        BetterBlockPos src = path.getSrc();
+        if (!MovementHelper.canWalkOn(baritone.bsi, src.x, src.y - 1, src.z)) {
+            return false;
+        }
+        for (BetterBlockPos pos : path.positions()) {
+            if (pos.y <= feet.y && Math.abs(pos.x - feet.x) <= 1 && Math.abs(pos.z - feet.z) <= 1) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -1973,11 +2034,13 @@ public class HighwayContext {
 
         // Fell off the highway, or got paved over while below it: recover by pathing back to a
         // built spot behind us
-        boolean fellFar = playerContext.playerFeet().y <= highwayFeetY() - settings.highwayFallDetectThreshold.value;
+        boolean fellFar = fellOffHighway(currentStateEnum == HighwayState.BuildingHighway);
         if (settings.highwayFallRecovery.value && currentStateEnum == HighwayState.BuildingHighway
                 && (fellFar || trappedUnderRoad())) {
-            Helper.HELPER.logDirect((fellFar ? "Fell off the highway" : "Trapped underneath the highway")
-                    + " (y=" + playerContext.playerFeet().y + "). Recovering.");
+            String why = !fellFar ? "Trapped underneath the highway"
+                    : Boolean.TRUE.equals(descentPlanned) ? "Stuck below the highway"
+                    : "Fell off the highway";
+            Helper.HELPER.logDirect(why + " (y=" + playerContext.playerFeet().y + "). Recovering.");
             setPreviousState(currentStateEnum);
             resetRecovery();
             baritone.getInputOverrideHandler().clearAllKeys();
