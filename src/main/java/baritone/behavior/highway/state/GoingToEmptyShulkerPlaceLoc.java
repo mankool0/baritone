@@ -17,7 +17,6 @@
 
 package baritone.behavior.highway.state;
 
-import baritone.api.pathing.goals.GoalBlock;
 import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
@@ -49,20 +48,22 @@ public class GoingToEmptyShulkerPlaceLoc extends State {
         BlockPos twoBlocksAway = context.placeLocStand(2);
 
         if (context.playerContext().playerFeet().equals(twoBlocksAway)) {
+            context.reachedSideStorageStand();
             context.baritone().getPathingBehavior().cancelEverything();
             context.transitionTo(HighwayState.PlacingEmptyShulkerSupport);
         } else if (context.playerContext().playerFeet().equals(oneBlockAway)) {
             if (!context.baritone().getBuilderProcess().checkNoEntityCollision(new AABB(context.placeLoc()), null)) {
                 // We're blocking, move to 2 blocks away
                 Helper.HELPER.logDirect("Player blocking shulker placement, moving to 2 blocks away");
-                context.baritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(twoBlocksAway));
+                context.pathToSideStorageStand(twoBlocksAway, HighwayState.EmptyShulkerPlaceLocPrep);
             } else {
+                context.reachedSideStorageStand();
                 context.baritone().getPathingBehavior().cancelEverything();
                 context.transitionTo(HighwayState.PlacingEmptyShulkerSupport);
             }
         } else {
             // Not at either position, path to 1 block away first
-            context.baritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(oneBlockAway));
+            context.pathToSideStorageStand(oneBlockAway, HighwayState.EmptyShulkerPlaceLocPrep);
         }
     }
 }

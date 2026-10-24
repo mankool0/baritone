@@ -218,6 +218,9 @@ public class HighwayContext {
     private static final int STAND_FLOOR_TRIES = 3; // builds of a missing side-storage stand floor before giving up on the spot
     private BlockPos standFloorSpot = null; // floor cell the stand-floor builds are counted against
     private int standFloorTries = 0;
+    private static final int STAND_PATH_TRIES = 5; // paths to a side-storage stand that end short of it before giving up on the spot
+    private BlockPos standPathSpot = null; // spot the stand path requests below are counted against
+    private int standPathTries = 0;
     private BlockPos shulkerSightFailSpot = null; // spot the sight failures below are counted against
     private int shulkerSightDigs = 0;
     private int shulkerSightWalks = 0;
@@ -3755,8 +3758,63 @@ public class HighwayContext {
             if (!hasFloorUnder(stand) && !canBuildFloorAt(stand.below())) {
                 return false;
             }
+            if (!canDigOutStand(stand)) {
+                return false;
+            }
         }
         return true;
+    }
+
+    /**
+     * Whether the pathfinder will clear {@code stand} for our body: each cell already open, or one
+     * it is willing to dig. It won't dig a block with liquid beside or above it, so a stand cell
+     * walling off lava outside the lane passed the box column's lava check and left the go-to
+     * state asking for a path that never came.
+     */
+    private boolean canDigOutStand(BlockPos stand) {
+        for (BlockPos cell : new BlockPos[]{stand, stand.above()}) {
+            int x = cell.getX();
+            int y = cell.getY();
+            int z = cell.getZ();
+            if (MovementHelper.canWalkThrough(baritone.bsi, x, y, z)) {
+                continue;
+            }
+            BlockState state = baritone.bsi.get0(x, y, z);
+            if (!state.getFluidState().isEmpty() || MovementHelper.avoidBreaking(baritone.bsi, x, y, z, state)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Sends us to {@code stand} to work on the side-storage spot. The goal process drops out short
+     * of the goal whenever no path is found, and the go-to states used to just ask again, for good:
+     * a spot can pass the scan and still be one the pathfinder won't get us next to. Each ask that
+     * doesn't end on a stand counts against the spot, and past the last one we move to
+     * {@code relocateState} instead.
+     */
+    public void pathToSideStorageStand(BlockPos stand, HighwayState relocateState) {
+        if (!placeLoc.equals(standPathSpot)) {
+            standPathSpot = placeLoc;
+            standPathTries = 0;
+        }
+        if (standPathTries++ >= STAND_PATH_TRIES) {
+            rememberBadShulkerSpot(placeLoc);
+            Helper.HELPER.logDirect("Couldn't find a path to stand next to " + placeLoc.toShortString() + ", picking a different spot.");
+            standPathSpot = null;
+            standPathTries = 0;
+            baritone.getPathingBehavior().cancelEverything();
+            transitionTo(relocateState);
+            return;
+        }
+        baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(stand));
+    }
+
+    /** We made it onto a side-storage stand, so the path requests it took were no failures. */
+    public void reachedSideStorageStand() {
+        standPathSpot = null;
+        standPathTries = 0;
     }
 
     /**
