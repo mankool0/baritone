@@ -73,14 +73,20 @@ public final class DoubleMine implements AbstractGameEventListener {
 
     private final IPlayerContext ctx;
     private final ServerDigSpeed digSpeed;
+    /**
+     * Where the finished digs go, which the left-click path never sees: the stuck checks count them
+     * as progress standing still
+     */
+    private final BrokenBlocks broken;
     private Dig regular;
     private Dig parked;
     private boolean sending;
     private boolean sentThisTick;
 
-    public DoubleMine(IPlayerContext ctx, ServerDigSpeed digSpeed) {
+    public DoubleMine(IPlayerContext ctx, ServerDigSpeed digSpeed, BrokenBlocks broken) {
         this.ctx = ctx;
         this.digSpeed = digSpeed;
+        this.broken = broken;
     }
 
     /**
@@ -93,7 +99,11 @@ public final class DoubleMine implements AbstractGameEventListener {
     public BlockPos tick(List<Tuple<BetterBlockPos, Rotation>> candidates) {
         long now = ctx.world().getGameTime();
         sentThisTick = false;
-        if (parked != null && (gone(parked) || now > parked.start + ServerDigTarget.ticksToReach(progress(parked), 1.0f) + PARK_TIMEOUT_TICKS)) {
+        if (parked != null && gone(parked)) {
+            broken.add(parked.pos, parked.state);
+            parked = null;
+        }
+        if (parked != null && now > parked.start + ServerDigTarget.ticksToReach(progress(parked), 1.0f) + PARK_TIMEOUT_TICKS) {
             parked = null;
         }
         if (regular != null && (gone(regular) || !ctx.player().isWithinBlockInteractionRange(regular.pos, 0.5))) {
@@ -101,6 +111,8 @@ public final class DoubleMine implements AbstractGameEventListener {
         }
         if (regular != null && now >= regular.start + ServerDigTarget.ticksToReach(progress(regular), IPlayerController.SERVER_FINISH_DIG_PROGRESS) + FINISH_MARGIN_TICKS) {
             send(regular, ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, true);
+            // predicted gone, so a refused break that the ack restores doesn't count
+            broken.add(regular.pos, regular.state);
             regular = null;
         }
         // start one, park it and start another: at most two passes

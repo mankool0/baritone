@@ -346,7 +346,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
 
     public BuilderProcess(Baritone baritone) {
         super(baritone);
-        doubleMine = new DoubleMine(ctx, baritone.getServerDigSpeed());
+        doubleMine = new DoubleMine(ctx, baritone.getServerDigSpeed(), baritone.getInputOverrideHandler().getBlockBreakHelper().broken());
         baritone.getGameEventHandler().registerEventListener(doubleMine);
         baritone.getGameEventHandler().registerEventListener(placeRateLimiter);
     }
@@ -1312,6 +1312,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         if (!dug) {
             return 0;
         }
+        // predicted gone like the left-click path's breaks, for the stuck checks
+        baritone.getInputOverrideHandler().getBlockBreakHelper().broken().add(pos, state);
         if (first) {
             // one swing covers every break this tick, like a held attack, and keeps the packet
             // count down
