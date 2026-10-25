@@ -313,11 +313,12 @@ public class HighwayContext {
     private int picksToHave = 5;
     private boolean enderChestHasPickShulks = true;
     private boolean enderChestHasEnderShulks = true;
-    private boolean enderChestHasGappleShulks = true;
-    private boolean enderChestHasTotemShulks = true;
     private boolean refillingEnderChests = false;
-    private boolean refillingGapples = false;
-    private boolean refillingTotems = false;
+    // Supplies a storage trip is refilling, and those storage ran out of shulkers of (until the next startBuild)
+    private final EnumSet<Supply> refillingSupplies = EnumSet.noneOf(Supply.class);
+    private final EnumSet<Supply> storageOutOfSupplies = EnumSet.noneOf(Supply.class);
+    // The supply the Supply states are topping up
+    private Supply activeSupply = Supply.GAPPLES;
     private boolean stashingShulker = false;
     private BlockPos enderChestAccessLoc = null;
     private ShulkerType picksToUse;
@@ -2075,8 +2076,7 @@ public class HighwayContext {
             HighwayState.Nothing,
             HighwayState.FloatingFixPrep,
             HighwayState.PickaxeShulkerPlaceLocPrep,
-            HighwayState.GappleShulkerPlaceLocPrep,
-            HighwayState.TotemShulkerPlaceLocPrep,
+            HighwayState.SupplyShulkerPlaceLocPrep,
             HighwayState.EchestMiningPlaceLocPrep,
             HighwayState.EmptyShulkerPlaceLocPrep,
             HighwayState.EnderChestStashPlaceLocPrep,
@@ -2202,20 +2202,16 @@ public class HighwayContext {
         this.enderChestHasEnderShulks = enderChestHasEnderShulks;
     }
 
-    public boolean enderChestHasGappleShulks() {
-        return enderChestHasGappleShulks;
+    public boolean enderChestHasShulks(Supply supply) {
+        return !storageOutOfSupplies.contains(supply);
     }
 
-    public void setEnderChestHasGappleShulks(boolean enderChestHasGappleShulks) {
-        this.enderChestHasGappleShulks = enderChestHasGappleShulks;
-    }
-
-    public boolean enderChestHasTotemShulks() {
-        return enderChestHasTotemShulks;
-    }
-
-    public void setEnderChestHasTotemShulks(boolean enderChestHasTotemShulks) {
-        this.enderChestHasTotemShulks = enderChestHasTotemShulks;
+    public void setEnderChestHasShulks(Supply supply, boolean has) {
+        if (has) {
+            storageOutOfSupplies.remove(supply);
+        } else {
+            storageOutOfSupplies.add(supply);
+        }
     }
 
     public boolean refillingEnderChests() {
@@ -2226,20 +2222,39 @@ public class HighwayContext {
         this.refillingEnderChests = refillingEnderChests;
     }
 
-    public boolean refillingGapples() {
-        return refillingGapples;
+    public boolean refilling(Supply supply) {
+        return refillingSupplies.contains(supply);
     }
 
-    public void setRefillingGapples(boolean refillingGapples) {
-        this.refillingGapples = refillingGapples;
+    public void setRefilling(Supply supply, boolean refilling) {
+        if (refilling) {
+            refillingSupplies.add(supply);
+        } else {
+            refillingSupplies.remove(supply);
+        }
     }
 
-    public boolean refillingTotems() {
-        return refillingTotems;
+    /** The refill leg in progress: legs run one at a time, in priority order. Null when none is. */
+    public Supply firstRefillingSupply() {
+        return refillingSupplies.isEmpty() ? null : refillingSupplies.iterator().next();
     }
 
-    public void setRefillingTotems(boolean refillingTotems) {
-        this.refillingTotems = refillingTotems;
+    public void stopRefillingSupplies() {
+        refillingSupplies.clear();
+    }
+
+    /** For a new build: nothing being refilled, and storage assumed to hold every supply again. */
+    public void resetSupplies() {
+        refillingSupplies.clear();
+        storageOutOfSupplies.clear();
+    }
+
+    public Supply activeSupply() {
+        return activeSupply;
+    }
+
+    public void setActiveSupply(Supply supply) {
+        this.activeSupply = supply;
     }
 
     public boolean stashingShulker() {
@@ -2256,12 +2271,12 @@ public class HighwayContext {
 
     /**
      * Forget the remembered storage access chest, but only once no refill leg is still latched:
-     * trips are chained (an ender chest grab can queue a gapple and a totem top-up behind it), and
+     * trips are chained (an ender chest grab can queue supply top-ups behind it), and
      * whichever leg finishes first would otherwise strand the later ones into placing a fresh chest
      * a few blocks from the perfectly good one this trip already put down.
      */
     public void releaseEnderChestAccessLoc() {
-        if (!refillingEnderChests && !refillingGapples && !refillingTotems) {
+        if (!refillingEnderChests && refillingSupplies.isEmpty()) {
             enderChestAccessLoc = null;
         }
     }
@@ -2503,16 +2518,13 @@ public class HighwayContext {
     private static final EnumSet<HighwayState> CONTAINER_STATES = EnumSet.of(
             HighwayState.OpeningPickaxeShulker,
             HighwayState.LootingPickaxeShulker,
-            HighwayState.OpeningGappleShulker,
-            HighwayState.LootingGappleShulker,
-            HighwayState.OpeningTotemShulker,
-            HighwayState.LootingTotemShulker,
+            HighwayState.OpeningSupplyShulker,
+            HighwayState.LootingSupplyShulker,
             HighwayState.OpeningLootEnderChest,
             HighwayState.DepositingLootEnderChestDepletedShulkers,
             HighwayState.LootingLootEnderChestPicks,
             HighwayState.LootingLootEnderChestEnderChests,
-            HighwayState.LootingLootEnderChestGapples,
-            HighwayState.LootingLootEnderChestTotems,
+            HighwayState.LootingLootEnderChestSupplies,
             HighwayState.DepositingLootEnderChestDepletedShulkersFinal,
             HighwayState.OpeningEnderShulker,
             HighwayState.LootingEnderShulker,
@@ -2967,36 +2979,18 @@ public class HighwayContext {
         return enderChestCount;
     }
 
-    private int isGappleShulker(ItemStack shulker) {
+    /** How many of the item a box holding nothing else has, 0 for any other box. */
+    private int singleItemShulkerCount(ItemStack shulker, Item item) {
         NonNullList<ItemStack> contents = getShulkerContents(shulker);
 
-        int gappleCount = 0;
+        int count = 0;
         for (ItemStack curStack : contents) {
-            if (Item.getId(curStack.getItem()) != Item.getId(Items.AIR) && Item.getId(curStack.getItem()) != Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) {
+            if (!curStack.isEmpty() && !curStack.is(item)) {
                 return 0;
             }
-
-            if (Item.getId(curStack.getItem()) == Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) {
-                gappleCount++;
-            }
+            count += curStack.getCount();
         }
-        return gappleCount;
-    }
-
-    private int isTotemShulker(ItemStack shulker) {
-        NonNullList<ItemStack> contents = getShulkerContents(shulker);
-
-        int totemCount = 0;
-        for (ItemStack curStack : contents) {
-            if (Item.getId(curStack.getItem()) != Item.getId(Items.AIR) && Item.getId(curStack.getItem()) != Item.getId(Items.TOTEM_OF_UNDYING)) {
-                return 0;
-            }
-
-            if (Item.getId(curStack.getItem()) == Item.getId(Items.TOTEM_OF_UNDYING)) {
-                totemCount += curStack.getCount();
-            }
-        }
-        return totemCount;
+        return count;
     }
 
     private boolean isEmptyShulker(ItemStack shulker) {
@@ -3032,24 +3026,6 @@ public class HighwayContext {
                         break;
                     }
 
-                    case Gapple: {
-                        int count = isGappleShulker(stack);
-                        if (count > 0 && count < bestSlotCount) {
-                            bestSlot = i;
-                            bestSlotCount = count;
-                        }
-                        break;
-                    }
-
-                    case Totem: {
-                        int count = isTotemShulker(stack);
-                        if (count > 0 && count < bestSlotCount) {
-                            bestSlot = i;
-                            bestSlotCount = count;
-                        }
-                        break;
-                    }
-
                     case NonSilkPickaxe: {
                         int count = isNonSilkPickShulker(stack);
                         if (count > 0 && count < bestSlotCount) {
@@ -3078,6 +3054,16 @@ public class HighwayContext {
                     case DepletedPickaxe: {
                         if (isDepletedPickShulker(stack)) {
                             return i;
+                        }
+                        break;
+                    }
+
+                    default: {
+                        // the supply boxes, one item each; the emptiest goes first
+                        int count = shulkerType.item() == null ? 0 : singleItemShulkerCount(stack, shulkerType.item());
+                        if (count > 0 && count < bestSlotCount) {
+                            bestSlot = i;
+                            bestSlotCount = count;
                         }
                         break;
                     }
@@ -4196,8 +4182,8 @@ public class HighwayContext {
                 return;
             }
         } else if (!playerContext.playerFeet().equals(stand) && reachWalks++ < SHULKER_SIGHT_WALKS) {
-            // Straight there rather than through the go-to state: the gapple, pickaxe, totem and loot
-            // chest ones give up once the inventory runs out of what they place, which this just did
+            // Straight there rather than through the go-to state: the supply, pickaxe and loot chest
+            // ones give up once the inventory runs out of what they place, which this just did
             Helper.HELPER.logDirect(what + " at " + key.toShortString() + " can't be reached, walking back to "
                     + stand.toShortString() + ".");
             baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(stand));
@@ -4558,47 +4544,20 @@ public class HighwayContext {
         return 0;
     }
 
-    public int lootGappleChestSlot() {
-        int count = 0;
-        AbstractContainerMenu curContainer = playerContext.player().containerMenu;
-        for (int i = 0; i < 27; i++) {
-            if (curContainer.getSlot(i).getItem().is(Items.ENCHANTED_GOLDEN_APPLE)) {
-                count += curContainer.getSlot(i).getItem().getCount();
-
-                if (getItemCountInventory(Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) == 0 && getItemSlot(Item.getId(Items.AIR)) == -1) {
-                    // For some reason we have no gapples and no air slots so we have to throw out some throwaway items
-                    int throwawaySlot = getThrowawaySlotToToss();
-                    if (throwawaySlot == -1) {
-                        return 0;
-                    }
-                    playerContext.playerController().windowClick(curContainer.containerId, i, 0, ClickType.PICKUP, playerContext.player());
-                    playerContext.playerController().windowClick(curContainer.containerId, throwawaySlot < 9 ? throwawaySlot + 54 : throwawaySlot + 18, 0, ClickType.PICKUP, playerContext.player()); // Have to convert slot id to single chest slot id
-                    playerContext.playerController().windowClick(curContainer.containerId, -999, 0, ClickType.PICKUP, playerContext.player());
-                } else {
-                    // Gapples exist already or there's an air slot so we can just do a quick move
-                    playerContext.playerController().windowClick(curContainer.containerId, i, 0, ClickType.QUICK_MOVE, playerContext.player());
-                }
-
-                return count;
-            }
-        }
-
-        return count;
-    }
-
     /**
-     * With an open totem shulker box, pull one slot's worth of totems into the inventory. Totems
-     * don't stack, so every totem needs its own free slot; when there is none, swap a throwaway
-     * stack out for the totems and drop it. Returns the number of totems moved (0 when none left).
+     * With an open supply shulker box, pull one slot's worth of the item into the inventory. A quick
+     * move tops up a stack we already carry before it takes a free slot, so only with neither (totems
+     * never stack) is a throwaway stack swapped out for it and dropped. Returns the size of the slot
+     * taken from (0 when none left, or no room can be made).
      */
-    public int lootTotemChestSlot() {
+    public int lootSupplyChestSlot(Item item) {
         AbstractContainerMenu curContainer = playerContext.player().containerMenu;
         for (int i = 0; i < 27; i++) {
-            if (curContainer.getSlot(i).getItem().is(Items.TOTEM_OF_UNDYING)) {
+            if (curContainer.getSlot(i).getItem().is(item)) {
                 int count = curContainer.getSlot(i).getItem().getCount();
 
-                if (getItemSlot(Item.getId(Items.AIR)) == -1) {
-                    // No free slot for the totems, so throw out some throwaway items to make room
+                if (getItemSlot(Item.getId(Items.AIR)) == -1 && !hasRoomOnStack(item)) {
+                    // No room for it, so throw out some throwaway items to make room
                     int throwawaySlot = getThrowawaySlotToToss();
                     if (throwawaySlot == -1) {
                         return 0;
@@ -4607,7 +4566,6 @@ public class HighwayContext {
                     playerContext.playerController().windowClick(curContainer.containerId, throwawaySlot < 9 ? throwawaySlot + 54 : throwawaySlot + 18, 0, ClickType.PICKUP, playerContext.player()); // Have to convert slot id to single chest slot id
                     playerContext.playerController().windowClick(curContainer.containerId, -999, 0, ClickType.PICKUP, playerContext.player());
                 } else {
-                    // There's an air slot so we can just do a quick move
                     playerContext.playerController().windowClick(curContainer.containerId, i, 0, ClickType.QUICK_MOVE, playerContext.player());
                 }
 
@@ -4616,6 +4574,17 @@ public class HighwayContext {
         }
 
         return 0;
+    }
+
+    /** Whether a stack of this item in slots 0-35 has room for more. */
+    private boolean hasRoomOnStack(Item item) {
+        for (int i = 0; i < 36; i++) {
+            ItemStack stack = playerContext.player().getInventory().getNonEquipmentItems().get(i);
+            if (stack.is(item) && stack.getCount() < stack.getMaxStackSize()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public int lootEnderChestSlot() {
@@ -4682,20 +4651,14 @@ public class HighwayContext {
                         }
                         break;
 
-                    case Gapple:
-                        if (isGappleShulker(stack) > 0) {
-                            doLoot = true;
-                        }
-                        break;
-
-                    case Totem:
-                        if (isTotemShulker(stack) > 0) {
-                            doLoot = true;
-                        }
-                        break;
-
                     case AnyPickaxe:
                         if (isPickaxeShulker(stack) > 0) {
+                            doLoot = true;
+                        }
+                        break;
+
+                    default:
+                        if (shulkerType.item() != null && singleItemShulkerCount(stack, shulkerType.item()) > 0) {
                             doLoot = true;
                         }
                 }
@@ -4839,18 +4802,6 @@ public class HighwayContext {
                         }
                         break;
 
-                    case Gapple:
-                        if (isGappleShulker(stack) > 0) {
-                            count++;
-                        }
-                        break;
-
-                    case Totem:
-                        if (isTotemShulker(stack) > 0) {
-                            count++;
-                        }
-                        break;
-
                     case Empty:
                         if (isEmptyShulker(stack)) {
                             count++;
@@ -4878,6 +4829,11 @@ public class HighwayContext {
                     case Any:
                         count++;
                         break;
+
+                    default:
+                        if (shulkerType.item() != null && singleItemShulkerCount(stack, shulkerType.item()) > 0) {
+                            count++;
+                        }
                 }
             }
         }

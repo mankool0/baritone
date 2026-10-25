@@ -17,14 +17,33 @@
 
 package baritone.behavior.highway.enums;
 
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+
 public enum ShulkerType {
     EnderChest,
     NonSilkPickaxe, // For paving
     //SilkPickaxe,
     AnyPickaxe, // For digging
     DepletedPickaxe,
-    Gapple,
-    Totem,
+    // Boxes of nothing but one item, the Supply ones
+    Gapple(Items.ENCHANTED_GOLDEN_APPLE),
+    Totem(Items.TOTEM_OF_UNDYING),
     Empty,
-    Any
+    Any;
+
+    private final Item item;
+
+    ShulkerType() {
+        this(null);
+    }
+
+    ShulkerType(Item item) {
+        this.item = item;
+    }
+
+    /** The one item a box of this type holds, or null for a type with a test of its own. */
+    public Item item() {
+        return item;
+    }
 }

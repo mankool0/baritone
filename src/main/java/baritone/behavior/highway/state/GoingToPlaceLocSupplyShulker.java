@@ -20,11 +20,11 @@ package baritone.behavior.highway.state;
 import baritone.api.pathing.goals.GoalBlock;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
+import baritone.behavior.highway.Supply;
 import baritone.behavior.highway.enums.HighwayState;
-import baritone.behavior.highway.enums.ShulkerType;
 
-public class GoingToPlaceLocTotemShulker extends State {
-    public GoingToPlaceLocTotemShulker(HighwayState state) {
+public class GoingToPlaceLocSupplyShulker extends State {
+    public GoingToPlaceLocSupplyShulker(HighwayState state) {
         super(state);
     }
 
@@ -34,15 +34,16 @@ public class GoingToPlaceLocTotemShulker extends State {
             return; // Wait to get there
         }
 
-        if (context.getTotemCountInventory() >= context.totemsToHave() || context.getShulkerSlot(ShulkerType.Totem) == -1) {
-            // We have enough totems, or no more totem shulker
+        Supply supply = context.activeSupply();
+        if (supply.count(context) >= supply.toHave(context) || context.getShulkerSlot(supply.shulkerType()) == -1) {
+            // We have enough, or no more shulker of it
             context.transitionTo(HighwayState.Nothing);
             return;
         }
 
         if (context.playerContext().playerFeet().equals(context.placeLocStand(1))) {
             // We have arrived
-            context.transitionTo(HighwayState.PlacingTotemShulkerSupport);
+            context.transitionTo(HighwayState.PlacingSupplyShulkerSupport);
             context.resetTimer();
         } else {
             // Keep trying to get there

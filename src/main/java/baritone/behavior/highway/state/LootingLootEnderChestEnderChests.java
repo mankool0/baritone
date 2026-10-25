@@ -46,7 +46,7 @@ public class LootingLootEnderChestEnderChests extends State {
         }
 
         if (context.getShulkerCountInventory(ShulkerType.EnderChest) >= wantShulks) {
-            context.transitionTo(HighwayState.LootingLootEnderChestGapples);
+            context.transitionTo(HighwayState.LootingLootEnderChestSupplies);
             return;
         }
 
@@ -67,6 +67,6 @@ public class LootingLootEnderChestEnderChests extends State {
 
         Helper.HELPER.logDirect("No more ender chest shulkers. Rolling with what we have.");
         context.setEnderChestHasEnderShulks(false);
-        context.transitionTo(HighwayState.LootingLootEnderChestGapples);
+        context.transitionTo(HighwayState.LootingLootEnderChestSupplies);
     }
 }

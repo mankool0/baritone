@@ -20,6 +20,7 @@ package baritone.behavior.highway.state;
 import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
+import baritone.behavior.highway.Supply;
 import baritone.behavior.highway.enums.HighwayState;
 import baritone.behavior.highway.enums.ShulkerType;
 import net.minecraft.client.gui.screens.inventory.ContainerScreen;
@@ -64,39 +65,26 @@ public class DepositingLootEnderChestDepletedShulkers extends State {
                     context.setRefillingEnderChests(false);
                     context.transitionTo(HighwayState.Nothing);
                 }
-            } else if (context.refillingGapples()) {
-                // This storage trip grabbed a gapple shulker: go place and loot it.
-                if (context.getShulkerCountInventory(ShulkerType.Gapple) > 0) {
-                    // Remember the chest unconditionally: carry mode won't stash the gapple box, but a
-                    // totem leg queued behind us still can, and a stale loc is dropped on release anyway.
+            } else if (context.firstRefillingSupply() != null) {
+                // This storage trip grabbed a supply's shulker: go place and loot it.
+                Supply supply = context.firstRefillingSupply();
+                if (context.getShulkerCountInventory(supply.shulkerType()) > 0) {
+                    // Remember the chest unconditionally: carry mode won't stash this box, but a leg
+                    // queued behind us still can, and a stale loc is dropped on release anyway.
                     context.setEnderChestAccessLoc(context.placeLoc());
                     if (context.getPickCountInventory() >= context.settings().highwayPicksThreshold.value) {
-                        context.transitionTo(HighwayState.GappleShulkerPlaceLocPrep); // -> top up gapples
+                        context.setActiveSupply(supply);
+                        context.transitionTo(HighwayState.SupplyShulkerPlaceLocPrep); // -> top it up
                     } else {
                         // A pick-triggered trip piggybacked this grab and we're near out of picks, which
                         // mining the placed shulker box would need. BuildingHighway runs the pick cycle
-                        // first and then comes back for the gapples; the refill flag survives the detour.
+                        // first and then comes back for this supply; the refill flag survives the detour.
                         context.transitionTo(HighwayState.Nothing);
                     }
                 } else {
-                    // Storage had no gapple shulker; abort the refill and let BuildingHighway re-evaluate (it will pause).
-                    context.setRefillingGapples(false);
-                    context.transitionTo(HighwayState.Nothing);
-                }
-            } else if (context.refillingTotems()) {
-                // This storage trip grabbed a totem shulker: go place and loot it.
-                if (context.getShulkerCountInventory(ShulkerType.Totem) > 0) {
-                    context.setEnderChestAccessLoc(context.placeLoc()); // reuse this access chest for the stash
-                    if (context.getPickCountInventory() >= context.settings().highwayPicksThreshold.value) {
-                        context.transitionTo(HighwayState.TotemShulkerPlaceLocPrep); // -> top up totems
-                    } else {
-                        // Same pick-priority detour as the gapple leg above: mining the placed box
-                        // needs a pickaxe, so let BuildingHighway run the pick cycle first.
-                        context.transitionTo(HighwayState.Nothing);
-                    }
-                } else {
-                    // Storage had no totem shulker; abort the refill and let BuildingHighway re-evaluate (it will pause).
-                    context.setRefillingTotems(false);
+                    // Storage had no shulker of it; abort the refill and let BuildingHighway re-evaluate
+                    // (it pauses for gapples, and carries on without the others).
+                    context.setRefilling(supply, false);
                     context.transitionTo(HighwayState.Nothing);
                 }
             } else {

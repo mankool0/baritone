@@ -24,7 +24,7 @@ import baritone.behavior.highway.enums.HighwayState;
 import baritone.behavior.highway.enums.ShulkerType;
 import net.minecraft.world.level.block.AirBlock;
 
-public class MiningGappleShulker extends State {
+public class MiningSupplyShulker extends State {
 
     private int guardWaitTicks = 0;
 
@@ -33,7 +33,7 @@ public class MiningGappleShulker extends State {
 
     private int sinceClearDispatch = BUILDER_SPINUP_TICKS;
 
-    public MiningGappleShulker(HighwayState state) {
+    public MiningSupplyShulker(HighwayState state) {
         super(state);
     }
 
@@ -75,6 +75,6 @@ public class MiningGappleShulker extends State {
             return;
         }
 
-        context.transitionTo(HighwayState.CollectingGappleShulker);
+        context.transitionTo(HighwayState.CollectingSupplyShulker);
     }
 }

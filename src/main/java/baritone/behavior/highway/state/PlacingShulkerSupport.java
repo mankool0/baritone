@@ -71,8 +71,7 @@ public class PlacingShulkerSupport extends State {
             case PlacingEmptyShulkerSupport -> context.getShulkerSlot(baritone.behavior.highway.enums.ShulkerType.Empty) == -1;
             case PlacingLootEnderChestSupport -> context.getItemCountInventory(net.minecraft.world.item.Item.getId(net.minecraft.world.level.block.Blocks.ENDER_CHEST.asItem())) == 0;
             case PlacingPickaxeShulkerSupport -> context.getPickCountInventory() >= context.picksToHave() || context.getShulkerSlot(context.picksToUse()) == -1;
-            case PlacingGappleShulkerSupport -> context.getItemCountInventory(net.minecraft.world.item.Item.getId(net.minecraft.world.item.Items.ENCHANTED_GOLDEN_APPLE)) >= context.settings().highwayGapplesToHave.value || context.getShulkerSlot(baritone.behavior.highway.enums.ShulkerType.Gapple) == -1;
-            case PlacingTotemShulkerSupport -> context.getTotemCountInventory() >= context.totemsToHave() || context.getShulkerSlot(baritone.behavior.highway.enums.ShulkerType.Totem) == -1;
+            case PlacingSupplyShulkerSupport -> context.activeSupply().count(context) >= context.activeSupply().toHave(context) || context.getShulkerSlot(context.activeSupply().shulkerType()) == -1;
             case PlacingEnderShulkerSupport -> false; // No cancellation condition for ender shulker
             default -> false;
         };
@@ -83,8 +82,7 @@ public class PlacingShulkerSupport extends State {
             case PlacingEmptyShulkerSupport -> HighwayState.GoingToEmptyShulkerPlaceLoc;
             case PlacingLootEnderChestSupport -> HighwayState.GoingToLootEnderChestPlaceLoc;
             case PlacingPickaxeShulkerSupport -> HighwayState.GoingToPlaceLocPickaxeShulker;
-            case PlacingGappleShulkerSupport -> HighwayState.GoingToPlaceLocGappleShulker;
-            case PlacingTotemShulkerSupport -> HighwayState.GoingToPlaceLocTotemShulker;
+            case PlacingSupplyShulkerSupport -> HighwayState.GoingToPlaceLocSupplyShulker;
             case PlacingEnderShulkerSupport -> HighwayState.GoingToPlaceLocEnderShulker;
             default -> HighwayState.Nothing;
         };
@@ -95,8 +93,7 @@ public class PlacingShulkerSupport extends State {
             case PlacingEmptyShulkerSupport -> HighwayState.PlacingEmptyShulker;
             case PlacingLootEnderChestSupport -> HighwayState.PlacingLootEnderChest;
             case PlacingPickaxeShulkerSupport -> HighwayState.PlacingPickaxeShulker;
-            case PlacingGappleShulkerSupport -> HighwayState.PlacingGappleShulker;
-            case PlacingTotemShulkerSupport -> HighwayState.PlacingTotemShulker;
+            case PlacingSupplyShulkerSupport -> HighwayState.PlacingSupplyShulker;
             case PlacingEnderShulkerSupport -> HighwayState.PlacingEnderShulker;
             default -> HighwayState.Nothing;
         };

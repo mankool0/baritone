@@ -17,26 +17,32 @@
 
 package baritone.behavior.highway.state;
 
+import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.enums.HighwayState;
 import baritone.behavior.highway.enums.ShulkerType;
 
-public class PlacingTotemShulker extends PlacingShulkerBase {
-    public PlacingTotemShulker(HighwayState state) {
+public class PlacingSupplyShulker extends PlacingShulkerBase {
+    public PlacingSupplyShulker(HighwayState state) {
         super(state);
     }
 
     @Override
     protected HighwayState getPreviousState() {
-        return HighwayState.GoingToPlaceLocTotemShulker;
+        return HighwayState.GoingToPlaceLocSupplyShulker;
     }
 
     @Override
     protected HighwayState getNextState() {
-        return HighwayState.OpeningTotemShulker;
+        return HighwayState.OpeningSupplyShulker;
     }
 
     @Override
     protected ShulkerType getShulkerType() {
-        return ShulkerType.Totem;
+        return ShulkerType.Any; // Default, will be overridden in handle
+    }
+
+    @Override
+    public void handle(HighwayContext context) {
+        handleWithShulkerType(context, context.activeSupply().shulkerType());
     }
 }

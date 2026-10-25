@@ -29,8 +29,8 @@ import net.minecraft.world.level.block.ShulkerBoxBlock;
 
 import java.util.Optional;
 
-public class OpeningTotemShulker extends State {
-    public OpeningTotemShulker(HighwayState state) {
+public class OpeningSupplyShulker extends State {
+    public OpeningSupplyShulker(HighwayState state) {
         super(state);
     }
 
@@ -40,7 +40,7 @@ public class OpeningTotemShulker extends State {
         shulkerReachable.ifPresent(rotation -> context.baritone().getLookBehavior().updateTarget(rotation, true));
 
         if (context.playerContext().world().getBlockState(context.placeLoc()).getBlock() instanceof ShulkerBoxBlock && shulkerReachable.isEmpty()) {
-            context.handleContainerOutOfReach(context.placeLoc(), context.placeLocStand(1), HighwayState.PlacingTotemShulker, null);
+            context.handleContainerOutOfReach(context.placeLoc(), context.placeLocStand(1), HighwayState.PlacingSupplyShulker, null);
             return;
         }
 
@@ -60,7 +60,7 @@ public class OpeningTotemShulker extends State {
             Helper.HELPER.logDirect(gone
                     ? "Shulker didn't stay placed, retrying the placement."
                     : "Shulker never opened, retrying the placement.");
-            context.transitionTo(HighwayState.PlacingTotemShulker);
+            context.transitionTo(HighwayState.PlacingSupplyShulker);
             context.resetTimer();
             return;
         }
@@ -68,7 +68,7 @@ public class OpeningTotemShulker extends State {
         context.baritone().getInputOverrideHandler().clearAllKeys();
         if (context.playerContext().minecraft().screen instanceof ShulkerBoxScreen) {
             context.noteContainerOpened();
-            context.transitionTo(HighwayState.LootingTotemShulker);
+            context.transitionTo(HighwayState.LootingSupplyShulker);
             return;
         }
         // A refused open earned one sneak tap, which needs a few ticks without clicks

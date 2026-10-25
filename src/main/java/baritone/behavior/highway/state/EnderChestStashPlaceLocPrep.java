@@ -62,8 +62,7 @@ public class EnderChestStashPlaceLocPrep extends State {
             Helper.HELPER.logDirect("Couldn't find a spot to stash the shulker, keeping it for now.");
             context.setStashingShulker(false);
             context.setRefillingEnderChests(false);
-            context.setRefillingGapples(false);
-            context.setRefillingTotems(false);
+            context.stopRefillingSupplies();
             context.transitionTo(HighwayState.Nothing);
             return;
         }

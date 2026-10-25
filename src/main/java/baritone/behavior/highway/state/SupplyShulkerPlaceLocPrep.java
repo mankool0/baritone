@@ -22,8 +22,8 @@ import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
 import net.minecraft.core.Vec3i;
 
-public class GappleShulkerPlaceLocPrep extends State {
-    public GappleShulkerPlaceLocPrep(HighwayState state) {
+public class SupplyShulkerPlaceLocPrep extends State {
+    public SupplyShulkerPlaceLocPrep(HighwayState state) {
         super(state);
     }
 
@@ -32,6 +32,6 @@ public class GappleShulkerPlaceLocPrep extends State {
         context.setPlaceLoc(context.shulkerPlaceLocClearOfThieves()); // Anchored a bit back, shifted further if piglins could steal the drop
 
         context.settings().buildRepeat.value = new Vec3i(0, 0, 0);
-        context.transitionTo(HighwayState.GoingToPlaceLocGappleShulker);
+        context.transitionTo(HighwayState.GoingToPlaceLocSupplyShulker);
     }
 }

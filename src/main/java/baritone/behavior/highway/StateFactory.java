@@ -85,59 +85,32 @@ public class StateFactory {
             case InventoryCleaningPickaxeShulker -> {
                 return new InventoryCleaningPickaxeShulker(highwayState);
             }
-            case GappleShulkerPlaceLocPrep -> {
-                return new GappleShulkerPlaceLocPrep(highwayState);
+            case SupplyShulkerPlaceLocPrep -> {
+                return new SupplyShulkerPlaceLocPrep(highwayState);
             }
-            case GoingToPlaceLocGappleShulker -> {
-                return new GoingToPlaceLocGappleShulker(highwayState);
+            case GoingToPlaceLocSupplyShulker -> {
+                return new GoingToPlaceLocSupplyShulker(highwayState);
             }
-            case PlacingGappleShulkerSupport -> {
+            case PlacingSupplyShulkerSupport -> {
                 return new PlacingShulkerSupport(highwayState);
             }
-            case PlacingGappleShulker -> {
-                return new PlacingGappleShulker(highwayState);
+            case PlacingSupplyShulker -> {
+                return new PlacingSupplyShulker(highwayState);
             }
-            case OpeningGappleShulker -> {
-                return new OpeningGappleShulker(highwayState);
+            case OpeningSupplyShulker -> {
+                return new OpeningSupplyShulker(highwayState);
             }
-            case LootingGappleShulker -> {
-                return new LootingGappleShulker(highwayState);
+            case LootingSupplyShulker -> {
+                return new LootingSupplyShulker(highwayState);
             }
-            case MiningGappleShulker -> {
-                return new MiningGappleShulker(highwayState);
+            case MiningSupplyShulker -> {
+                return new MiningSupplyShulker(highwayState);
             }
-            case CollectingGappleShulker -> {
-                return new CollectingGappleShulker(highwayState);
+            case CollectingSupplyShulker -> {
+                return new CollectingSupplyShulker(highwayState);
             }
-            case InventoryCleaningGappleShulker -> {
-                return new InventoryCleaningGappleShulker(highwayState);
-            }
-            case TotemShulkerPlaceLocPrep -> {
-                return new TotemShulkerPlaceLocPrep(highwayState);
-            }
-            case GoingToPlaceLocTotemShulker -> {
-                return new GoingToPlaceLocTotemShulker(highwayState);
-            }
-            case PlacingTotemShulkerSupport -> {
-                return new PlacingShulkerSupport(highwayState);
-            }
-            case PlacingTotemShulker -> {
-                return new PlacingTotemShulker(highwayState);
-            }
-            case OpeningTotemShulker -> {
-                return new OpeningTotemShulker(highwayState);
-            }
-            case LootingTotemShulker -> {
-                return new LootingTotemShulker(highwayState);
-            }
-            case MiningTotemShulker -> {
-                return new MiningTotemShulker(highwayState);
-            }
-            case CollectingTotemShulker -> {
-                return new CollectingTotemShulker(highwayState);
-            }
-            case InventoryCleaningTotemShulker -> {
-                return new InventoryCleaningTotemShulker(highwayState);
+            case InventoryCleaningSupplyShulker -> {
+                return new InventoryCleaningSupplyShulker(highwayState);
             }
             case ShulkerCollection -> {
                 return new ShulkerCollection(highwayState);
@@ -178,11 +151,8 @@ public class StateFactory {
             case LootingLootEnderChestEnderChests -> {
                 return new LootingLootEnderChestEnderChests(highwayState);
             }
-            case LootingLootEnderChestGapples -> {
-                return new LootingLootEnderChestGapples(highwayState);
-            }
-            case LootingLootEnderChestTotems -> {
-                return new LootingLootEnderChestTotems(highwayState);
+            case LootingLootEnderChestSupplies -> {
+                return new LootingLootEnderChestSupplies(highwayState);
             }
             case EchestMiningPlaceLocPrep -> {
                 return new EchestMiningPlaceLocPrep(highwayState);

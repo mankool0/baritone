@@ -20,6 +20,7 @@ package baritone.behavior.highway.state;
 import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
+import baritone.behavior.highway.Supply;
 import baritone.behavior.highway.enums.HighwayState;
 import baritone.behavior.highway.enums.ShulkerType;
 import net.minecraft.client.gui.screens.inventory.ContainerScreen;
@@ -27,7 +28,7 @@ import net.minecraft.client.gui.screens.inventory.ContainerScreen;
 /**
  * With ender storage open, deposit the (partially depleted) shulker back into it so it stays in
  * the ender inventory rather than being carried. Ends the digging ender chest refill cycle or the
- * gapple refill cycle, whichever is active.
+ * refill cycle of a {@link Supply}, whichever is active.
  */
 public class DepositingStashShulker extends State {
     public DepositingStashShulker(HighwayState state) {
@@ -47,20 +48,17 @@ public class DepositingStashShulker extends State {
 
         // Legs run one at a time (each clears its flag before the next starts), so the still-latched
         // flag in priority order names the shulker this stash is for.
+        Supply supply = context.refillingEnderChests() ? null : context.firstRefillingSupply();
         ShulkerType stashType = context.refillingEnderChests() ? ShulkerType.EnderChest
-                : context.refillingGapples() ? ShulkerType.Gapple
-                : ShulkerType.Totem;
+                : supply != null ? supply.shulkerType()
+                : null;
         if (!context.containerClickReady()) {
             return;
         }
 
-        if (context.depositShulkerChestSlot(stashType) > 0) {
+        if (stashType != null && context.depositShulkerChestSlot(stashType) > 0) {
             context.noteContainerClick();
-            Helper.HELPER.logDirect("Stashed " + switch (stashType) {
-                case EnderChest -> "ender chest";
-                case Gapple -> "gapple";
-                default -> "totem";
-            } + " shulker back into storage.");
+            Helper.HELPER.logDirect("Stashed " + (supply != null ? supply.noun() : "ender chest") + " shulker back into storage.");
             return;
         }
 
@@ -74,10 +72,10 @@ public class DepositingStashShulker extends State {
             context.setStartShulkerCount(shulkerCount);
         }
         context.setStashingShulker(false);
-        switch (stashType) {
-            case EnderChest -> context.setRefillingEnderChests(false);
-            case Gapple -> context.setRefillingGapples(false);
-            default -> context.setRefillingTotems(false);
+        if (supply != null) {
+            context.setRefilling(supply, false);
+        } else {
+            context.setRefillingEnderChests(false);
         }
         context.releaseEnderChestAccessLoc(); // kept when another refill is queued behind us
         context.transitionTo(HighwayState.Nothing);

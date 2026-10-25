@@ -20,18 +20,19 @@ package baritone.behavior.highway.state;
 import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
+import baritone.behavior.highway.Supply;
 import baritone.behavior.highway.enums.HighwayState;
 import net.minecraft.client.gui.screens.inventory.ShulkerBoxScreen;
 
-public class LootingTotemShulker extends State {
-    public LootingTotemShulker(HighwayState state) {
+public class LootingSupplyShulker extends State {
+    public LootingSupplyShulker(HighwayState state) {
         super(state);
     }
 
     @Override
     public void handle(HighwayContext context) {
         if (!(context.playerContext().minecraft().screen instanceof ShulkerBoxScreen)) {
-            context.transitionTo(HighwayState.OpeningTotemShulker);
+            context.transitionTo(HighwayState.OpeningSupplyShulker);
             return;
         }
 
@@ -39,8 +40,9 @@ public class LootingTotemShulker extends State {
             return;
         }
 
-        if (context.getTotemCountInventory() >= context.totemsToHave()) {
-            context.transitionTo(HighwayState.MiningTotemShulker);
+        Supply supply = context.activeSupply();
+        if (supply.count(context) >= supply.toHave(context)) {
+            context.transitionTo(HighwayState.MiningSupplyShulker);
             context.playerContext().player().closeContainer();
             return;
         }
@@ -49,15 +51,15 @@ public class LootingTotemShulker extends State {
             return;
         }
 
-        int totemsLooted = context.lootTotemChestSlot();
+        int looted = supply.lootSlot(context);
         context.noteContainerClick();
-        if (totemsLooted > 0) {
-            Helper.HELPER.logDirect("Looted " + totemsLooted + " totems");
+        if (looted > 0) {
+            Helper.HELPER.logDirect("Looted " + looted + " " + supply.plural());
             return;
         }
 
         Helper.HELPER.logDirect("Can't loot/empty shulker. Rolling with what we have.");
-        context.transitionTo(HighwayState.MiningTotemShulker);
+        context.transitionTo(HighwayState.MiningSupplyShulker);
         context.playerContext().player().closeContainer();
     }
 }

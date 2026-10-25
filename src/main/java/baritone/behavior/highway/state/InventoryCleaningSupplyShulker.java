@@ -24,8 +24,8 @@ import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 
-public class InventoryCleaningGappleShulker extends State {
-    public InventoryCleaningGappleShulker(HighwayState state) {
+public class InventoryCleaningSupplyShulker extends State {
+    public InventoryCleaningSupplyShulker(HighwayState state) {
         super(state);
     }
 
@@ -34,7 +34,7 @@ public class InventoryCleaningGappleShulker extends State {
         if (context.getItemCountInventory(Item.getId(Items.AIR)) > 0) {
             // Room was made some other way (cleaned out by hand, an item used up), so go
             // pick the box up instead of waiting for something to throw out
-            context.transitionTo(HighwayState.CollectingGappleShulker);
+            context.transitionTo(HighwayState.CollectingSupplyShulker);
             return;
         }
         if (!context.containerClickReady()) {
@@ -48,6 +48,6 @@ public class InventoryCleaningGappleShulker extends State {
         context.playerContext().playerController().windowClick(context.playerContext().player().inventoryMenu.containerId, throwawaySlot < 9 ? throwawaySlot + 36 : throwawaySlot, 0, ClickType.PICKUP, context.playerContext().player());
         context.playerContext().playerController().windowClick(context.playerContext().player().inventoryMenu.containerId, -999, 0, ClickType.PICKUP, context.playerContext().player());
         context.noteContainerClick();
-        context.transitionTo(HighwayState.CollectingGappleShulker);
+        context.transitionTo(HighwayState.CollectingSupplyShulker);
     }
 }

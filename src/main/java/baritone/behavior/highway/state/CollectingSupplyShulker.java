@@ -21,20 +21,20 @@ import baritone.api.pathing.goals.GoalBlock;
 import baritone.api.utils.BetterBlockPos;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
+import baritone.behavior.highway.Supply;
 import baritone.behavior.highway.enums.HighwayState;
-import baritone.behavior.highway.enums.ShulkerType;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 
-public class CollectingTotemShulker extends State {
+public class CollectingSupplyShulker extends State {
     /** Ticks to give an in-flight pickup to land in the inventory before treating the box as gone. */
     private static final int BOX_LANDING_TICKS = 20;
 
     private int boxWaitTicks = 0;
 
-    public CollectingTotemShulker(HighwayState state) {
+    public CollectingSupplyShulker(HighwayState state) {
         super(state);
     }
 
@@ -49,7 +49,7 @@ public class CollectingTotemShulker extends State {
                 if (HighwayContext.shulkerItemList.contains(((ItemEntity) entity).getItem().getItem())) {
                     if (context.getItemCountInventory(Item.getId(Items.AIR)) == 0) {
                         // No space for shulker, need to do removal
-                        context.transitionTo(HighwayState.InventoryCleaningTotemShulker);
+                        context.transitionTo(HighwayState.InventoryCleaningSupplyShulker);
                         context.resetTimer();
                     }
                     context.baritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(new BetterBlockPos(entity.getX(), entity.getY(), entity.getZ())));
@@ -66,16 +66,17 @@ public class CollectingTotemShulker extends State {
             return;
         }
         if (!context.minedShulkerLanded()
-                && context.maybeStartThiefHunt(HighwayState.CollectingTotemShulker)) {
+                && context.maybeStartThiefHunt(HighwayState.CollectingSupplyShulker)) {
             return; // The mined box never reached the inventory and a piglin is carrying one
         }
-        if (context.refillingTotems()) {
-            if (context.settings().highwayStashTotemShulkers.value && context.getShulkerCountInventory(ShulkerType.Totem) > 0) {
+        Supply supply = context.activeSupply();
+        if (context.refilling(supply)) {
+            if (supply.stash(context.settings()) && context.getShulkerCountInventory(supply.shulkerType()) > 0) {
                 context.transitionTo(HighwayState.EnderChestStashPlaceLocPrep); // fetched from storage: put it back
                 return;
             }
             // Carry mode, or the shulker emptied out while topping up: nothing to stash
-            context.setRefillingTotems(false);
+            context.setRefilling(supply, false);
             context.releaseEnderChestAccessLoc();
         }
         context.transitionTo(HighwayState.Nothing);

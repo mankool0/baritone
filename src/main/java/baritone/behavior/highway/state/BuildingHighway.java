@@ -20,6 +20,7 @@ package baritone.behavior.highway.state;
 import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
+import baritone.behavior.highway.Supply;
 import baritone.behavior.highway.enums.HighwayBlockState;
 import baritone.behavior.highway.enums.HighwayState;
 import baritone.behavior.highway.enums.LocationType;
@@ -28,7 +29,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.item.Item;
-import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
 
@@ -205,83 +205,49 @@ public class BuildingHighway extends State {
             return;
         }
 
-        if (context.getItemCountInventory(Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) <= context.settings().highwayGapplesThreshold.value) {
-            if (context.getShulkerCountInventory(ShulkerType.Gapple) == 0) {
-                if (!context.thresholdConfirmed("Gapple count")) {
-                    return;
-                }
-                if (!context.enderChestHasGappleShulks()) {
+        for (Supply supply : Supply.values()) {
+            if (supply.enabled(context.settings()) && supply.count(context) <= supply.threshold(context.settings())) {
+                if (context.getShulkerCountInventory(supply.shulkerType()) > 0) {
+                    context.setActiveSupply(supply);
+                    context.transitionTo(HighwayState.SupplyShulkerPlaceLocPrep);
                     context.baritone().getPathingBehavior().cancelEverything();
-                    context.pause("Out of gapples, refill ender chest and inventory and restart.");
+                    context.resetTimer();
                     return;
                 }
-                Helper.HELPER.logDirect("Out of gapples, fetching a gapple shulker from the ender chest.");
-                context.setRefillingGapples(true);
-                context.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);
-                return;
-            }
-            context.transitionTo(HighwayState.GappleShulkerPlaceLocPrep);
-            context.baritone().getPathingBehavior().cancelEverything();
-            context.resetTimer();
-            return;
-        }
-
-        if (context.refillingGapples()) {
-            // A gapple refill cycle got interrupted after the threshold cleared (e.g. the place/loot
-            // flow bailed because we already had enough): stash the fetched shulker back, or just
-            // drop the flag when there is nothing left to stash.
-            if (context.settings().highwayStashGappleShulkers.value && context.getShulkerCountInventory(ShulkerType.Gapple) > 0) {
-                context.transitionTo(HighwayState.EnderChestStashPlaceLocPrep);
-                context.baritone().getPathingBehavior().cancelEverything();
-                context.resetTimer();
-                return;
-            }
-            context.setRefillingGapples(false);
-            context.releaseEnderChestAccessLoc();
-        }
-
-        if (context.settings().highwayRefillTotems.value && context.getTotemCountInventory() <= context.settings().highwayTotemsThreshold.value) {
-            if (context.getShulkerCountInventory(ShulkerType.Totem) == 0) {
-                if (!context.enderChestHasTotemShulks()) {
-                    // Storage is out of totem shulkers. Unlike picks or obsidian, totems aren't
-                    // something the build consumes, so by default we just carry on without them
-                    // and stop retrying until the next startBuild resets the flag.
-                    if (context.settings().highwayPauseWhenOutOfTotems.value) {
-                        if (!context.thresholdConfirmed("Totem count")) {
-                            return;
-                        }
+                // With storage out of its shulkers, a supply the build can do without (totems) is
+                // just gone without, and stops costing trips until the next startBuild resets the flag
+                boolean stocked = context.enderChestHasShulks(supply);
+                if (stocked || supply.pausesWhenStorageEmpty(context.settings())) {
+                    // No shulker in hand, so this costs a storage trip or a pause: confirm the count
+                    // is real before committing to it
+                    if (!context.thresholdConfirmed(supply.countKey())) {
+                        return;
+                    }
+                    if (!stocked) {
                         context.baritone().getPathingBehavior().cancelEverything();
-                        context.pause("Out of totems, refill ender chest and inventory and restart.");
+                        context.pause("Out of " + supply.plural() + ", refill ender chest and inventory and restart.");
                         return;
                     }
-                } else {
-                    if (!context.thresholdConfirmed("Totem count")) {
-                        return;
-                    }
-                    Helper.HELPER.logDirect("Out of totems, fetching a totem shulker from the ender chest.");
-                    context.setRefillingTotems(true);
+                    Helper.HELPER.logDirect("Low on " + supply.plural() + ", fetching a " + supply.noun() + " shulker from the ender chest.");
+                    context.setRefilling(supply, true);
                     context.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);
                     return;
                 }
-            } else {
-                context.transitionTo(HighwayState.TotemShulkerPlaceLocPrep);
-                context.baritone().getPathingBehavior().cancelEverything();
-                context.resetTimer();
-                return;
             }
-        }
 
-        if (context.refillingTotems()) {
-            // Same safety net as the gapple one above: the refill got interrupted after the
-            // threshold cleared, so stash the fetched shulker back or just drop the flag.
-            if (context.settings().highwayStashTotemShulkers.value && context.getShulkerCountInventory(ShulkerType.Totem) > 0) {
-                context.transitionTo(HighwayState.EnderChestStashPlaceLocPrep);
-                context.baritone().getPathingBehavior().cancelEverything();
-                context.resetTimer();
-                return;
+            if (context.refilling(supply)) {
+                // A refill cycle got interrupted after the threshold cleared (e.g. the place/loot
+                // flow bailed because we already had enough): stash the fetched shulker back, or just
+                // drop the flag when there is nothing left to stash.
+                if (supply.stash(context.settings()) && context.getShulkerCountInventory(supply.shulkerType()) > 0) {
+                    context.transitionTo(HighwayState.EnderChestStashPlaceLocPrep);
+                    context.baritone().getPathingBehavior().cancelEverything();
+                    context.resetTimer();
+                    return;
+                }
+                context.setRefilling(supply, false);
+                context.releaseEnderChestAccessLoc();
             }
-            context.setRefillingTotems(false);
-            context.releaseEnderChestAccessLoc();
         }
 
         if (context.baritone().getBuilderProcess().isActive() && context.baritone().getBuilderProcess().isPaused() && context.timer() >= 360) {
