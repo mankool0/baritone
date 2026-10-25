@@ -49,6 +49,7 @@ public final class HighwayJunk {
             Blocks.OBSIDIAN.asItem(),
             Blocks.CRYING_OBSIDIAN.asItem(),
             Items.ENCHANTED_GOLDEN_APPLE,
+            Items.GOLDEN_CARROT,
             Items.TOTEM_OF_UNDYING,
             Items.ENDER_PEARL,
             Items.ELYTRA

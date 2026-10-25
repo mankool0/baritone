@@ -169,6 +169,7 @@ public class HighwayContext {
     private State currentState;
     private HighwayState previousState = HighwayState.Nothing;
     private HighwayState emergencyEatReturnState = HighwayState.Nothing;
+    private HighwayState goldenCarrotEatReturnState = HighwayState.Nothing;
     private Entity currentMobTarget = null;
     private final Map<java.util.UUID, Long> ignoredMobs = new HashMap<>(); // mobs a stalled chase gave up on, to the game time they stay ignored until
     private final Map<java.util.UUID, Long> ignoredCrystals = new HashMap<>(); // end crystals CrystalRemoval gave up on, likewise
@@ -1064,11 +1065,13 @@ public class HighwayContext {
         this.cachedAbsorption = cachedAbsorption;
     }
 
-    // All states of the two gapple-eat flows; used to release eat-side effects when any code
-    // path (mob combat, floating fix, stuck handling, ...) yanks the state machine out of them.
-    private static final EnumSet<HighwayState> GAPPLE_EAT_STATES = EnumSet.of(
+    // All states of the two gapple-eat flows and the golden carrot one; used to release eat-side
+    // effects when any code path (mob combat, floating fix, stuck handling, ...) yanks the state
+    // machine out of them.
+    private static final EnumSet<HighwayState> EAT_STATES = EnumSet.of(
             HighwayState.EmergencyGapplePrep, HighwayState.EmergencyGapplePreEat, HighwayState.EmergencyGappleEat,
-            HighwayState.LiquidRemovalGapplePrep, HighwayState.LiquidRemovalGapplePreEat, HighwayState.LiquidRemovalGappleEat
+            HighwayState.LiquidRemovalGapplePrep, HighwayState.LiquidRemovalGapplePreEat, HighwayState.LiquidRemovalGappleEat,
+            HighwayState.GoldenCarrotEatPrep, HighwayState.GoldenCarrotPreEat, HighwayState.GoldenCarrotEat
     );
 
     public void transitionTo(HighwayState nextState) {
@@ -1081,8 +1084,8 @@ public class HighwayContext {
         }
         // Leaving the eat flow by any path: release the use key and drop the hitResult
         // suppression so they can't leak into (and act during) other states.
-        if (currentState != null && GAPPLE_EAT_STATES.contains(currentState.getState())
-                && !GAPPLE_EAT_STATES.contains(nextState)) {
+        if (currentState != null && EAT_STATES.contains(currentState.getState())
+                && !EAT_STATES.contains(nextState)) {
             NetherHighwayBuilderBehavior.suppressHitResult = false;
             if (playerContext.minecraft() != null) {
                 playerContext.minecraft().options.keyUse.setDown(false);
@@ -1100,6 +1103,36 @@ public class HighwayContext {
 
     public int gappleEatFoodThreshold() {
         return Math.min(settings.highwayGappleEatFoodThreshold.value, 19);
+    }
+
+    /** Capped at 19: a golden carrot can't be eaten on a full bar, unlike a gapple. */
+    public int goldenCarrotEatFoodThreshold() {
+        return Math.min(settings.highwayGoldenCarrotEatFoodThreshold.value, 19);
+    }
+
+    /** Hunger goes to golden carrots while we have any, and back to gapples once they run out. */
+    public boolean canEatGoldenCarrots() {
+        return goldenCarrotEatFoodThreshold() > 0 && getGoldenCarrotCountInventory() > 0;
+    }
+
+    /**
+     * Whether hunger in this state is golden carrot work. Not in a fight: combat preempts a carrot
+     * eat, unlike the emergency gapple one, so a carrot eat started there would bounce straight back.
+     */
+    public boolean goldenCarrotsFeed(HighwayState state) {
+        return canEatGoldenCarrots() && state != HighwayState.MobCombat && state != HighwayState.MobCombatReturn;
+    }
+
+    /**
+     * The food level a golden carrot eat stops above: past both thresholds that start one, or a
+     * carrot threshold under the emergency one would hand us straight back to another eat.
+     */
+    public int goldenCarrotEatTarget() {
+        return Math.max(goldenCarrotEatFoodThreshold(), gappleEatFoodThreshold());
+    }
+
+    public int getGoldenCarrotCountInventory() {
+        return getItemCountInventory(Item.getId(Items.GOLDEN_CARROT));
     }
 
     public int fireRestMinDuration() {
@@ -1120,6 +1153,14 @@ public class HighwayContext {
 
     public void setEmergencyEatReturnState(HighwayState state) {
         this.emergencyEatReturnState = state;
+    }
+
+    public HighwayState goldenCarrotEatReturnState() {
+        return goldenCarrotEatReturnState;
+    }
+
+    public void setGoldenCarrotEatReturnState(HighwayState state) {
+        this.goldenCarrotEatReturnState = state;
     }
 
     public Entity currentMobTarget() {
@@ -1993,6 +2034,7 @@ public class HighwayContext {
     public void handle() {
         HighwayState currentStateEnum = currentState.getState();
         boolean inEmergencyEat = currentStateEnum == HighwayState.EmergencyGapplePrep || currentStateEnum == HighwayState.EmergencyGapplePreEat || currentStateEnum == HighwayState.EmergencyGappleEat;
+        boolean inCarrotEat = currentStateEnum == HighwayState.GoldenCarrotEatPrep || currentStateEnum == HighwayState.GoldenCarrotPreEat || currentStateEnum == HighwayState.GoldenCarrotEat;
         boolean inCombat = currentStateEnum == HighwayState.MobCombat || currentStateEnum == HighwayState.MobCombatReturn;
         boolean inRecovery = currentStateEnum == HighwayState.FallRecovery;
         boolean inPortalEscape = currentStateEnum == HighwayState.PortalEscape;
@@ -2007,7 +2049,8 @@ public class HighwayContext {
         if (!inEmergencyEat && !inCombat && !inRecovery && !inPortalEscape && currentStateEnum != HighwayState.Nothing) {
             java.util.Optional<Entity> mob = findMobTargetingPlayer();
             if (mob.isPresent()) {
-                setPreviousState(currentStateEnum);
+                // A carrot eat resumes from its prep: combat leaves the sword selected
+                setPreviousState(inCarrotEat ? HighwayState.GoldenCarrotEatPrep : currentStateEnum);
                 setCurrentMobTarget(mob.get());
                 // A preempted thief hunt resumes at the thief, not at where combat started
                 setCombatReturnPos(currentStateEnum == HighwayState.ShulkerThiefHunt ? null : playerContext.playerFeet());
@@ -2022,12 +2065,22 @@ public class HighwayContext {
                 int foodThreshold = gappleEatFoodThreshold();
                 boolean healthTrigger = healthThreshold > 0 && playerContext.player().getHealth() < healthThreshold;
                 boolean foodTrigger = foodThreshold > 0 && playerContext.player().getFoodData().getFoodLevel() <= foodThreshold;
-                if (healthTrigger || foodTrigger) {
+                // Hunger alone is golden carrot work while we have any; low health still wants a gapple
+                if (healthTrigger || foodTrigger && !goldenCarrotsFeed(currentStateEnum)) {
                     Helper.HELPER.logDirect("Emergency gapple eat triggered (health=" + playerContext.player().getHealth() + ", food=" + playerContext.player().getFoodData().getFoodLevel() + ").");
-                    setEmergencyEatReturnState(currentStateEnum);
+                    // Out of a carrot eat, back to where that one was going: the gapple leaves its own slot selected
+                    setEmergencyEatReturnState(inCarrotEat ? goldenCarrotEatReturnState : currentStateEnum);
                     baritone.getInputOverrideHandler().clearAllKeys();
                     baritone.getPathingBehavior().cancelEverything();
                     transitionTo(HighwayState.EmergencyGapplePrep);
+                    return;
+                }
+                if (foodTrigger && !inCarrotEat) {
+                    Helper.HELPER.logDirect("Emergency golden carrot eat triggered (food=" + playerContext.player().getFoodData().getFoodLevel() + ").");
+                    setGoldenCarrotEatReturnState(currentStateEnum);
+                    baritone.getInputOverrideHandler().clearAllKeys();
+                    baritone.getPathingBehavior().cancelEverything();
+                    transitionTo(HighwayState.GoldenCarrotEatPrep);
                     return;
                 }
             }
@@ -2180,6 +2233,10 @@ public class HighwayContext {
 
     public int totemsToHave() {
         return Math.max(settings.highwayTotemsToHave.value, settings.highwayTotemsThreshold.value + 1);
+    }
+
+    public int goldenCarrotsToHave() {
+        return Math.max(settings.highwayGoldenCarrotsToHave.value, settings.highwayGoldenCarrotsThreshold.value + 1);
     }
 
     public List<BlockState> blackListBlocks() {

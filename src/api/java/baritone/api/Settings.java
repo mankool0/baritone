@@ -1834,6 +1834,24 @@ public final class Settings {
     public final Setting<Boolean> highwayPauseWhenOutOfTotems = new Setting<>(false);
 
     /**
+     * Grab a golden carrot shulker from ender storage and top golden carrots back up when they run
+     * low. Off by default so bots that don't stock carrot shulkers never go looking for one. When
+     * storage has none left the bot keeps building and eats gapples once the carrots are gone.
+     */
+    public final Setting<Boolean> highwayRefillGoldenCarrots = new Setting<>(false);
+
+    /**
+     * Golden carrot threshold for acquiring more golden carrots
+     */
+    public final Setting<Integer> highwayGoldenCarrotsThreshold = new Setting<>(16);
+
+    /**
+     * Minimum amount of golden carrots to stop looting. Raised to at least
+     * highwayGoldenCarrotsThreshold + 1 so a refill always clears its own trigger.
+     */
+    public final Setting<Integer> highwayGoldenCarrotsToHave = new Setting<>(64);
+
+    /**
      * When the builder has to make room (obsidian to pick up, a shulker to collect or loot), throw
      * junk first: highwayJunkItems and scrap gear (see highwayScrapMaterials). Netherrack and the
      * other acceptableThrowawayItems go only once no junk is left. Off means junk is never thrown.
@@ -1843,7 +1861,7 @@ public final class Settings {
     /**
      * Items the builder may throw out as junk. Only listed items count: an item the builder
      * doesn't recognise is kept. Pickaxes, shulker boxes, ender chests, obsidian, crying obsidian,
-     * enchanted golden apples, totems, ender pearls, elytra, custom-named stacks, slot 8 and the
+     * enchanted golden apples, golden carrots, totems, ender pearls, elytra, custom-named stacks, slot 8 and the
      * best sword, axe and shovel are never thrown, whatever this list says.
      */
     public final Setting<List<Item>> highwayJunkItems = new Setting<>(new ArrayList<>(Arrays.asList(
@@ -1930,6 +1948,19 @@ public final class Settings {
     public final Setting<Boolean> highwayStashTotemShulkers = new Setting<>(true);
 
     /**
+     * Golden carrot shulkers to have in inventory during looting. Only used when
+     * highwayStashGoldenCarrotShulkers is false.
+     */
+    public final Setting<Integer> highwayGoldenCarrotShulksToHave = new Setting<>(1);
+
+    /**
+     * Keep golden carrot shulkers in the ender chest instead of the inventory: when golden carrots
+     * run low, grab a golden carrot shulker from the ender chest, loot golden carrots up to
+     * highwayGoldenCarrotsToHave, and deposit the shulker back into the ender chest.
+     */
+    public final Setting<Boolean> highwayStashGoldenCarrotShulkers = new Setting<>(true);
+
+    /**
      * Ender chests to loot for obsidian farming
      */
     public final Setting<Integer> highwayEnderChestsToLoot = new Setting<>(64);
@@ -2006,9 +2037,18 @@ public final class Settings {
     public final Setting<Float> highwayGappleEatHealthThreshold = new Setting<>(0f);
 
     /**
-     * Eat a gapple when food level drops to or below this value. Set to 0 to disable.
+     * Eat when food level drops to or below this value, whatever the bot is doing: a golden carrot
+     * when it carries any (see highwayGoldenCarrotEatFoodThreshold), else a gapple. Set to 0 to disable.
      */
     public final Setting<Integer> highwayGappleEatFoodThreshold = new Setting<>(0);
+
+    /**
+     * While building, eat a golden carrot when food drops to or below this value, keeping gapples
+     * for fire, lava and low health. A golden carrot fills 20.4 hunger points to a gapple's 13.6, and
+     * 14 or lower wastes none of its 6 food. Without golden carrots, gapples feed the bot as before.
+     * Set to 0 to always eat gapples.
+     */
+    public final Setting<Integer> highwayGoldenCarrotEatFoodThreshold = new Setting<>(14);
 
     /**
      * Allow emergency gapple eating to interrupt MobCombat when health/food thresholds are met.

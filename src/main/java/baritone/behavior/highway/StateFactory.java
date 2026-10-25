@@ -238,6 +238,15 @@ public class StateFactory {
             case EmergencyGappleEat -> {
                 return new EmergencyGappleEat(highwayState);
             }
+            case GoldenCarrotEatPrep -> {
+                return new GoldenCarrotEatPrep(highwayState);
+            }
+            case GoldenCarrotPreEat -> {
+                return new GoldenCarrotPreEat(highwayState);
+            }
+            case GoldenCarrotEat -> {
+                return new GoldenCarrotEat(highwayState);
+            }
             case MobCombat -> {
                 return new MobCombat(highwayState);
             }

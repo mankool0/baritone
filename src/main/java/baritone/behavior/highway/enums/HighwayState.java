@@ -104,6 +104,10 @@ public enum HighwayState {
     EmergencyGapplePreEat,
     EmergencyGappleEat,
 
+    GoldenCarrotEatPrep,
+    GoldenCarrotPreEat,
+    GoldenCarrotEat,
+
     MobCombat,
     MobCombatReturn,
     ShulkerThiefHunt,

@@ -214,8 +214,9 @@ public class BuildingHighway extends State {
                     context.resetTimer();
                     return;
                 }
-                // With storage out of its shulkers, a supply the build can do without (totems) is
-                // just gone without, and stops costing trips until the next startBuild resets the flag
+                // With storage out of its shulkers, a supply the build can do without (totems,
+                // golden carrots) is just gone without, and stops costing trips until the next
+                // startBuild resets the flag
                 boolean stocked = context.enderChestHasShulks(supply);
                 if (stocked || supply.pausesWhenStorageEmpty(context.settings())) {
                     // No shulker in hand, so this costs a storage trip or a pause: confirm the count
@@ -345,12 +346,24 @@ public class BuildingHighway extends State {
             //return;
         }
 
-        if (context.timer() >= 10 && (context.playerContext().player().isOnFire() || context.playerContext().player().getFoodData().getFoodLevel() <= 16)) {
+        if (context.timer() >= 10) {
+            int food = context.playerContext().player().getFoodData().getFoodLevel();
             MobEffectInstance fireRest = context.playerContext().player().getEffect(MobEffects.FIRE_RESISTANCE);
-            if (fireRest == null || fireRest.getDuration() < context.fireRestMinDuration() || context.playerContext().player().getFoodData().getFoodLevel() <= 16) {
+            boolean burning = context.playerContext().player().isOnFire() && (fireRest == null || fireRest.getDuration() < context.fireRestMinDuration());
+            // Golden carrots feed us far more per eat; gapples are kept for fire, lava and low health
+            boolean carrots = context.canEatGoldenCarrots();
+            if (burning || !carrots && food <= 16) {
                 Helper.HELPER.logDirect("Eating a gapple.");
                 context.clearSourceBlocks(); // Should fix occasional crash after eating gapples
                 context.transitionTo(HighwayState.LiquidRemovalGapplePrep);
+                context.baritone().getInputOverrideHandler().clearAllKeys();
+                context.baritone().getPathingBehavior().cancelEverything();
+                return;
+            }
+            if (carrots && food <= context.goldenCarrotEatFoodThreshold()) {
+                Helper.HELPER.logDirect("Eating a golden carrot.");
+                context.setGoldenCarrotEatReturnState(HighwayState.Nothing);
+                context.transitionTo(HighwayState.GoldenCarrotEatPrep);
                 context.baritone().getInputOverrideHandler().clearAllKeys();
                 context.baritone().getPathingBehavior().cancelEverything();
                 return;

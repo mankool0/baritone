@@ -101,6 +101,38 @@ public enum Supply {
             // Totems are a safety net, not something the build consumes
             return settings.highwayPauseWhenOutOfTotems.value;
         }
+    },
+
+    GOLDEN_CARROTS(ShulkerType.GoldenCarrot, "golden carrot", "golden carrots", "Golden carrot count") {
+        @Override
+        public boolean enabled(Settings settings) {
+            return settings.highwayRefillGoldenCarrots.value;
+        }
+
+        @Override
+        public int toHave(HighwayContext context) {
+            return context.goldenCarrotsToHave();
+        }
+
+        @Override
+        public int threshold(Settings settings) {
+            return settings.highwayGoldenCarrotsThreshold.value;
+        }
+
+        @Override
+        public boolean stash(Settings settings) {
+            return settings.highwayStashGoldenCarrotShulkers.value;
+        }
+
+        @Override
+        public int shulksToHave(Settings settings) {
+            return settings.highwayGoldenCarrotShulksToHave.value;
+        }
+
+        @Override
+        public boolean pausesWhenStorageEmpty(Settings settings) {
+            return false; // gapples take hunger back once the carrots run out
+        }
     };
 
     private final ShulkerType shulkerType;

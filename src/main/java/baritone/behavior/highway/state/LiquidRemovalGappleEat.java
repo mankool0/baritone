@@ -35,7 +35,9 @@ public class LiquidRemovalGappleEat extends State {
     @Override
     public void handle(HighwayContext context) {
         MobEffectInstance fireRest = context.playerContext().player().getEffect(MobEffects.FIRE_RESISTANCE);
-        if (fireRest != null && fireRest.getDuration() >= context.fireRestMinDuration() && context.playerContext().player().getFoodData().getFoodLevel() > 16 /*&& ctx.playerFeet().getY() == placeLoc.getY()*/) {
+        // Hunger is left to the golden carrots while we have any, so fire resistance is all this eat is for
+        boolean fed = context.playerContext().player().getFoodData().getFoodLevel() > 16 || context.canEatGoldenCarrots();
+        if (fireRest != null && fireRest.getDuration() >= context.fireRestMinDuration() && fed /*&& ctx.playerFeet().getY() == placeLoc.getY()*/) {
             NetherHighwayBuilderBehavior.suppressHitResult = false;
             context.transitionTo(HighwayState.LiquidRemovalPathing);
             context.playerContext().minecraft().options.keyUse.setDown(false);

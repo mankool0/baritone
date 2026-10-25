@@ -29,6 +29,7 @@ public enum ShulkerType {
     // Boxes of nothing but one item, the Supply ones
     Gapple(Items.ENCHANTED_GOLDEN_APPLE),
     Totem(Items.TOTEM_OF_UNDYING),
+    GoldenCarrot(Items.GOLDEN_CARROT),
     Empty,
     Any;
 
