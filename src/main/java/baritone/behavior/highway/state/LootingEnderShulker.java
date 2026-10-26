@@ -21,7 +21,7 @@ import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
-import net.minecraft.client.gui.screens.inventory.ShulkerBoxScreen;
+import net.minecraft.world.inventory.ShulkerBoxMenu;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Blocks;
 
@@ -32,7 +32,7 @@ public class LootingEnderShulker extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (!(context.playerContext().minecraft().screen instanceof ShulkerBoxScreen)) {
+        if (!(context.playerContext().player().containerMenu instanceof ShulkerBoxMenu)) {
             context.transitionTo(HighwayState.OpeningEnderShulker);
             return;
         }

@@ -121,10 +121,14 @@ public class RecoveryTracker extends ContextComponent {
         }
     }
 
-    /** Hold (or release) the jump key that floats us at the lava surface during recovery. */
+    /**
+     * Hold (or release) the jump key that floats us at the lava surface during recovery. Pressed
+     * again on every call while held: opening a screen lets go of every key, and grabbing the mouse
+     * once it closes can set them all back to what the keyboard holds.
+     */
     public void setRecoveryHoldingJump(boolean holding) {
-        if (recoveryHoldingJump == holding) {
-            return;
+        if (!holding && !recoveryHoldingJump) {
+            return; // not ours to let go of
         }
         recoveryHoldingJump = holding;
         if (playerContext.minecraft() != null) {

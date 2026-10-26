@@ -24,7 +24,7 @@ import baritone.api.utils.input.Input;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
-import net.minecraft.client.gui.screens.inventory.ShulkerBoxScreen;
+import net.minecraft.world.inventory.ShulkerBoxMenu;
 import net.minecraft.world.level.block.ShulkerBoxBlock;
 
 import java.util.Optional;
@@ -66,7 +66,7 @@ public class OpeningPickaxeShulker extends State {
         }
 
         context.baritone().getInputOverrideHandler().clearAllKeys();
-        if (context.playerContext().minecraft().screen instanceof ShulkerBoxScreen) {
+        if (context.playerContext().player().containerMenu instanceof ShulkerBoxMenu) {
             context.containerRecovery().noteContainerOpened();
             context.transitionTo(HighwayState.LootingPickaxeShulker);
             return;

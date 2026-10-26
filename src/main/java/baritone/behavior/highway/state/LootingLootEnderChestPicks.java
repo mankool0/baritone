@@ -21,7 +21,7 @@ import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
-import net.minecraft.client.gui.screens.inventory.ContainerScreen;
+import net.minecraft.world.inventory.ChestMenu;
 
 public class LootingLootEnderChestPicks extends State {
     public LootingLootEnderChestPicks(HighwayState state) {
@@ -30,7 +30,7 @@ public class LootingLootEnderChestPicks extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (!(context.playerContext().minecraft().screen instanceof ContainerScreen)) {
+        if (!(context.playerContext().player().containerMenu instanceof ChestMenu)) {
             context.transitionTo(HighwayState.OpeningLootEnderChest);
             return;
         }

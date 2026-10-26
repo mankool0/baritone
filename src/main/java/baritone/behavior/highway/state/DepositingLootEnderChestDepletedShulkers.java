@@ -23,7 +23,7 @@ import baritone.behavior.highway.State;
 import baritone.behavior.highway.Supply;
 import baritone.behavior.highway.enums.HighwayState;
 import baritone.behavior.highway.enums.ShulkerType;
-import net.minecraft.client.gui.screens.inventory.ContainerScreen;
+import net.minecraft.world.inventory.ChestMenu;
 
 public class DepositingLootEnderChestDepletedShulkers extends State {
     public DepositingLootEnderChestDepletedShulkers(HighwayState state) {
@@ -32,7 +32,7 @@ public class DepositingLootEnderChestDepletedShulkers extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (!(context.playerContext().minecraft().screen instanceof ContainerScreen)) {
+        if (!(context.playerContext().player().containerMenu instanceof ChestMenu)) {
             context.transitionTo(HighwayState.OpeningLootEnderChest);
             return;
         }

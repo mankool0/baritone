@@ -23,7 +23,7 @@ import baritone.behavior.highway.State;
 import baritone.behavior.highway.Supply;
 import baritone.behavior.highway.enums.HighwayState;
 import baritone.behavior.highway.enums.ShulkerType;
-import net.minecraft.client.gui.screens.inventory.ContainerScreen;
+import net.minecraft.world.inventory.ChestMenu;
 
 /**
  * With ender storage open, deposit the (partially depleted) shulker back into it so it stays in
@@ -37,7 +37,7 @@ public class DepositingStashShulker extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (!(context.playerContext().minecraft().screen instanceof ContainerScreen)) {
+        if (!(context.playerContext().player().containerMenu instanceof ChestMenu)) {
             context.transitionTo(HighwayState.OpeningLootEnderChest); // stashing flag routes the reopen back here
             return;
         }

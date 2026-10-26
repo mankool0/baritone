@@ -62,9 +62,6 @@ import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import it.unimi.dsi.fastutil.longs.LongSets;
 import it.unimi.dsi.fastutil.objects.ObjectIterator;
-import net.minecraft.client.gui.screens.ChatScreen;
-import net.minecraft.client.gui.screens.PauseScreen;
-import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Vec3i;
@@ -1533,11 +1530,20 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         if (ctx.player() == null || ctx.minecraft().gameMode == null) {
             return "not in game";
         }
-        if (!(ctx.minecraft().screen == null || ctx.minecraft().screen instanceof ChatScreen || ctx.minecraft().screen instanceof InventoryScreen || ctx.minecraft().screen instanceof PauseScreen)) {
-            return "screen open";
+        // The server only learns of a screen that has a container behind it. Any other, like the pause
+        // menu an unfocused window opens, chat or a mod's menu, changes nothing it would see.
+        if (ctx.player().hasContainerOpen()) {
+            return "container open";
+        }
+        if (!ctx.player().connection.hasClientLoaded()) {
+            // the server drops dig and use packets until then
+            return "level loading";
         }
         if (ctx.minecraft().isPaused()) {
             return "game paused";
+        }
+        if (ctx.player().isDeadOrDying()) {
+            return "dead";
         }
         if (!ctx.player().containerMenu.getCarried().isEmpty()) {
             return "item on the cursor";
