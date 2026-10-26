@@ -35,22 +35,22 @@ public class LootingPickaxeShulker extends State {
             return;
         }
 
-        if (!context.openContainerReady()) {
+        if (!context.sync().openContainerReady()) {
             return;
         }
 
-        if (context.getPickCountInventory() >= context.picksToHave()) {
+        if (context.inventory().getPickCountInventory() >= context.resupply().picksToHave()) {
             context.transitionTo(HighwayState.MiningPickaxeShulker);
             context.playerContext().player().closeContainer();
             return;
         }
 
-        if (!context.containerClickReady()) {
+        if (!context.sync().containerClickReady()) {
             return;
         }
 
-        int picksLooted = context.lootPickaxeChestSlot();
-        context.noteContainerClick();
+        int picksLooted = context.looting().lootPickaxeChestSlot();
+        context.sync().noteContainerClick();
         if (picksLooted > 0) {
             Helper.HELPER.logDirect("Looted " + picksLooted + " pickaxe");
             return;

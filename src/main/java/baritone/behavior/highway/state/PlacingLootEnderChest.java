@@ -53,9 +53,9 @@ public class PlacingLootEnderChest extends State {
 
         // Chest is down with headroom to open it - we're done here
         if (placeState.getBlock() instanceof EnderChestBlock && aboveState.getBlock() instanceof AirBlock) {
-            if (context.outOfReachWalkRunning()) {
+            if (context.containerRecovery().outOfReachWalkRunning()) {
                 context.resetTimer();
-                return; // back onto the standing spot first, see HighwayContext.handleContainerOutOfReach
+                return; // back onto the standing spot first, see ContainerRecovery.handleContainerOutOfReach
             }
             context.baritone().getInputOverrideHandler().clearAllKeys();
             context.transitionTo(HighwayState.OpeningLootEnderChest);
@@ -78,7 +78,7 @@ public class PlacingLootEnderChest extends State {
         }
 
         // Lava has crept into the spot (or was never safe) - don't break netherrack into it, pick a new spot
-        if (!context.isSideStorageSpotSafe(context.placeLoc())) {
+        if (!context.shulkerPlacement().isSideStorageSpotSafe(context.placeLoc())) {
             Helper.HELPER.logDirect("Lava near ender chest spot, relocating.");
             context.baritone().getPathingBehavior().cancelEverything();
             context.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);
@@ -112,7 +112,7 @@ public class PlacingLootEnderChest extends State {
             return;
         }
 
-        int slot = context.putItemHotbar(Item.getId(Blocks.ENDER_CHEST.asItem()));
+        int slot = context.inventory().putItemHotbar(Item.getId(Blocks.ENDER_CHEST.asItem()));
         if (slot == -1) {
             Helper.HELPER.logDirect("No ender chests to place, relocating.");
             context.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);
@@ -127,7 +127,7 @@ public class PlacingLootEnderChest extends State {
 
         // Convert to a plain BlockPos to avoid BetterBlockPos leaking into Minecraft's block entity maps
         BlockPos placeLoc = new BlockPos(context.placeLoc().getX(), context.placeLoc().getY(), context.placeLoc().getZ());
-        if (context.placeBlockAgainstNeighbor(placeLoc, slot)) {
+        if (context.shulkerPlacement().placeBlockAgainstNeighbor(placeLoc, slot)) {
             placed = true;
             context.resetTimer();
         }

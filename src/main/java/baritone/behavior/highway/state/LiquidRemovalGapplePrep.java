@@ -33,7 +33,7 @@ public class LiquidRemovalGapplePrep extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        int gappleSlot = context.putItemHotbar(Item.getId(Items.ENCHANTED_GOLDEN_APPLE));
+        int gappleSlot = context.inventory().putItemHotbar(Item.getId(Items.ENCHANTED_GOLDEN_APPLE));
         if (gappleSlot == -1) {
             Helper.HELPER.logDirect("Error getting gapple slot");
             context.transitionTo(HighwayState.LiquidRemovalPrep);

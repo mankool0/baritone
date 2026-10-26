@@ -39,28 +39,28 @@ public class InventoryCleaningObsidian extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (!context.containerClickReady()) {
+        if (!context.sync().containerClickReady()) {
             return;
         }
 
         // Only free as many slots as the nearby drops actually need, so we keep throwaway
         // items we might still want (support blocks etc.) instead of dumping them all
-        int stacksToThrow = slotsNeededForDrops(context) - context.getItemCountInventory(Item.getId(Items.AIR));
-        if (stacksToThrow > 0 && context.getThrowawaySlotToToss() != -1 && !context.aimToThrow(ticksInState())) {
+        int stacksToThrow = slotsNeededForDrops(context) - context.inventory().getItemCountInventory(Item.getId(Items.AIR));
+        if (stacksToThrow > 0 && context.inventory().getThrowawaySlotToToss() != -1 && !context.inventory().aimToThrow(ticksInState())) {
             return;
         }
         for (int i = 0; i < stacksToThrow; i++) {
-            int throwawaySlot = context.getThrowawaySlotToToss();
+            int throwawaySlot = context.inventory().getThrowawaySlotToToss();
             if (throwawaySlot == -1) {
-                if (context.obsidianStuckLogDue()) {
-                    Helper.HELPER.logDirect("Obsidian on the ground doesn't fit and nothing is left to throw out: need " + stacksToThrow + " more slot(s) [" + context.obsidianRoomBreakdown() + "]");
+                if (context.farm().obsidianStuckLogDue()) {
+                    Helper.HELPER.logDirect("Obsidian on the ground doesn't fit and nothing is left to throw out: need " + stacksToThrow + " more slot(s) [" + context.farm().obsidianRoomBreakdown() + "]");
                 }
                 break;
             }
             context.playerContext().playerController().windowClick(context.playerContext().player().inventoryMenu.containerId, throwawaySlot < 9 ? throwawaySlot + 36 : throwawaySlot, 0, ClickType.PICKUP, context.playerContext().player());
             context.playerContext().playerController().windowClick(context.playerContext().player().inventoryMenu.containerId, -999, 0, ClickType.PICKUP, context.playerContext().player());
         }
-        context.noteContainerClick();
+        context.sync().noteContainerClick();
         context.transitionTo(HighwayState.CollectingObsidian);
         context.resetTimer();
     }

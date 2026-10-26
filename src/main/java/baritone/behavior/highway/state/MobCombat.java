@@ -23,6 +23,7 @@ import baritone.api.utils.Helper;
 import baritone.api.utils.interfaces.IGoalRenderPos;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
+import baritone.behavior.highway.Threats;
 import baritone.behavior.highway.enums.HighwayState;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
@@ -42,36 +43,36 @@ public class MobCombat extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        int swordSlot = context.putBestSwordHotbar();
+        int swordSlot = context.inventory().putBestSwordHotbar();
         if (swordSlot != -1 && swordSlot < 9) {
             context.playerContext().player().getInventory().setSelectedSlot(swordSlot);
         }
 
-        Optional<Entity> mob = context.findMobTargetingPlayer();
+        Optional<Entity> mob = context.threats().findMobTargetingPlayer();
 
         if (mob.isEmpty()) {
             // All threats gone, path back to where we were before resuming
             context.baritone().getPathingBehavior().cancelEverything();
-            context.setCurrentMobTarget(null);
+            context.threats().setCurrentMobTarget(null);
             context.transitionTo(HighwayState.MobCombatReturn);
             return;
         }
 
         Entity target = mob.get();
-        context.setCurrentMobTarget(target);
+        context.threats().setCurrentMobTarget(target);
         Player player = context.playerContext().player();
 
         // Only aim-and-swing in melee range; a forced look target further out would fight the
         // pathing rotations while we're still closing in
         if (context.settings().highwayMobCombatAttack.value
                 && target.getBoundingBox().distanceToSqr(player.getEyePosition()) <= 3.0 * 3.0) {
-            context.attackEntity(target);
+            context.threats().attackEntity(target);
         }
 
         double approach = context.settings().highwayMobCombatApproachDistance.value;
-        double reach = context.mobReachDistance(target);
+        double reach = context.threats().mobReachDistance(target);
         if (reach <= approach) {
-            context.resetChaseStall(); // fighting, not stalled
+            context.threats().resetChaseStall(); // fighting, not stalled
             // Close enough for the killaura: stand still instead of walking into the mob. This also
             // drops a builder still running when combat began with the mob already this close
             if (context.baritone().getPathingControlManager().mostRecentInControl().isPresent()
@@ -85,9 +86,9 @@ public class MobCombat extends State {
         // here, or keep pulling us back to it, for as long as it stays angry. Ghasts are left out:
         // findMobTargetingPlayer keeps a ghast engaged on purpose while it's within 40 blocks, and
         // this shouldn't undercut that.
-        if (!(target instanceof Ghast) && context.chaseStalled(target, reach, STALL_TIMEOUT_TICKS)) {
+        if (!(target instanceof Ghast) && context.threats().chaseStalled(target, reach, STALL_TIMEOUT_TICKS)) {
             Helper.HELPER.logDirect("Can't get to the " + target.getName().getString() + ", ignoring it for a while.");
-            context.ignoreMob(target, IGNORE_TICKS);
+            context.threats().ignoreMob(target, IGNORE_TICKS);
             return;
         }
 
@@ -98,7 +99,7 @@ public class MobCombat extends State {
     }
 
     /**
-     * Standing spots from anywhere inside which {@link HighwayContext#mobReachDistance} is at most
+     * Standing spots from anywhere inside which {@link Threats#mobReachDistance} is at most
      * {@code distance}, wherever in its own block the mob stands (both of us on full-block floors).
      * Every spot outside reach is outside the goal, so the chase can't settle short of reach the way
      * a plain {@code GoalNear} did. Built only from block positions and sizes, so it stays equal to last

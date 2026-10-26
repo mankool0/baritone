@@ -41,7 +41,7 @@ public class ShulkerCollection extends State {
         for (Entity entity : context.playerContext().entities()) {
             if (entity instanceof ItemEntity) {
                 if (HighwayContext.shulkerItemList.contains(((ItemEntity) entity).getItem().getItem())) {
-                    if (context.getItemCountInventory(Item.getId(Items.AIR)) == 0) {
+                    if (context.inventory().getItemCountInventory(Item.getId(Items.AIR)) == 0) {
                         // No space for shulker, need to do removal
                         context.transitionTo(HighwayState.InventoryCleaningShulkerCollection);
                         context.resetTimer();

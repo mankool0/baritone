@@ -31,23 +31,23 @@ public class InventoryCleaningEnderShulker extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.getItemCountInventory(Item.getId(Items.AIR)) > 0) {
+        if (context.inventory().getItemCountInventory(Item.getId(Items.AIR)) > 0) {
             // Room was made some other way (cleaned out by hand, an item used up), so go
             // pick the box up instead of waiting for something to throw out
             context.transitionTo(HighwayState.CollectingEnderShulker);
             return;
         }
-        if (!context.containerClickReady()) {
+        if (!context.sync().containerClickReady()) {
             return;
         }
 
-        int throwawaySlot = context.roomSlotToToss();
-        if (throwawaySlot == -1 || !context.aimToThrow(ticksInState())) {
+        int throwawaySlot = context.inventory().roomSlotToToss();
+        if (throwawaySlot == -1 || !context.inventory().aimToThrow(ticksInState())) {
             return;
         }
         context.playerContext().playerController().windowClick(context.playerContext().player().inventoryMenu.containerId, throwawaySlot < 9 ? throwawaySlot + 36 : throwawaySlot, 0, ClickType.PICKUP, context.playerContext().player());
         context.playerContext().playerController().windowClick(context.playerContext().player().inventoryMenu.containerId, -999, 0, ClickType.PICKUP, context.playerContext().player());
-        context.noteContainerClick();
+        context.sync().noteContainerClick();
         context.transitionTo(HighwayState.CollectingEnderShulker);
     }
 }

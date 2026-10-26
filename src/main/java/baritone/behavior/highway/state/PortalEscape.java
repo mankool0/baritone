@@ -34,7 +34,7 @@ public class PortalEscape extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (!context.isPlayerInPortal()) {
+        if (!context.walk().isPlayerInPortal()) {
             context.baritone().getInputOverrideHandler().clearAllKeys();
             context.transitionTo(HighwayState.Nothing);
             context.resetTimer();
@@ -42,7 +42,7 @@ public class PortalEscape extends State {
             return;
         }
 
-        BlockPos target = context.findPortalEscapeTarget();
+        BlockPos target = context.walk().findPortalEscapeTarget();
         if (target == null) {
             // boxed in: hand over to a human instead of bouncing between dimensions
             context.baritone().getInputOverrideHandler().clearAllKeys();
@@ -51,6 +51,6 @@ public class PortalEscape extends State {
             return;
         }
 
-        context.walkTowardBlock(target);
+        context.walk().walkTowardBlock(target);
     }
 }

@@ -73,12 +73,12 @@ public enum Supply {
 
         @Override
         public int count(HighwayContext context) {
-            return context.getTotemCountInventory(); // the offhand one is the one that saves us
+            return context.inventory().getTotemCountInventory(); // the offhand one is the one that saves us
         }
 
         @Override
         public int toHave(HighwayContext context) {
-            return context.totemsToHave();
+            return context.resupply().totemsToHave();
         }
 
         @Override
@@ -111,7 +111,7 @@ public enum Supply {
 
         @Override
         public int toHave(HighwayContext context) {
-            return context.goldenCarrotsToHave();
+            return context.resupply().goldenCarrotsToHave();
         }
 
         @Override
@@ -176,7 +176,7 @@ public enum Supply {
 
     /** How many we carry. */
     public int count(HighwayContext context) {
-        return context.getItemCountInventory(Item.getId(item()));
+        return context.inventory().getItemCountInventory(Item.getId(item()));
     }
 
     /** How many to loot up to. */
@@ -196,13 +196,13 @@ public enum Supply {
 
     /** With one of its shulkers open, move one slot's worth into the inventory; how many were in it, 0 when none. */
     public int lootSlot(HighwayContext context) {
-        return context.lootSupplyChestSlot(item());
+        return context.looting().lootSupplyChestSlot(item());
     }
 
     /** Shulkers of it to come back from a storage trip with. */
     public int shulksWanted(HighwayContext context) {
         int want = enabled(context.settings()) && !stash(context.settings()) ? shulksToHave(context.settings()) : 0;
-        if (context.refilling(this)) {
+        if (context.resupply().refilling(this)) {
             want = Math.max(want, 1); // this trip has to come back with a shulker to loot from
         }
         return want;

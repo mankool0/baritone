@@ -29,7 +29,7 @@ public class SupplyShulkerPlaceLocPrep extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        context.setPlaceLoc(context.shulkerPlaceLocClearOfThieves()); // Anchored a bit back, shifted further if piglins could steal the drop
+        context.setPlaceLoc(context.shulkerPlacement().shulkerPlaceLocClearOfThieves()); // Anchored a bit back, shifted further if piglins could steal the drop
 
         context.settings().buildRepeat.value = new Vec3i(0, 0, 0);
         context.transitionTo(HighwayState.GoingToPlaceLocSupplyShulker);

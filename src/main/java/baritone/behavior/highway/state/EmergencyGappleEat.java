@@ -32,22 +32,22 @@ public class EmergencyGappleEat extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        float healthThreshold = context.gappleEatHealthThreshold();
-        int foodThreshold = context.gappleEatFoodThreshold();
+        float healthThreshold = context.eating().gappleEatHealthThreshold();
+        int foodThreshold = context.eating().gappleEatFoodThreshold();
         float health = context.playerContext().player().getHealth();
         int food = context.playerContext().player().getFoodData().getFoodLevel();
 
         boolean healthOk = healthThreshold <= 0 || health >= healthThreshold;
         // Hunger is the golden carrots' job where they'd feed us: the emergency check starts a carrot
         // eat for it as soon as we're back
-        boolean foodOk = foodThreshold <= 0 || food > foodThreshold || context.goldenCarrotsFeed(context.emergencyEatReturnState());
+        boolean foodOk = foodThreshold <= 0 || food > foodThreshold || context.eating().goldenCarrotsFeed(context.eating().emergencyEatReturnState());
 
         if (healthOk && foodOk) {
             NetherHighwayBuilderBehavior.suppressHitResult = false;
             context.playerContext().minecraft().options.keyUse.setDown(false);
             context.baritone().getInputOverrideHandler().clearAllKeys();
             context.baritone().getPathingBehavior().cancelEverything();
-            context.transitionTo(context.emergencyEatReturnState());
+            context.transitionTo(context.eating().emergencyEatReturnState());
             return;
         }
 
@@ -70,7 +70,7 @@ public class EmergencyGappleEat extends State {
             if (containerOpen) {
                 context.playerContext().player().closeContainer();
             } else {
-                context.holdUseToEat();
+                context.eating().holdUseToEat();
             }
         } else {
             Helper.HELPER.logDirect("Gapple eat isn't starting, re-selecting the gapple slot.");

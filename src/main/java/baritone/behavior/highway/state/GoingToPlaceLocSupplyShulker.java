@@ -34,8 +34,8 @@ public class GoingToPlaceLocSupplyShulker extends State {
             return; // Wait to get there
         }
 
-        Supply supply = context.activeSupply();
-        if (supply.count(context) >= supply.toHave(context) || context.getShulkerSlot(supply.shulkerType()) == -1) {
+        Supply supply = context.resupply().activeSupply();
+        if (supply.count(context) >= supply.toHave(context) || context.inventory().getShulkerSlot(supply.shulkerType()) == -1) {
             // We have enough, or no more shulker of it
             context.transitionTo(HighwayState.Nothing);
             return;

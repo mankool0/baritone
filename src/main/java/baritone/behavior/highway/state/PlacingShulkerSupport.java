@@ -50,16 +50,16 @@ public class PlacingShulkerSupport extends State {
         context.baritone().getPathingBehavior().cancelEverything();
         context.settings().buildRepeat.value = new Vec3i(0, 0, 0);
         if (context.playerContext().world().getBlockState(context.placeLoc().below()).getBlock() instanceof AirBlock) {
-            if (!context.canBuildSupportBlock()) {
+            if (!context.inventory().canBuildSupportBlock()) {
                 context.pause("Nothing under the shulker placing spot and no blocks left to build a support with. Move the bot onto solid ground or give it throwaway blocks and restart.");
                 return;
             }
             supportBlockNeeded = true;
-            context.buildSupportBlock(context.placeLoc().below());
+            context.shulkerPlacement().buildSupportBlock(context.placeLoc().below());
             return;
         }
 
-        if (state == HighwayState.PlacingEnderShulkerSupport && context.farmLooseChests()) {
+        if (state == HighwayState.PlacingEnderShulkerSupport && context.farm().farmLooseChests()) {
             context.transitionTo(HighwayState.GoingToPlaceLocEnderChest);
             return;
         }
@@ -68,10 +68,10 @@ public class PlacingShulkerSupport extends State {
 
     private boolean shouldCancel(HighwayContext context) {
         return switch (state) {
-            case PlacingEmptyShulkerSupport -> context.getShulkerSlot(baritone.behavior.highway.enums.ShulkerType.Empty) == -1;
-            case PlacingLootEnderChestSupport -> context.getItemCountInventory(net.minecraft.world.item.Item.getId(net.minecraft.world.level.block.Blocks.ENDER_CHEST.asItem())) == 0;
-            case PlacingPickaxeShulkerSupport -> context.getPickCountInventory() >= context.picksToHave() || context.getShulkerSlot(context.picksToUse()) == -1;
-            case PlacingSupplyShulkerSupport -> context.activeSupply().count(context) >= context.activeSupply().toHave(context) || context.getShulkerSlot(context.activeSupply().shulkerType()) == -1;
+            case PlacingEmptyShulkerSupport -> context.inventory().getShulkerSlot(baritone.behavior.highway.enums.ShulkerType.Empty) == -1;
+            case PlacingLootEnderChestSupport -> context.inventory().getItemCountInventory(net.minecraft.world.item.Item.getId(net.minecraft.world.level.block.Blocks.ENDER_CHEST.asItem())) == 0;
+            case PlacingPickaxeShulkerSupport -> context.inventory().getPickCountInventory() >= context.resupply().picksToHave() || context.inventory().getShulkerSlot(context.resupply().picksToUse()) == -1;
+            case PlacingSupplyShulkerSupport -> context.resupply().activeSupply().count(context) >= context.resupply().activeSupply().toHave(context) || context.inventory().getShulkerSlot(context.resupply().activeSupply().shulkerType()) == -1;
             case PlacingEnderShulkerSupport -> false; // No cancellation condition for ender shulker
             default -> false;
         };

@@ -145,7 +145,7 @@ public class HighwayJunkTest {
         List<ItemStack> inventory = inventory();
         inventory.set(8, new ItemStack(Items.ROTTEN_FLESH));
         assertFalse(junkSlots(inventory).test(8));
-        assertEquals(-1, HighwayContext.throwawaySlotToToss(inventory, junkSlots(inventory), throwaway, true));
+        assertEquals(-1, HighwayInventory.throwawaySlotToToss(inventory, junkSlots(inventory), throwaway, true));
     }
 
     @Test
@@ -153,8 +153,8 @@ public class HighwayJunkTest {
         List<ItemStack> inventory = inventory();
         inventory.set(0, new ItemStack(Items.NETHERRACK, 64));
         inventory.set(20, new ItemStack(Items.QUARTZ, 3));
-        assertEquals(20, HighwayContext.throwawaySlotToToss(inventory, junkSlots(inventory), throwaway, true));
-        assertEquals(20, HighwayContext.roomSlotToToss(inventory, junkSlots(inventory), throwaway, true));
+        assertEquals(20, HighwayInventory.throwawaySlotToToss(inventory, junkSlots(inventory), throwaway, true));
+        assertEquals(20, HighwayInventory.roomSlotToToss(inventory, junkSlots(inventory), throwaway, true));
     }
 
     @Test
@@ -162,7 +162,7 @@ public class HighwayJunkTest {
         List<ItemStack> inventory = inventory();
         inventory.set(20, new ItemStack(Items.GOLD_NUGGET));
         inventory.set(3, new ItemStack(Items.ROTTEN_FLESH));
-        assertEquals(3, HighwayContext.throwawaySlotToToss(inventory, junkSlots(inventory), throwaway, true));
+        assertEquals(3, HighwayInventory.throwawaySlotToToss(inventory, junkSlots(inventory), throwaway, true));
     }
 
     @Test
@@ -173,12 +173,12 @@ public class HighwayJunkTest {
         inventory.set(20, new ItemStack(Items.GOLD_NUGGET));
         inventory.set(30, new ItemStack(Items.NETHERRACK, 64));
         IntPredicate off = slot -> false;
-        assertEquals(30, HighwayContext.throwawaySlotToToss(inventory, off, throwaway, true));
-        assertEquals(30, HighwayContext.roomSlotToToss(inventory, off, throwaway, true));
+        assertEquals(30, HighwayInventory.throwawaySlotToToss(inventory, off, throwaway, true));
+        assertEquals(30, HighwayInventory.roomSlotToToss(inventory, off, throwaway, true));
         inventory.set(30, ItemStack.EMPTY);
         // paving never throws obsidian as a throwaway, but a shulker still gets the smallest stack
-        assertEquals(-1, HighwayContext.throwawaySlotToToss(inventory, off, throwaway, true));
-        assertEquals(2, HighwayContext.roomSlotToToss(inventory, off, throwaway, true));
+        assertEquals(-1, HighwayInventory.throwawaySlotToToss(inventory, off, throwaway, true));
+        assertEquals(2, HighwayInventory.roomSlotToToss(inventory, off, throwaway, true));
     }
 
     @Test
@@ -201,10 +201,10 @@ public class HighwayJunkTest {
         IntPredicate keptTool = slot -> slot == 2;
         IntPredicate junk = junkSlots(inventory, keptTool);
 
-        int room = HighwayContext.obsidianRoom(inventory, junk, throwaway, 0);
+        int room = EnderChestFarm.obsidianRoom(inventory, junk, throwaway, 0);
 
         int thrown = 0;
-        for (int slot; (slot = HighwayContext.throwawaySlotToToss(inventory, junk, throwaway, true)) != -1; ) {
+        for (int slot; (slot = HighwayInventory.throwawaySlotToToss(inventory, junk, throwaway, true)) != -1; ) {
             inventory.set(slot, ItemStack.EMPTY);
             thrown++;
         }

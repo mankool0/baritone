@@ -19,6 +19,7 @@ package baritone.behavior.highway.state;
 
 import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
+import baritone.behavior.highway.HighwayScanner;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
 import baritone.behavior.highway.enums.LocationType;
@@ -34,14 +35,14 @@ public class LiquidRemovalPrep extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        Vec3 direction = new Vec3(context.highwayDirection().getX(), context.highwayDirection().getY(), context.highwayDirection().getZ());
+        Vec3 direction = new Vec3(context.layout().highwayDirection().getX(), context.layout().highwayDirection().getY(), context.layout().highwayDirection().getZ());
         Vec3 feetPos = new Vec3(context.playerContext().playerFeet().getX(), context.playerContext().playerFeet().getY(), context.playerContext().playerFeet().getZ());
         // Start a bit behind us to clear up our own mess, and scan far enough forward to always
         // re-find whatever the detection scan flagged, but no farther than a little past its front
-        BlockPos startCheckPos = context.sliceAlongLine(context.liqOriginVector(), feetPos, -HighwayContext.LIQUID_SCAN_BACK_SLICES, LocationType.ShulkerEchestInteraction);
-        HighwayContext.ScanFront front = context.liquidScanFront();
+        BlockPos startCheckPos = context.layout().sliceAlongLine(context.layout().liqOriginVector(), feetPos, -HighwayScanner.LIQUID_SCAN_BACK_SLICES, LocationType.ShulkerEchestInteraction);
+        HighwayScanner.ScanFront front = context.scanner().liquidScanFront();
 
-        BlockPos liquidPos = context.findFirstLiquidGround(startCheckPos, HighwayContext.LIQUID_SCAN_BACK_SLICES + front.slicesAhead(), front, false);
+        BlockPos liquidPos = context.scanner().findFirstLiquidGround(startCheckPos, HighwayScanner.LIQUID_SCAN_BACK_SLICES + front.slicesAhead(), front, false);
 
         if (liquidPos == null) {
             Helper.HELPER.logDebug("findFirstLiquidGround Failed. Going back to state Nothing");
@@ -49,17 +50,17 @@ public class LiquidRemovalPrep extends State {
             return;
         }
 
-        context.clearSourceBlocks();
+        context.liquidRemoval().clearSourceBlocks();
         ArrayList<BlockPos> flowingBlocks = new ArrayList<>();
-        context.findSourceLiquid(liquidPos.getX(), liquidPos.getY(), liquidPos.getZ(), new ArrayList<>(), context.sourceBlocks(), flowingBlocks);
-        context.sourceBlocks().removeIf(blockPos -> (blockPos.getY() > 123)); // Remove all source blocks above Y 123 as it might be unreachable
+        context.liquidRemoval().findSourceLiquid(liquidPos.getX(), liquidPos.getY(), liquidPos.getZ(), new ArrayList<>(), context.liquidRemoval().sourceBlocks(), flowingBlocks);
+        context.liquidRemoval().sourceBlocks().removeIf(blockPos -> (blockPos.getY() > 123)); // Remove all source blocks above Y 123 as it might be unreachable
 
         // If sourceBlocks is empty we cleared it in the remove, want to fill in flowing lava at top bedrock level
-        if (context.sourceBlocks().isEmpty()) {
+        if (context.liquidRemoval().sourceBlocks().isEmpty()) {
             for (BlockPos flowingPos : flowingBlocks) {
                 if (flowingPos.getY() == 123) {
                     Helper.HELPER.logDebug("Lava source Y position too high, ignoring and adding " + flowingPos + " to list");
-                    context.sourceBlocks().add(flowingPos);
+                    context.liquidRemoval().sourceBlocks().add(flowingPos);
                 }
             }
         }
@@ -77,21 +78,21 @@ public class LiquidRemovalPrep extends State {
         // comparison counts slices: a raw axis compare reads the far side of the cross-section as
         // behind us on a diagonal, and on an angled pattern - whose minor axis crawls a third of a
         // block per slice - it does that to lava a dozen slices ahead, sending us into it.
-        int retreatSlices = -HighwayContext.LIQUID_SCAN_BACK_SLICES;
-        if (context.firstStartingPos() != null) {
-            BlockPos feetOnLiqLine = context.getClosestPoint(context.liqOriginVector(), direction, feetPos, LocationType.ShulkerEchestInteraction);
-            BlockPos liquidOnLiqLine = context.getClosestPoint(context.liqOriginVector(), direction,
+        int retreatSlices = -HighwayScanner.LIQUID_SCAN_BACK_SLICES;
+        if (context.layout().firstStartingPos() != null) {
+            BlockPos feetOnLiqLine = context.layout().getClosestPoint(context.layout().liqOriginVector(), direction, feetPos, LocationType.ShulkerEchestInteraction);
+            BlockPos liquidOnLiqLine = context.layout().getClosestPoint(context.layout().liqOriginVector(), direction,
                     new Vec3(liquidPos.getX(), liquidPos.getY(), liquidPos.getZ()), LocationType.ShulkerEchestInteraction);
-            if (context.stepsAlongHighway(feetOnLiqLine, liquidOnLiqLine) < 0) {
-                retreatSlices = HighwayContext.LIQUID_SCAN_BACK_SLICES;
+            if (context.layout().stepsAlongHighway(feetOnLiqLine, liquidOnLiqLine) < 0) {
+                retreatSlices = HighwayScanner.LIQUID_SCAN_BACK_SLICES;
             }
         }
 
-        context.setPlaceLoc(context.liftOntoPavement(context.sliceAlongLine(context.backPathOriginVector(), feetPos, retreatSlices, LocationType.ShulkerEchestInteraction)));
+        context.setPlaceLoc(context.layout().liftOntoPavement(context.layout().sliceAlongLine(context.layout().backPathOriginVector(), feetPos, retreatSlices, LocationType.ShulkerEchestInteraction)));
         // Get the closest point
-        if (!context.sourceBlocks().isEmpty()) {
+        if (!context.liquidRemoval().sourceBlocks().isEmpty()) {
             context.baritone().getPathingBehavior().cancelEverything();
-            if (context.liquidThroughWalls()) {
+            if (context.liquidRemoval().liquidThroughWalls()) {
                 // Fill it from here through the cover, no retreat and no gapple. This used to be
                 // limited to pools that were still sealed; the approach now places into the lava
                 // it has to dig past and into any cell it could step into, so an open pool is no

@@ -40,7 +40,7 @@ public class OpeningLootEnderChest extends State {
         enderChestReachable.ifPresent(rotation -> context.baritone().getLookBehavior().updateTarget(rotation, true));
 
         if (context.playerContext().world().getBlockState(context.placeLoc()).getBlock() instanceof EnderChestBlock && enderChestReachable.isEmpty()) {
-            context.handleContainerOutOfReach(context.placeLoc(), context.placeLocStand(1), HighwayState.PlacingLootEnderChest, HighwayState.LootEnderChestPlaceLocPrep);
+            context.containerRecovery().handleContainerOutOfReach(context.placeLoc(), context.placeLocStand(1), HighwayState.PlacingLootEnderChest, HighwayState.LootEnderChestPlaceLocPrep);
             return;
         }
 
@@ -49,10 +49,10 @@ public class OpeningLootEnderChest extends State {
         boolean gone = !(context.playerContext().world().getBlockState(context.placeLoc()).getBlock() instanceof EnderChestBlock);
         if (gone || ticksInState() > context.settings().highwayPlaceConfirmTimeout.value) {
             context.baritone().getInputOverrideHandler().clearAllKeys();
-            if (!gone && context.handleOpenRefused(context.placeLoc())) {
+            if (!gone && context.containerRecovery().handleOpenRefused(context.placeLoc())) {
                 return;
             }
-            if (!gone && context.handleLootEnderChestWouldNotOpen(context.placeLoc())) {
+            if (!gone && context.containerRecovery().handleLootEnderChestWouldNotOpen(context.placeLoc())) {
                 return;
             }
             Helper.HELPER.logDirect(gone
@@ -65,20 +65,20 @@ public class OpeningLootEnderChest extends State {
 
         context.baritone().getInputOverrideHandler().clearAllKeys();
         if (context.playerContext().minecraft().screen instanceof ContainerScreen) {
-            context.noteContainerOpened();
-            context.transitionTo(context.stashingShulker()
+            context.containerRecovery().noteContainerOpened();
+            context.transitionTo(context.resupply().stashingShulker()
                     ? HighwayState.DepositingStashShulker
                     : HighwayState.DepositingLootEnderChestDepletedShulkers);
             return;
         }
         // A refused open earned one sneak tap, which needs a few ticks without clicks
-        if (context.runSneakTap(context.placeLoc())) {
+        if (context.containerRecovery().runSneakTap(context.placeLoc())) {
             return;
         }
         // One click per server round trip: a second one landing before this screen does opens it twice.
         // And only with the crosshair on it: the click lands on whatever that is, and with a block in
         // hand anything else gets the block placed against it.
-        if (context.playerContext().isLookingAt(context.placeLoc()) && !context.openClickPending(context.placeLoc())) {
+        if (context.playerContext().isLookingAt(context.placeLoc()) && !context.sync().openClickPending(context.placeLoc())) {
             context.baritone().getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
         }
     }

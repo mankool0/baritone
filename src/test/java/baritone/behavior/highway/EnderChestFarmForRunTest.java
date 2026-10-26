@@ -32,28 +32,28 @@ public class EnderChestFarmForRunTest {
 
     @Test
     public void aFewHolesBreakOneChest() {
-        assertEquals(1, HighwayContext.chestsForObsidian(5, 0));
-        assertEquals(1, HighwayContext.chestsForObsidian(8, 0));
-        assertEquals(2, HighwayContext.chestsForObsidian(9, 0));
+        assertEquals(1, EnderChestFarm.chestsForObsidian(5, 0));
+        assertEquals(1, EnderChestFarm.chestsForObsidian(8, 0));
+        assertEquals(2, EnderChestFarm.chestsForObsidian(9, 0));
     }
 
     @Test
     public void obsidianOnHandCounts() {
-        assertEquals(3, HighwayContext.chestsForObsidian(40, 20));
-        assertEquals(0, HighwayContext.chestsForObsidian(10, 10));
-        assertEquals(0, HighwayContext.chestsForObsidian(3, 20));
+        assertEquals(3, EnderChestFarm.chestsForObsidian(40, 20));
+        assertEquals(0, EnderChestFarm.chestsForObsidian(10, 10));
+        assertEquals(0, EnderChestFarm.chestsForObsidian(3, 20));
     }
 
     @Test
     public void aCappedFarmKeepsEverythingButTheRunsChests() {
-        assertEquals(63, HighwayContext.farmKeepForRun(8, 64, 1));
-        assertEquals(56, HighwayContext.farmKeepForRun(8, 64, 8));
+        assertEquals(63, EnderChestFarm.farmKeepForRun(8, 64, 1));
+        assertEquals(56, EnderChestFarm.farmKeepForRun(8, 64, 8));
     }
 
     @Test
     public void theCapNeverLowersTheKeep() {
-        assertEquals(8, HighwayContext.farmKeepForRun(8, 64, -1));
-        assertEquals(8, HighwayContext.farmKeepForRun(8, 10, 5));
-        assertEquals(40, HighwayContext.farmKeepForRun(40, 64, 30));
+        assertEquals(8, EnderChestFarm.farmKeepForRun(8, 64, -1));
+        assertEquals(8, EnderChestFarm.farmKeepForRun(8, 10, 5));
+        assertEquals(40, EnderChestFarm.farmKeepForRun(40, 64, 30));
     }
 }

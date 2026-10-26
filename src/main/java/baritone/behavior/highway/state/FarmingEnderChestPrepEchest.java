@@ -50,7 +50,7 @@ public class FarmingEnderChestPrepEchest extends State {
             return;
         }
 
-        int eChestSlot = context.getLargestItemSlot(Item.getId(Blocks.ENDER_CHEST.asItem()));
+        int eChestSlot = context.inventory().getLargestItemSlot(Item.getId(Blocks.ENDER_CHEST.asItem()));
         if (eChestSlot == -1) {
             // Nothing left to load; FarmingEnderChest sees the empty offhand and routes to SwapBack
             context.transitionTo(HighwayState.FarmingEnderChestPrepPick);
@@ -65,10 +65,10 @@ public class FarmingEnderChestPrepEchest extends State {
             return;
         }
 
-        if (!context.containerClickReady()) {
+        if (!context.sync().containerClickReady()) {
             return;
         }
-        context.swapOffhand(eChestSlot);
-        context.noteContainerClick();
+        context.inventory().swapOffhand(eChestSlot);
+        context.sync().noteContainerClick();
     }
 }

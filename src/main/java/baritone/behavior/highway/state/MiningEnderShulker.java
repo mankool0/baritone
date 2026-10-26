@@ -61,8 +61,8 @@ public class MiningEnderShulker extends State {
         context.baritone().getPathingBehavior().cancelEverything();
         if (!(context.playerContext().world().getBlockState(context.placeLoc()).getBlock() instanceof AirBlock)) {
             // Snapshot before the box drops so the collecting state can tell theft from success
-            context.setPreMineShulkerCount(context.getShulkerCountInventory(ShulkerType.Any));
-            if (context.shulkerThiefNear(context.placeLoc(), context.settings().highwayShulkerTheftGuardRadius.value)
+            context.inventory().setPreMineShulkerCount(context.inventory().getShulkerCountInventory(ShulkerType.Any));
+            if (context.threats().shulkerThiefNear(context.placeLoc(), context.settings().highwayShulkerTheftGuardRadius.value)
                     && guardWaitTicks++ < context.settings().highwayShulkerTheftGuardMaxWait.value) {
                 if (guardWaitTicks == 1) {
                     Helper.HELPER.logDirect("Holding off mining the shulker until nearby piglins that could steal it wander off.");

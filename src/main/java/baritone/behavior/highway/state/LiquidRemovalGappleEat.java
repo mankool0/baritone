@@ -36,8 +36,8 @@ public class LiquidRemovalGappleEat extends State {
     public void handle(HighwayContext context) {
         MobEffectInstance fireRest = context.playerContext().player().getEffect(MobEffects.FIRE_RESISTANCE);
         // Hunger is left to the golden carrots while we have any, so fire resistance is all this eat is for
-        boolean fed = context.playerContext().player().getFoodData().getFoodLevel() > 16 || context.canEatGoldenCarrots();
-        if (fireRest != null && fireRest.getDuration() >= context.fireRestMinDuration() && fed /*&& ctx.playerFeet().getY() == placeLoc.getY()*/) {
+        boolean fed = context.playerContext().player().getFoodData().getFoodLevel() > 16 || context.eating().canEatGoldenCarrots();
+        if (fireRest != null && fireRest.getDuration() >= context.eating().fireRestMinDuration() && fed /*&& ctx.playerFeet().getY() == placeLoc.getY()*/) {
             NetherHighwayBuilderBehavior.suppressHitResult = false;
             context.transitionTo(HighwayState.LiquidRemovalPathing);
             context.playerContext().minecraft().options.keyUse.setDown(false);
@@ -62,7 +62,7 @@ public class LiquidRemovalGappleEat extends State {
             if (containerOpen) {
                 context.playerContext().player().closeContainer();
             } else {
-                context.holdUseToEat();
+                context.eating().holdUseToEat();
             }
         } else {
             Helper.HELPER.logDirect("Gapple eat isn't starting, re-selecting the gapple slot.");

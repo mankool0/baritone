@@ -190,9 +190,9 @@ public class CrystalRemoval extends State {
             replan(context, "couldn't put cover down at " + next.toShortString());
             return;
         }
-        int slot = context.putAcceptableThrowawayHotbar();
+        int slot = context.inventory().putAcceptableThrowawayHotbar();
         if (slot == -1) {
-            slot = context.putItemHotbar(Item.getId(Items.OBSIDIAN));
+            slot = context.inventory().putItemHotbar(Item.getId(Items.OBSIDIAN));
         }
         if (slot == -1) {
             giveUp(context, "nothing to put down as cover");
@@ -203,7 +203,7 @@ public class CrystalRemoval extends State {
         }
         ctx.player().getInventory().setSelectedSlot(slot);
         context.baritone().getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
-        context.place(next, (float) ctx.playerController().getBlockReachDistance(), true, false, InteractionHand.MAIN_HAND);
+        context.placer().place(next, (float) ctx.playerController().getBlockReachDistance(), true, false, InteractionHand.MAIN_HAND);
     }
 
     private void attacking(HighwayContext context) {
@@ -223,11 +223,11 @@ public class CrystalRemoval extends State {
             replan(context, "something's in the way of the hit");
             return;
         }
-        context.attackEntity(crystal, plan.aim());
+        context.threats().attackEntity(crystal, plan.aim());
     }
 
     private EndCrystal findCrystal(HighwayContext context) {
-        BlockPos cell = context.crystalLocation();
+        BlockPos cell = context.scanner().crystalLocation();
         if (cell == null) {
             return null;
         }
@@ -377,14 +377,14 @@ public class CrystalRemoval extends State {
     private void giveUp(HighwayContext context, String why) {
         Helper.HELPER.logDirect("Can't break the end crystal at " + crystal.blockPosition().toShortString() + ": " + why
                 + ". Leaving it for " + IGNORE_TICKS / 20 + " s.");
-        context.ignoreCrystal(crystal, IGNORE_TICKS);
+        context.threats().ignoreCrystal(crystal, IGNORE_TICKS);
         finish(context);
     }
 
     private void finish(HighwayContext context) {
         releaseKeys(context);
         context.baritone().getPathingBehavior().cancelEverything();
-        context.setCrystalLocation(null);
+        context.scanner().setCrystalLocation(null);
         context.transitionTo(HighwayState.Nothing);
     }
 

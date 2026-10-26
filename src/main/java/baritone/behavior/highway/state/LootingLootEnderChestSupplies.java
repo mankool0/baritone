@@ -45,7 +45,7 @@ public class LootingLootEnderChestSupplies extends State {
             return;
         }
 
-        if (!context.openContainerReady()) {
+        if (!context.sync().openContainerReady()) {
             return;
         }
 
@@ -55,24 +55,24 @@ public class LootingLootEnderChestSupplies extends State {
             }
             // Already at storage and low on it: turn this trip into its refill too (grab a shulker
             // now, top up after the trip, stash it back) instead of taking a second trip
-            if (supply.enabled(context.settings()) && supply.stash(context.settings()) && !context.refilling(supply)
-                    && context.getShulkerCountInventory(supply.shulkerType()) == 0
+            if (supply.enabled(context.settings()) && supply.stash(context.settings()) && !context.resupply().refilling(supply)
+                    && context.inventory().getShulkerCountInventory(supply.shulkerType()) == 0
                     && supply.count(context) <= supply.threshold(context.settings())) {
-                context.setRefilling(supply, true);
+                context.resupply().setRefilling(supply, true);
             }
 
-            if (context.getShulkerCountInventory(supply.shulkerType()) >= supply.shulksWanted(context)) {
+            if (context.inventory().getShulkerCountInventory(supply.shulkerType()) >= supply.shulksWanted(context)) {
                 continue;
             }
 
-            if (!context.containerClickReady()) {
+            if (!context.sync().containerClickReady()) {
                 return;
             }
 
-            int shulksLooted = context.lootShulkerChestSlot(supply.shulkerType());
-            context.noteContainerClick();
+            int shulksLooted = context.looting().lootShulkerChestSlot(supply.shulkerType());
+            context.sync().noteContainerClick();
             if (shulksLooted < 0) {
-                context.pauseNoRoomFor(supply.noun());
+                context.looting().pauseNoRoomFor(supply.noun());
                 return;
             }
             if (shulksLooted > 0) {
@@ -81,7 +81,7 @@ public class LootingLootEnderChestSupplies extends State {
             }
 
             Helper.HELPER.logDirect("No more " + supply.noun() + " shulkers. Rolling with what we have.");
-            context.setEnderChestHasShulks(supply, false);
+            context.resupply().setEnderChestHasShulks(supply, false);
             emptied.add(supply);
             return;
         }

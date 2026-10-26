@@ -37,14 +37,14 @@ public class ShulkerThiefHunt extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        HighwayState returnState = context.thiefHuntReturnState() != null ? context.thiefHuntReturnState() : HighwayState.Nothing;
+        HighwayState returnState = context.threats().thiefHuntReturnState() != null ? context.threats().thiefHuntReturnState() : HighwayState.Nothing;
 
-        int swordSlot = context.putBestSwordHotbar();
+        int swordSlot = context.inventory().putBestSwordHotbar();
         if (swordSlot != -1 && swordSlot < 9) {
             context.playerContext().player().getInventory().setSelectedSlot(swordSlot);
         }
 
-        Entity target = context.thiefTarget();
+        Entity target = context.threats().thiefTarget();
 
         if (target != null && !target.isAlive() && !target.isRemoved()) {
             Helper.HELPER.logDirect("Shulker thief is dead, collecting the drop.");
@@ -55,9 +55,9 @@ public class ShulkerThiefHunt extends State {
         if (target == null || target.isRemoved()) {
             // The entity vanished without an observed death (unloaded); try to reacquire.
             // No cooldown on giving up here, a thief that comes back into view is worth re-engaging.
-            Optional<Entity> thief = context.findShulkerThief();
+            Optional<Entity> thief = context.threats().findShulkerThief();
             if (thief.isPresent()) {
-                context.setThiefTarget(thief.get());
+                context.threats().setThiefTarget(thief.get());
                 return;
             }
             Helper.HELPER.logDirect("Lost track of the shulker thief.");
@@ -67,29 +67,29 @@ public class ShulkerThiefHunt extends State {
 
         // The per-thief cooldown keeps a failed target from chaining fresh hunts (each with a new
         // start pos, so an un-cooldowned range abort would let one thief lure us out indefinitely).
-        boolean chasedTooFar = context.thiefHuntStartPos() != null
-                && target.distanceToSqr(context.thiefHuntStartPos().getX() + 0.5, context.thiefHuntStartPos().getY() + 0.5, context.thiefHuntStartPos().getZ() + 0.5)
+        boolean chasedTooFar = context.threats().thiefHuntStartPos() != null
+                && target.distanceToSqr(context.threats().thiefHuntStartPos().getX() + 0.5, context.threats().thiefHuntStartPos().getY() + 0.5, context.threats().thiefHuntStartPos().getZ() + 0.5)
                 > context.settings().highwayStolenShulkerChaseRange.value * context.settings().highwayStolenShulkerChaseRange.value;
         if (chasedTooFar) {
             Helper.HELPER.logDirect("Shulker thief got beyond the chase range, going back.");
-            context.ignoreThief(target, FAIL_COOLDOWN_TICKS);
+            context.threats().ignoreThief(target, FAIL_COOLDOWN_TICKS);
             finish(context, returnState);
             return;
         }
 
         double dist = Math.sqrt(context.playerContext().player().distanceToSqr(target));
-        if (dist < context.thiefHuntBestDist() - 0.5) {
-            context.setThiefHuntBestDist(dist);
+        if (dist < context.threats().thiefHuntBestDist() - 0.5) {
+            context.threats().setThiefHuntBestDist(dist);
             context.resetTimer();
         }
         if (dist <= 3.0) {
-            context.attackEntity(target);
+            context.threats().attackEntity(target);
             context.resetTimer(); // in melee range, fighting, not stalled
         } else if (context.timer() > STALL_TIMEOUT_TICKS) {
             // A minute without ever closing in: the thief is unreachable or we're stuck. The chase
             // range is the only cap on how long a hunt that IS gaining ground may run.
             Helper.HELPER.logDirect("Can't gain on the shulker thief, giving up on it.");
-            context.ignoreThief(target, FAIL_COOLDOWN_TICKS);
+            context.threats().ignoreThief(target, FAIL_COOLDOWN_TICKS);
             finish(context, returnState);
             return;
         }
@@ -98,7 +98,7 @@ public class ShulkerThiefHunt extends State {
     }
 
     private void finish(HighwayContext context, HighwayState returnState) {
-        context.setThiefTarget(null);
+        context.threats().setThiefTarget(null);
         context.baritone().getPathingBehavior().cancelEverything();
         context.transitionTo(returnState);
         context.resetTimer();

@@ -33,7 +33,7 @@ public class GoingToPlaceLocPickaxeShulker extends State {
             return; // Wait to get there
         }
 
-        if (context.getPickCountInventory() >= context.picksToHave() || context.getShulkerSlot(context.picksToUse()) == -1) {
+        if (context.inventory().getPickCountInventory() >= context.resupply().picksToHave() || context.inventory().getShulkerSlot(context.resupply().picksToUse()) == -1) {
             // We have enough picks, or no more pickaxe shulker
             context.transitionTo(HighwayState.Nothing);
             return;

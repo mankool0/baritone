@@ -43,7 +43,7 @@ public class BoatRemoval extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.boatLocation() == null) {
+        if (context.scanner().boatLocation() == null) {
             Helper.HELPER.logDirect("Boat location is non-existent, restarting builder");
             context.transitionTo(HighwayState.Nothing);
             return;
@@ -51,10 +51,10 @@ public class BoatRemoval extends State {
 
         // Check if boat is still there. The hole is deep enough that whatever was riding it is
         // out of the way once the cell itself is.
-        if (context.baritone().getBuilderProcess().checkNoEntityCollision(new AABB(context.boatLocation()), context.playerContext().player())) {
+        if (context.baritone().getBuilderProcess().checkNoEntityCollision(new AABB(context.scanner().boatLocation()), context.playerContext().player())) {
             Helper.HELPER.logDirect("Boat seems to be gone");
             context.baritone().getPathingBehavior().cancelEverything();
-            context.setBoatLocation(null);
+            context.scanner().setBoatLocation(null);
             context.transitionTo(HighwayState.Nothing);
             return;
         }
@@ -70,11 +70,11 @@ public class BoatRemoval extends State {
             return; // a dispatched clearArea takes a couple of ticks to show up as an active builder
         }
 
-        List<BlockPos> hole = context.entityDropHole(context.boatLocation());
+        List<BlockPos> hole = context.scanner().entityDropHole(context.scanner().boatLocation());
         if (hole == null) {
             Helper.HELPER.logDirect("Can't dig a hole the boat would drop through, restarting builder");
             context.baritone().getPathingBehavior().cancelEverything();
-            context.setBoatLocation(null);
+            context.scanner().setBoatLocation(null);
             context.transitionTo(HighwayState.Nothing);
             return;
         }
@@ -94,7 +94,7 @@ public class BoatRemoval extends State {
             if (++dropWait >= DROP_WAIT_TICKS) {
                 Helper.HELPER.logDirect("Boat isn't dropping through the hole, restarting builder");
                 context.baritone().getPathingBehavior().cancelEverything();
-                context.setBoatLocation(null);
+                context.scanner().setBoatLocation(null);
                 context.transitionTo(HighwayState.Nothing);
             }
             return;

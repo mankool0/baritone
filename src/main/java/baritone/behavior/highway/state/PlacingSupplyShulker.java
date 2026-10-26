@@ -43,6 +43,6 @@ public class PlacingSupplyShulker extends PlacingShulkerBase {
 
     @Override
     public void handle(HighwayContext context) {
-        handleWithShulkerType(context, context.activeSupply().shulkerType());
+        handleWithShulkerType(context, context.resupply().activeSupply().shulkerType());
     }
 }

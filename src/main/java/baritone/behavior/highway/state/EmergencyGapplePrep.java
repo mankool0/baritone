@@ -34,10 +34,10 @@ public class EmergencyGapplePrep extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        int gappleSlot = context.putItemHotbar(Item.getId(Items.ENCHANTED_GOLDEN_APPLE));
+        int gappleSlot = context.inventory().putItemHotbar(Item.getId(Items.ENCHANTED_GOLDEN_APPLE));
         if (gappleSlot == -1) {
             Helper.HELPER.logDirect("Error getting gapple slot for emergency eat");
-            context.transitionTo(context.emergencyEatReturnState());
+            context.transitionTo(context.eating().emergencyEatReturnState());
             return;
         }
 
@@ -46,7 +46,7 @@ public class EmergencyGapplePrep extends State {
                 return;
             }
             Helper.HELPER.logDirect("Couldn't move gapples onto the hotbar for emergency eat (allowInventory off or moves blocked?)");
-            context.transitionTo(context.emergencyEatReturnState());
+            context.transitionTo(context.eating().emergencyEatReturnState());
             return;
         }
 

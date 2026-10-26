@@ -43,6 +43,6 @@ public class PlacingPickaxeShulker extends PlacingShulkerBase {
 
     @Override
     public void handle(HighwayContext context) {
-        handleWithShulkerType(context, context.picksToUse());
+        handleWithShulkerType(context, context.resupply().picksToUse());
     }
 }

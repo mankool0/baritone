@@ -66,7 +66,7 @@ public final class PortalReturn {
     public void tick(ResourceKey<Level> startDimension) {
         switch (phase) {
             case STEP_OUT -> {
-                if (!context.isPlayerInPortal()) {
+                if (!context.walk().isPlayerInPortal()) {
                     baritone.getInputOverrideHandler().clearAllKeys();
                     cancelExitPrep();
                     phase = Phase.WAIT_COOLDOWN;
@@ -76,16 +76,16 @@ public final class PortalReturn {
                 if (returnPortalPos == null) {
                     returnPortalPos = ctx.playerFeet();
                 }
-                BlockPos out = context.findPortalEscapeTarget();
+                BlockPos out = context.walk().findPortalEscapeTarget();
                 if (out != null) {
                     cancelExitPrep();
-                    context.walkTowardBlock(out);
+                    context.walk().walkTowardBlock(out);
                     return;
                 }
                 prepareExit();
             }
             case WAIT_COOLDOWN -> {
-                if (context.isPlayerInPortal()) {
+                if (context.walk().isPlayerInPortal()) {
                     phase = Phase.STEP_OUT;
                     return;
                 }
@@ -111,10 +111,10 @@ public final class PortalReturn {
                     phaseTimer = 0;
                     return;
                 }
-                context.walkTowardBlock(returnPortalPos);
+                context.walk().walkTowardBlock(returnPortalPos);
             }
             case WAIT_TELEPORT -> {
-                if (!context.isPlayerInPortal()) {
+                if (!context.walk().isPlayerInPortal()) {
                     phase = Phase.STEP_IN;
                     return;
                 }
@@ -128,7 +128,7 @@ public final class PortalReturn {
     }
 
     private void prepareExit() {
-        BlockPos target = context.portalExitPrepTarget();
+        BlockPos target = context.walk().portalExitPrepTarget();
         if (target == null) {
             baritone.getInputOverrideHandler().clearAllKeys();
             if (context.timer() % 1200 == 0) {
@@ -137,7 +137,7 @@ public final class PortalReturn {
             return;
         }
 
-        BlockPos open = context.findPortalEscapeTarget(false);
+        BlockPos open = context.walk().findPortalEscapeTarget(false);
         if (open != null) {
             // walkable but no floor (floating portal): fill it directly
             cancelExitPrep();
@@ -194,7 +194,7 @@ public final class PortalReturn {
     }
 
     private void directFillFloor(BlockPos floorPos) {
-        int slot = context.putAcceptableThrowawayHotbar();
+        int slot = context.inventory().putAcceptableThrowawayHotbar();
         if (slot == -1) {
             baritone.getInputOverrideHandler().clearAllKeys();
             if (context.timer() % 1200 == 0) {
@@ -205,9 +205,9 @@ public final class PortalReturn {
         if (slot < 9) {
             ctx.player().getInventory().setSelectedSlot(slot);
             float reach = (float) ctx.playerController().getBlockReachDistance();
-            HighwayContext.PlaceResult result = context.place(floorPos, reach, true, false, InteractionHand.MAIN_HAND);
-            if (result == HighwayContext.PlaceResult.CantPlace) {
-                context.place(floorPos, reach, false, false, InteractionHand.MAIN_HAND);
+            BlockPlacer.PlaceResult result = context.placer().place(floorPos, reach, true, false, InteractionHand.MAIN_HAND);
+            if (result == BlockPlacer.PlaceResult.CantPlace) {
+                context.placer().place(floorPos, reach, false, false, InteractionHand.MAIN_HAND);
             }
         }
         if (context.timer() % 1200 == 0) {

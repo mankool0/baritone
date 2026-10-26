@@ -31,7 +31,7 @@ public class ShulkerSearchPathing extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.getShulkerCountInventory(ShulkerType.Any) >= context.startShulkerCount()) {
+        if (context.inventory().getShulkerCountInventory(ShulkerType.Any) >= context.resupply().startShulkerCount()) {
             // Picked the box back up mid-search (e.g. after a thief hunt), no need to keep walking
             Helper.HELPER.logDirect("Shulker count restored, going back to building.");
             context.baritone().getPathingBehavior().cancelEverything();
@@ -40,7 +40,7 @@ public class ShulkerSearchPathing extends State {
             return;
         }
 
-        if (context.isShulkerOnGround()) {
+        if (context.inventory().isShulkerOnGround()) {
             Helper.HELPER.logDirect("Found a missing shulker, going to collection stage.");
             context.baritone().getPathingBehavior().cancelEverything();
             context.transitionTo(HighwayState.ShulkerCollection);
@@ -48,13 +48,13 @@ public class ShulkerSearchPathing extends State {
         }
 
         // The ground scan walks right past a piglin carrying the box, so also check hands
-        if (context.maybeStartThiefHunt(HighwayState.ShulkerSearchPathing)) {
+        if (context.threats().maybeStartThiefHunt(HighwayState.ShulkerSearchPathing)) {
             return;
         }
 
         // A desync-placed box sits in the highway itself, not on the ground; the walk-back
         // sweeps this window along the whole searched stretch
-        if (context.maybeMineMisplacedShulker(8, 8)) {
+        if (context.containerRecovery().maybeMineMisplacedShulker(8, 8)) {
             return;
         }
 
@@ -65,7 +65,7 @@ public class ShulkerSearchPathing extends State {
         if (context.playerContext().playerFeet().equals(context.placeLoc())) {
             // We have arrived and no shulkers found, reset start count and go back to building
             Helper.HELPER.logDirect("Mission failure. No shulkers found. Going back to building.");
-            context.setStartShulkerCount(context.getShulkerCountInventory(ShulkerType.Any));
+            context.resupply().setStartShulkerCount(context.inventory().getShulkerCountInventory(ShulkerType.Any));
             context.transitionTo(HighwayState.Nothing);
             context.resetTimer();
         } else {

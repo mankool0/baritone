@@ -36,23 +36,23 @@ public class LootingSupplyShulker extends State {
             return;
         }
 
-        if (!context.openContainerReady()) {
+        if (!context.sync().openContainerReady()) {
             return;
         }
 
-        Supply supply = context.activeSupply();
+        Supply supply = context.resupply().activeSupply();
         if (supply.count(context) >= supply.toHave(context)) {
             context.transitionTo(HighwayState.MiningSupplyShulker);
             context.playerContext().player().closeContainer();
             return;
         }
 
-        if (!context.containerClickReady()) {
+        if (!context.sync().containerClickReady()) {
             return;
         }
 
         int looted = supply.lootSlot(context);
-        context.noteContainerClick();
+        context.sync().noteContainerClick();
         if (looted > 0) {
             Helper.HELPER.logDirect("Looted " + looted + " " + supply.plural());
             return;

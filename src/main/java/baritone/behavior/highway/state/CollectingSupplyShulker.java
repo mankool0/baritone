@@ -47,7 +47,7 @@ public class CollectingSupplyShulker extends State {
         for (Entity entity : context.playerContext().entities()) {
             if (entity instanceof ItemEntity) {
                 if (HighwayContext.shulkerItemList.contains(((ItemEntity) entity).getItem().getItem())) {
-                    if (context.getItemCountInventory(Item.getId(Items.AIR)) == 0) {
+                    if (context.inventory().getItemCountInventory(Item.getId(Items.AIR)) == 0) {
                         // No space for shulker, need to do removal
                         context.transitionTo(HighwayState.InventoryCleaningSupplyShulker);
                         context.resetTimer();
@@ -62,22 +62,22 @@ public class CollectingSupplyShulker extends State {
         // No box on the ground. The count not having risen usually means the pickup packet has
         // removed the item but the slot update is still in flight, so give it a moment before
         // concluding the box is gone (moving on early counts its slot as free).
-        if (!context.minedShulkerLanded() && boxWaitTicks++ < BOX_LANDING_TICKS) {
+        if (!context.inventory().minedShulkerLanded() && boxWaitTicks++ < BOX_LANDING_TICKS) {
             return;
         }
-        if (!context.minedShulkerLanded()
-                && context.maybeStartThiefHunt(HighwayState.CollectingSupplyShulker)) {
+        if (!context.inventory().minedShulkerLanded()
+                && context.threats().maybeStartThiefHunt(HighwayState.CollectingSupplyShulker)) {
             return; // The mined box never reached the inventory and a piglin is carrying one
         }
-        Supply supply = context.activeSupply();
-        if (context.refilling(supply)) {
-            if (supply.stash(context.settings()) && context.getShulkerCountInventory(supply.shulkerType()) > 0) {
+        Supply supply = context.resupply().activeSupply();
+        if (context.resupply().refilling(supply)) {
+            if (supply.stash(context.settings()) && context.inventory().getShulkerCountInventory(supply.shulkerType()) > 0) {
                 context.transitionTo(HighwayState.EnderChestStashPlaceLocPrep); // fetched from storage: put it back
                 return;
             }
             // Carry mode, or the shulker emptied out while topping up: nothing to stash
-            context.setRefilling(supply, false);
-            context.releaseEnderChestAccessLoc();
+            context.resupply().setRefilling(supply, false);
+            context.resupply().releaseEnderChestAccessLoc();
         }
         context.transitionTo(HighwayState.Nothing);
     }

@@ -39,7 +39,7 @@ public class GoingToEmptyShulkerPlaceLoc extends State {
         if (buildingFloor && !context.baritone().getBuilderProcess().isPaused() && context.baritone().getBuilderProcess().isActive()) {
             return; // Wait for the floor we're going to stand on
         }
-        buildingFloor = context.buildSideStorageStandFloor(HighwayState.EmptyShulkerPlaceLocPrep);
+        buildingFloor = context.shulkerPlacement().buildSideStorageStandFloor(HighwayState.EmptyShulkerPlaceLocPrep);
         if (buildingFloor) {
             return;
         }
@@ -48,22 +48,22 @@ public class GoingToEmptyShulkerPlaceLoc extends State {
         BlockPos twoBlocksAway = context.placeLocStand(2);
 
         if (context.playerContext().playerFeet().equals(twoBlocksAway)) {
-            context.reachedSideStorageStand();
+            context.shulkerPlacement().reachedSideStorageStand();
             context.baritone().getPathingBehavior().cancelEverything();
             context.transitionTo(HighwayState.PlacingEmptyShulkerSupport);
         } else if (context.playerContext().playerFeet().equals(oneBlockAway)) {
             if (!context.baritone().getBuilderProcess().checkNoEntityCollision(new AABB(context.placeLoc()), null)) {
                 // We're blocking, move to 2 blocks away
                 Helper.HELPER.logDirect("Player blocking shulker placement, moving to 2 blocks away");
-                context.pathToSideStorageStand(twoBlocksAway, HighwayState.EmptyShulkerPlaceLocPrep);
+                context.shulkerPlacement().pathToSideStorageStand(twoBlocksAway, HighwayState.EmptyShulkerPlaceLocPrep);
             } else {
-                context.reachedSideStorageStand();
+                context.shulkerPlacement().reachedSideStorageStand();
                 context.baritone().getPathingBehavior().cancelEverything();
                 context.transitionTo(HighwayState.PlacingEmptyShulkerSupport);
             }
         } else {
             // Not at either position, path to 1 block away first
-            context.pathToSideStorageStand(oneBlockAway, HighwayState.EmptyShulkerPlaceLocPrep);
+            context.shulkerPlacement().pathToSideStorageStand(oneBlockAway, HighwayState.EmptyShulkerPlaceLocPrep);
         }
     }
 }

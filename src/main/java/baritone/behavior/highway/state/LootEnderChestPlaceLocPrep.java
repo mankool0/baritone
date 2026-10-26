@@ -32,17 +32,17 @@ public class LootEnderChestPlaceLocPrep extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) == 0) {
+        if (context.inventory().getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) == 0) {
             context.baritone().getPathingBehavior().cancelEverything();
             context.pause("No ender chest to place.");
             return;
         }
 
-        context.clearThresholdConfirm();
+        context.sync().clearThresholdConfirm();
         context.resetTimer();
 
         // Start ~7 blocks back and scan further back, then ahead, for a spot we can place into
-        BlockPos safeLoc = context.findSafeSideStorageSpot(7, 25);
+        BlockPos safeLoc = context.shulkerPlacement().findSafeSideStorageSpot(7, 25);
         if (safeLoc == null) {
             context.baritone().getPathingBehavior().cancelEverything();
             context.pause("Couldn't find a usable ender chest spot.");

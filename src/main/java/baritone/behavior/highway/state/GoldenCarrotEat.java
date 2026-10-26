@@ -34,13 +34,13 @@ public class GoldenCarrotEat extends State {
     public void handle(HighwayContext context) {
         int food = context.playerContext().player().getFoodData().getFoodLevel();
         // Out of carrots once the last one is down: whatever hunger is left goes back to the gapples
-        boolean outOfCarrots = context.getGoldenCarrotCountInventory() == 0 && !context.playerContext().player().isUsingItem();
-        if (food > context.goldenCarrotEatTarget() || outOfCarrots) {
+        boolean outOfCarrots = context.inventory().getGoldenCarrotCountInventory() == 0 && !context.playerContext().player().isUsingItem();
+        if (food > context.eating().goldenCarrotEatTarget() || outOfCarrots) {
             NetherHighwayBuilderBehavior.suppressHitResult = false;
             context.playerContext().minecraft().options.keyUse.setDown(false);
             context.baritone().getInputOverrideHandler().clearAllKeys();
             context.baritone().getPathingBehavior().cancelEverything();
-            context.transitionTo(context.goldenCarrotEatReturnState());
+            context.transitionTo(context.eating().goldenCarrotEatReturnState());
             return;
         }
 
@@ -61,7 +61,7 @@ public class GoldenCarrotEat extends State {
             if (containerOpen) {
                 context.playerContext().player().closeContainer();
             } else {
-                context.holdUseToEat();
+                context.eating().holdUseToEat();
             }
         } else {
             Helper.HELPER.logDirect("Golden carrot eat isn't starting, re-selecting the golden carrot slot.");

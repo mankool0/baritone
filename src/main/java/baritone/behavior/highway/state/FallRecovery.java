@@ -43,7 +43,7 @@ public class FallRecovery extends State {
         // suppression that stops ALL block and container interaction while it is set, and
         // allowSwimThroughLava. A build restarted on top of any of those looks alive and can
         // place nothing.
-        context.resetRecovery();
+        context.recovery().resetRecovery();
     }
 
     @Override
@@ -53,16 +53,16 @@ public class FallRecovery extends State {
         boolean onFire = player.isOnFire();
         MobEffectInstance fireRes = player.getEffect(MobEffects.FIRE_RESISTANCE);
         int fireResDur = fireRes == null ? 0 : fireRes.getDuration();
-        boolean needFireRes = (inLava || onFire) && fireResDur < context.fireRestMinDuration();
+        boolean needFireRes = (inLava || onFire) && fireResDur < context.eating().fireRestMinDuration();
 
         boolean pathing = context.baritone().getPathingBehavior().isPathing();
 
         // Float at the lava surface while we eat and while baritone is still planning
-        context.setRecoveryHoldingJump(inLava && !pathing);
+        context.recovery().setRecoveryHoldingJump(inLava && !pathing);
 
         if (inLava) {
             // Treat lava as a swimmable fluid so baritone can swim us up and out of it.
-            context.enableLavaSwimmingForRecovery();
+            context.recovery().enableLavaSwimmingForRecovery();
         }
 
         if (needFireRes && eatGapple(context)) {
@@ -70,25 +70,25 @@ public class FallRecovery extends State {
         }
         // Done eating
         NetherHighwayBuilderBehavior.suppressHitResult = false;
-        context.releaseUseToEat();
+        context.eating().releaseUseToEat();
 
-        if (context.recoveryTarget() == null) {
-            BetterBlockPos target = context.computeRecoveryTarget();
+        if (context.recovery().recoveryTarget() == null) {
+            BetterBlockPos target = context.recovery().computeRecoveryTarget();
             if (target == null) {
                 Helper.HELPER.logDebug("Fall recovery: no built spot to return to yet, retrying.");
                 return;
             }
             Helper.HELPER.logDirect("Fall recovery: returning to " + target);
-            context.setRecoveryTarget(target);
+            context.recovery().setRecoveryTarget(target);
             context.baritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(target));
             return;
         }
 
         //Wait until we're back on the highway.
         BetterBlockPos feet = context.playerContext().playerFeet();
-        if (feet.equals(context.recoveryTarget())) {
+        if (feet.equals(context.recovery().recoveryTarget())) {
             Helper.HELPER.logDirect("Fall recovery complete, resuming build.");
-            context.resetRecovery(); // releases keyJump/keyUse and restores allowSwimThroughLava
+            context.recovery().resetRecovery(); // releases keyJump/keyUse and restores allowSwimThroughLava
             context.baritone().getPathingBehavior().cancelEverything();
             context.transitionTo(HighwayState.Nothing);
             return;
@@ -96,18 +96,18 @@ public class FallRecovery extends State {
 
         if (!context.baritone().getCustomGoalProcess().isActive()) {
             // Path ended/failed without reaching the target, search further back and try again.
-            context.growRecoveryBack();
-            BetterBlockPos target = context.computeRecoveryTarget();
+            context.recovery().growRecoveryBack();
+            BetterBlockPos target = context.recovery().computeRecoveryTarget();
             if (target != null) {
-                context.setRecoveryTarget(target);
+                context.recovery().setRecoveryTarget(target);
             }
-            context.baritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(context.recoveryTarget()));
+            context.baritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(context.recovery().recoveryTarget()));
         }
         // else: still pathing back, wait.
     }
 
     private boolean eatGapple(HighwayContext context) {
-        int gappleSlot = context.putItemHotbar(Item.getId(Items.ENCHANTED_GOLDEN_APPLE));
+        int gappleSlot = context.inventory().putItemHotbar(Item.getId(Items.ENCHANTED_GOLDEN_APPLE));
         if (gappleSlot == -1) {
             Helper.HELPER.logDirect("Fall recovery: no gapple to eat for fire resistance!");
             return false;
@@ -122,7 +122,7 @@ public class FallRecovery extends State {
         if (context.playerContext().player().hasContainerOpen()) {
             context.playerContext().player().closeContainer();
         } else {
-            context.holdUseToEat();
+            context.eating().holdUseToEat();
         }
         return true;
     }

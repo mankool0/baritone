@@ -37,43 +37,43 @@ public class DepositingLootEnderChestDepletedShulkers extends State {
             return;
         }
 
-        if (!context.openContainerReady()) {
+        if (!context.sync().openContainerReady()) {
             return;
         }
 
-        if (!context.containerClickReady()) {
+        if (!context.sync().containerClickReady()) {
             return;
         }
 
-        if (context.depositDepletedShulkerChestSlot() > 0) {
-            context.noteContainerClick();
-            Helper.HELPER.logDirect("Deposited depleted pickaxe shulker, lowering startShulkerCount from " + context.startShulkerCount() + " to " + (context.startShulkerCount() - 1));
-            context.setStartShulkerCount(context.startShulkerCount() - 1);
+        if (context.looting().depositDepletedShulkerChestSlot() > 0) {
+            context.sync().noteContainerClick();
+            Helper.HELPER.logDirect("Deposited depleted pickaxe shulker, lowering startShulkerCount from " + context.resupply().startShulkerCount() + " to " + (context.resupply().startShulkerCount() - 1));
+            context.resupply().setStartShulkerCount(context.resupply().startShulkerCount() - 1);
             return;
         }
 
         // Nothing left to deposit, or the ender chest is full
         if (state == HighwayState.DepositingLootEnderChestDepletedShulkersFinal) {
             context.playerContext().player().closeContainer();
-            if (context.refillingEnderChests()) {
+            if (context.resupply().refillingEnderChests()) {
                 // This storage trip was a digging ender-chest refill: we should now hold a shulker to open.
-                if (context.getShulkerCountInventory(ShulkerType.EnderChest) > 0) {
-                    context.setEnderChestAccessLoc(context.placeLoc()); // reuse this access chest for the stash
+                if (context.inventory().getShulkerCountInventory(ShulkerType.EnderChest) > 0) {
+                    context.resupply().setEnderChestAccessLoc(context.placeLoc()); // reuse this access chest for the stash
                     context.transitionTo(HighwayState.EchestMiningPlaceLocPrep); // -> top up loose ender chests
                 } else {
                     // Storage had no shulker; abort the refill and let BuildingHighway re-evaluate (it will pause).
-                    context.setRefillingEnderChests(false);
+                    context.resupply().setRefillingEnderChests(false);
                     context.transitionTo(HighwayState.Nothing);
                 }
-            } else if (context.firstRefillingSupply() != null) {
+            } else if (context.resupply().firstRefillingSupply() != null) {
                 // This storage trip grabbed a supply's shulker: go place and loot it.
-                Supply supply = context.firstRefillingSupply();
-                if (context.getShulkerCountInventory(supply.shulkerType()) > 0) {
+                Supply supply = context.resupply().firstRefillingSupply();
+                if (context.inventory().getShulkerCountInventory(supply.shulkerType()) > 0) {
                     // Remember the chest unconditionally: carry mode won't stash this box, but a leg
                     // queued behind us still can, and a stale loc is dropped on release anyway.
-                    context.setEnderChestAccessLoc(context.placeLoc());
-                    if (context.getPickCountInventory() >= context.settings().highwayPicksThreshold.value) {
-                        context.setActiveSupply(supply);
+                    context.resupply().setEnderChestAccessLoc(context.placeLoc());
+                    if (context.inventory().getPickCountInventory() >= context.settings().highwayPicksThreshold.value) {
+                        context.resupply().setActiveSupply(supply);
                         context.transitionTo(HighwayState.SupplyShulkerPlaceLocPrep); // -> top it up
                     } else {
                         // A pick-triggered trip piggybacked this grab and we're near out of picks, which
@@ -84,7 +84,7 @@ public class DepositingLootEnderChestDepletedShulkers extends State {
                 } else {
                     // Storage had no shulker of it; abort the refill and let BuildingHighway re-evaluate
                     // (it pauses for gapples, and carries on without the others).
-                    context.setRefilling(supply, false);
+                    context.resupply().setRefilling(supply, false);
                     context.transitionTo(HighwayState.Nothing);
                 }
             } else {

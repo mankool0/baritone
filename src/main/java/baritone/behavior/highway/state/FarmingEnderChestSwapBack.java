@@ -31,29 +31,29 @@ public class FarmingEnderChestSwapBack extends State {
     @Override
     public void handle(HighwayContext context) {
         Item curItem = context.playerContext().player().getOffhandItem().getItem();
-        if (curItem.equals(context.instantMineOriginalOffhandItem())) {
+        if (curItem.equals(context.farm().instantMineOriginalOffhandItem())) {
             context.resetTimer();
             context.transitionTo(HighwayState.FarmingEnderChestClear);
             return;
         }
 
-        if (!context.containerClickReady()) {
+        if (!context.sync().containerClickReady()) {
             return;
         }
 
         // Unload the leftover chests merge-first so the reserve lands on an existing partial loose
         // stack instead of fragmenting into a fresh slot (or the original item's old slot)
-        if (context.stashOffhandEnderChests()) {
-            context.noteContainerClick();
+        if (context.inventory().stashOffhandEnderChests()) {
+            context.sync().noteContainerClick();
             return; // re-check next tick; a merge can leave a remainder in the offhand
         }
 
         // Offhand is drained (or the inventory is packed solid): restore the original item
-        if (!context.instantMineOriginalOffhandItem().equals(Items.AIR)) {
-            int origItemSlot = context.getItemSlot(Item.getId(context.instantMineOriginalOffhandItem()));
+        if (!context.farm().instantMineOriginalOffhandItem().equals(Items.AIR)) {
+            int origItemSlot = context.inventory().getItemSlot(Item.getId(context.farm().instantMineOriginalOffhandItem()));
             if (origItemSlot != -1) {
-                context.swapOffhand(origItemSlot);
-                context.noteContainerClick();
+                context.inventory().swapOffhand(origItemSlot);
+                context.sync().noteContainerClick();
                 return;
             }
             // Original offhand item is gone (e.g. totem popped mid-farm): settle for an empty hand

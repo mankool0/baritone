@@ -42,42 +42,42 @@ public class DepositingStashShulker extends State {
             return;
         }
 
-        if (!context.openContainerReady()) {
+        if (!context.sync().openContainerReady()) {
             return;
         }
 
         // Legs run one at a time (each clears its flag before the next starts), so the still-latched
         // flag in priority order names the shulker this stash is for.
-        Supply supply = context.refillingEnderChests() ? null : context.firstRefillingSupply();
-        ShulkerType stashType = context.refillingEnderChests() ? ShulkerType.EnderChest
+        Supply supply = context.resupply().refillingEnderChests() ? null : context.resupply().firstRefillingSupply();
+        ShulkerType stashType = context.resupply().refillingEnderChests() ? ShulkerType.EnderChest
                 : supply != null ? supply.shulkerType()
                 : null;
-        if (!context.containerClickReady()) {
+        if (!context.sync().containerClickReady()) {
             return;
         }
 
-        if (stashType != null && context.depositShulkerChestSlot(stashType) > 0) {
-            context.noteContainerClick();
+        if (stashType != null && context.looting().depositShulkerChestSlot(stashType) > 0) {
+            context.sync().noteContainerClick();
             Helper.HELPER.logDirect("Stashed " + (supply != null ? supply.noun() : "ender chest") + " shulker back into storage.");
             return;
         }
 
         // Nothing left to deposit (done), or storage was full (keep the shulker and move on)
         context.playerContext().player().closeContainer();
-        int shulkerCount = context.getShulkerCountInventory(ShulkerType.Any);
-        if (shulkerCount < context.startShulkerCount()) {
+        int shulkerCount = context.inventory().getShulkerCountInventory(ShulkerType.Any);
+        if (shulkerCount < context.resupply().startShulkerCount()) {
             // The stashed shulker was counted, either carried at startup or counted when its top-up
             // cycle placed it: lower the expectation so we don't go walking back in search of a "lost" shulker.
-            Helper.HELPER.logDirect("Stashed a counted shulker, lowering startShulkerCount from " + context.startShulkerCount() + " to " + shulkerCount);
-            context.setStartShulkerCount(shulkerCount);
+            Helper.HELPER.logDirect("Stashed a counted shulker, lowering startShulkerCount from " + context.resupply().startShulkerCount() + " to " + shulkerCount);
+            context.resupply().setStartShulkerCount(shulkerCount);
         }
-        context.setStashingShulker(false);
+        context.resupply().setStashingShulker(false);
         if (supply != null) {
-            context.setRefilling(supply, false);
+            context.resupply().setRefilling(supply, false);
         } else {
-            context.setRefillingEnderChests(false);
+            context.resupply().setRefillingEnderChests(false);
         }
-        context.releaseEnderChestAccessLoc(); // kept when another refill is queued behind us
+        context.resupply().releaseEnderChestAccessLoc(); // kept when another refill is queued behind us
         context.transitionTo(HighwayState.Nothing);
     }
 }

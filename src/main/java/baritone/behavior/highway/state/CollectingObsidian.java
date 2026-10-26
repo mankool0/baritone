@@ -76,15 +76,15 @@ public class CollectingObsidian extends State {
         }
 
         if (closestObsidian != null) {
-            if (context.getItemCountInventory(Item.getId(Items.AIR)) == 0) {
-                if (context.getThrowawaySlotToToss() != -1) {
+            if (context.inventory().getItemCountInventory(Item.getId(Items.AIR)) == 0) {
+                if (context.inventory().getThrowawaySlotToToss() != -1) {
                     // No space for obsid, need to do removal
                     context.transitionTo(HighwayState.InventoryCleaningObsidian);
                     context.resetTimer();
                 } else if (closestFitting == null) {
                     // None of it fits and nothing is left to throw out. Waiting here would only end
                     // when the drops despawn, five minutes on.
-                    Helper.HELPER.logDirect("Leaving " + inRange + " obsidian on the ground: no room for it and nothing left to throw out [" + context.obsidianRoomBreakdown() + "]");
+                    Helper.HELPER.logDirect("Leaving " + inRange + " obsidian on the ground: no room for it and nothing left to throw out [" + context.farm().obsidianRoomBreakdown() + "]");
                     context.transitionTo(HighwayState.EmptyShulkerPlaceLocPrep);
                     context.resetTimer();
                     return;

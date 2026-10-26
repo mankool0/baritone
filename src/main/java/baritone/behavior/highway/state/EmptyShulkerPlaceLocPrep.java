@@ -32,13 +32,13 @@ public class EmptyShulkerPlaceLocPrep extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.getShulkerSlot(ShulkerType.Empty) == -1) {
+        if (context.inventory().getShulkerSlot(ShulkerType.Empty) == -1) {
             context.transitionTo(HighwayState.Nothing);
             return;
         }
 
         // Start ~7 blocks back and scan further back, then ahead, for a spot we can place into
-        BlockPos safeLoc = context.findSafeSideStorageSpot(7, 25);
+        BlockPos safeLoc = context.shulkerPlacement().findSafeSideStorageSpot(7, 25);
         if (safeLoc == null) {
             Helper.HELPER.logDirect("Couldn't find a usable empty shulker spot, skipping.");
             context.transitionTo(HighwayState.Nothing);

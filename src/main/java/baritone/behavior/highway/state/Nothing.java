@@ -48,12 +48,12 @@ public class Nothing extends State {
         // Never (re)start the builder while we're underneath the highway (e.g. down the hole dug to
         // drop a boat through): the printer would pave the floor right over our head and seal us
         // underneath. Climb back onto the road first.
-        if (context.settings().highwayFallRecovery.value && context.belowBuiltHighway()) {
-            BetterBlockPos target = context.computeRecoveryTarget();
+        if (context.settings().highwayFallRecovery.value && context.recovery().belowBuiltHighway()) {
+            BetterBlockPos target = context.recovery().computeRecoveryTarget();
             if (target != null) {
                 Helper.HELPER.logDirect("Below the highway level (y=" + context.playerContext().playerFeet().y + "), returning to " + target + " before building.");
-                context.resetRecovery();
-                context.setRecoveryTarget(target);
+                context.recovery().resetRecovery();
+                context.recovery().setRecoveryTarget(target);
                 context.baritone().getInputOverrideHandler().clearAllKeys();
                 context.baritone().getPathingBehavior().cancelEverything();
                 context.baritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(target));
@@ -64,16 +64,16 @@ public class Nothing extends State {
         Vec3 curPos = new Vec3(context.playerContext().playerFeet().getX(), context.playerContext().playerFeet().getY(), context.playerContext().playerFeet().getZ());
         // Start a bit behind us to clear up our own mess, counted in slices so the restart point
         // lands where the correctness scan starts on an angled pattern too
-        BetterBlockPos buildStart = context.sliceAlongLine(context.originVector(), curPos, -context.highwayCheckBackDistance(), LocationType.HighwayBuild);
+        BetterBlockPos buildStart = context.layout().sliceAlongLine(context.layout().originVector(), curPos, -context.layout().highwayCheckBackDistance(), LocationType.HighwayBuild);
         BlockPos fixStart = context.invalidBlockFixScanStart();
-        if (context.invalidBlockFixActive() && fixStart != null && context.stepsAlongHighway(fixStart, buildStart) > 0) {
+        if (context.invalidBlockFixActive() && fixStart != null && context.layout().stepsAlongHighway(fixStart, buildStart) > 0) {
             buildStart = new BetterBlockPos(fixStart);
         }
 
         // A join hands us the inventory well before the chunks around us. Started then, the builder
         // reads the not-yet-received stretch between the restart point and us as unbuilt and walks
         // back to it, only to walk forward again once it sees from up close that it was done.
-        if (!context.isLoadedUpToFeet(buildStart)) {
+        if (!context.scanner().isLoadedUpToFeet(buildStart)) {
             if (loadWaitTicks == 0) {
                 Helper.HELPER.logDirect("Waiting for the highway behind us to load before restarting the builder.");
             }
@@ -87,14 +87,14 @@ public class Nothing extends State {
         context.resetTimer();
         Helper.HELPER.logDirect("Starting highway build");
 
-        context.settings().buildRepeat.value = new Vec3i(context.highwayDirection().getX(), 0, context.highwayDirection().getZ());
+        context.settings().buildRepeat.value = new Vec3i(context.layout().highwayDirection().getX(), 0, context.layout().highwayDirection().getZ());
 
-        context.setOriginBuild(buildStart);
+        context.layout().setOriginBuild(buildStart);
 
-        if (context.endPos() != null) {
+        if (context.layout().endPos() != null) {
             // Bound the repeat so the builder never places past the end slice; originBuild is
             // clamped to the end, so this is always >= 1
-            context.settings().buildRepeatCount.value = context.stepsAlongHighway(context.originBuild(), context.endPos()) + 1;
+            context.settings().buildRepeatCount.value = context.layout().stepsAlongHighway(context.layout().originBuild(), context.layout().endPos()) + 1;
         } else {
             context.settings().buildRepeatCount.value = -1;
         }
@@ -103,27 +103,27 @@ public class Nothing extends State {
 
         // The context keeps the single-slice schematic that the correctness scans size themselves
         // against; the builder gets several slices at once so the printer always has targets.
-        BlockPos buildOrigin = context.originBuild();
-        ISchematic buildSchem = context.schematicForOrigin(buildOrigin);
+        BlockPos buildOrigin = context.layout().originBuild();
+        ISchematic buildSchem = context.layout().schematicForOrigin(buildOrigin);
         int lookahead = context.settings().highwayPrinterLookahead.value;
         int slicesToEnd = context.settings().buildRepeatCount.value;
         // The windows stop short of the end, leaving the last slices to a single-slice restart once
         // we're close. On a stretch that's already built nothing walks us that close: the travel
         // front parks us short of the first unbuilt cell, which can be in those very slices, so a
         // stall short of the end goes over to single slices as well.
-        boolean nearEnd = slicesToEnd != -1 && (slicesToEnd <= context.highwayCheckBackDistance() + 2 * lookahead + 2
-                || context.endStallRestarted());
+        boolean nearEnd = slicesToEnd != -1 && (slicesToEnd <= context.layout().highwayCheckBackDistance() + 2 * lookahead + 2
+                || context.endTracker().endStallRestarted());
         // A custom-pattern build repeats one slice at a time: a straight lookahead window can't
         // follow the jogs, and its internal shape would depend on the pattern phase.
-        if (context.settings().printer.value && lookahead > 1 && !nearEnd && !context.pattern().isCustom()) {
-            int stepX = context.highwayDirection().getX();
-            int stepZ = context.highwayDirection().getZ();
+        if (context.settings().printer.value && lookahead > 1 && !nearEnd && !context.layout().pattern().isCustom()) {
+            int stepX = context.layout().highwayDirection().getX();
+            int stepZ = context.layout().highwayDirection().getZ();
             // digging has no rails to place, and digs don't care which way the face looks
-            int laneLead = context.paving() && NetherHighwayBuilderBehavior.hasRails(context.settings()) ? LookaheadWindow.PAVING_LANE_LEAD : 0;
-            LookaheadWindow window = LookaheadWindow.of(context.schematic(), stepX, stepZ, lookahead,
+            int laneLead = context.layout().paving() && NetherHighwayBuilderBehavior.hasRails(context.settings()) ? LookaheadWindow.PAVING_LANE_LEAD : 0;
+            LookaheadWindow window = LookaheadWindow.of(context.layout().schematic(), stepX, stepZ, lookahead,
                     laneLead, context.settings().highwayWidth.value);
             buildOrigin = buildOrigin.offset(window.originShift());
-            buildSchem = context.bindCellOverrides(window.schematic(), buildOrigin);
+            buildSchem = context.layout().bindCellOverrides(window.schematic(), buildOrigin);
             // the builder only repeats once the whole region is correct, so advance by the full
             // window width or each repeat would just re-expose slices it already built
             context.settings().buildRepeat.value = new Vec3i(stepX * lookahead, 0, stepZ * lookahead);

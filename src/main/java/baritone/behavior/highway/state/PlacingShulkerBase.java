@@ -67,7 +67,7 @@ public abstract class PlacingShulkerBase extends State {
         if (placed) {
             if (testState.getBlock() instanceof ShulkerBoxBlock) {
                 Helper.HELPER.logDirect("Shulker has been placed successfully");
-                context.noteShulkerPlaced();
+                context.containerRecovery().noteShulkerPlaced();
                 context.baritone().getInputOverrideHandler().clearAllKeys();
                 context.transitionTo(getNextState());
                 placed = false;
@@ -89,9 +89,9 @@ public abstract class PlacingShulkerBase extends State {
         // below is about getting a box down, and the sight check even takes this box for the wall
         // in its own way and digs it out, with nothing set up to collect the drop.
         if (testState.getBlock() instanceof ShulkerBoxBlock) {
-            if (context.outOfReachWalkRunning()) {
+            if (context.containerRecovery().outOfReachWalkRunning()) {
                 context.resetTimer();
-                return; // back onto the standing spot first, see HighwayContext.handleContainerOutOfReach
+                return; // back onto the standing spot first, see ContainerRecovery.handleContainerOutOfReach
             }
             placed = true;
             context.resetTimer();
@@ -100,7 +100,7 @@ public abstract class PlacingShulkerBase extends State {
 
         // Lava has crept into the spot (or was never safe) - don't break netherrack into it, pick a new spot
         HighwayState relocateState = getRelocateState();
-        if (relocateState != null && !context.isSideStorageSpotSafe(context.placeLoc())) {
+        if (relocateState != null && !context.shulkerPlacement().isSideStorageSpotSafe(context.placeLoc())) {
             Helper.HELPER.logDirect("Lava near shulker spot, relocating.");
             context.baritone().getPathingBehavior().cancelEverything();
             context.transitionTo(relocateState);
@@ -116,7 +116,7 @@ public abstract class PlacingShulkerBase extends State {
         // The cell above counts on its own too: that is where the lid of a box set on the floor
         // swings, so leaving a ceiling over the spot puts down a box nobody can ever open.
         boolean spotBlocked = !testState.canBeReplaced();
-        boolean lidBlocked = !context.canShulkerOpenToward(context.placeLoc(), Direction.UP);
+        boolean lidBlocked = !context.shulkerPlacement().canShulkerOpenToward(context.placeLoc(), Direction.UP);
         if ((spotBlocked || lidBlocked) && !(testState.getBlock() instanceof ShulkerBoxBlock)) {
             context.baritone().getPathingBehavior().cancelEverything();
             context.baritone().getBuilderProcess().clearArea(context.placeLoc(), context.placeLoc().above());
@@ -125,12 +125,12 @@ public abstract class PlacingShulkerBase extends State {
             return;
         }
 
-        if (context.handleStandingInPlaceSpot(context.placeLoc(), relocateState)) {
+        if (context.containerRecovery().handleStandingInPlaceSpot(context.placeLoc(), relocateState)) {
             placed = false;
             return;
         }
 
-        if (context.handleShulkerPlaceOutOfSight(context.placeLoc(), getPreviousState(), relocateState)) {
+        if (context.containerRecovery().handleShulkerPlaceOutOfSight(context.placeLoc(), getPreviousState(), relocateState)) {
             placed = false;
             return;
         }
@@ -138,16 +138,16 @@ public abstract class PlacingShulkerBase extends State {
         // Count the box before it goes down. One fetched from storage on this trip comes straight
         // here without BuildingHighway ever counting it, so if the cycle then lost it, the inventory
         // still matched startShulkerCount and nothing went looking for it.
-        int shulkerCount = context.getShulkerCountInventory(ShulkerType.Any);
-        if (shulkerCount > context.startShulkerCount()) {
-            Helper.HELPER.logDirect("Counting the shulker we're placing, raising startShulkerCount from " + context.startShulkerCount() + " to " + shulkerCount);
-            context.setStartShulkerCount(shulkerCount);
+        int shulkerCount = context.inventory().getShulkerCountInventory(ShulkerType.Any);
+        if (shulkerCount > context.resupply().startShulkerCount()) {
+            Helper.HELPER.logDirect("Counting the shulker we're placing, raising startShulkerCount from " + context.resupply().startShulkerCount() + " to " + shulkerCount);
+            context.resupply().setStartShulkerCount(shulkerCount);
         }
 
         // Convert to regular BlockPos to avoid BetterBlockPos/BlockPos collision in block entity maps
         BlockPos placeLoc = new BlockPos(context.placeLoc().getX(), context.placeLoc().getY(), context.placeLoc().getZ());
 
-        HighwayState result = context.placeShulkerBox(placeLoc, getPreviousState(), this.getState(), getNextState(), shulkerType);
+        HighwayState result = context.shulkerPlacement().placeShulkerBox(placeLoc, getPreviousState(), this.getState(), getNextState(), shulkerType);
         
         if (result == this.getState()) {
             placed = true;

@@ -34,10 +34,10 @@ public class GoldenCarrotEatPrep extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        int carrotSlot = context.putItemHotbar(Item.getId(Items.GOLDEN_CARROT));
+        int carrotSlot = context.inventory().putItemHotbar(Item.getId(Items.GOLDEN_CARROT));
         if (carrotSlot == -1) {
             Helper.HELPER.logDirect("Error getting golden carrot slot");
-            context.transitionTo(context.goldenCarrotEatReturnState());
+            context.transitionTo(context.eating().goldenCarrotEatReturnState());
             return;
         }
 
@@ -46,7 +46,7 @@ public class GoldenCarrotEatPrep extends State {
                 return;
             }
             Helper.HELPER.logDirect("Couldn't move golden carrots onto the hotbar (allowInventory off or moves blocked?)");
-            context.transitionTo(context.goldenCarrotEatReturnState());
+            context.transitionTo(context.eating().goldenCarrotEatReturnState());
             return;
         }
 

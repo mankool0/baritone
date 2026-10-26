@@ -56,8 +56,8 @@ public class PlacingEmptyShulker extends PlacingShulkerBase {
         // there counts: the timeout, refusal and nothing-to-place exits go to Nothing too.
         if (context.currentState().getState() == HighwayState.Nothing
                 && context.playerContext().world().getBlockState(context.placeLoc()).getBlock() instanceof ShulkerBoxBlock) {
-            Helper.HELPER.logDirect("Lowering startShulkerCount from " + context.startShulkerCount() + " to " + (context.startShulkerCount() - 1));
-            context.setStartShulkerCount(context.startShulkerCount() - 1);
+            Helper.HELPER.logDirect("Lowering startShulkerCount from " + context.resupply().startShulkerCount() + " to " + (context.resupply().startShulkerCount() - 1));
+            context.resupply().setStartShulkerCount(context.resupply().startShulkerCount() - 1);
         }
     }
 }

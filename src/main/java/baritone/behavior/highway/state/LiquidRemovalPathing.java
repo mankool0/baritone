@@ -19,7 +19,9 @@ package baritone.behavior.highway.state;
 
 import baritone.api.utils.*;
 import baritone.api.utils.input.Input;
+import baritone.behavior.highway.BlockPlacer;
 import baritone.behavior.highway.HighwayContext;
+import baritone.behavior.highway.LiquidRemoval;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayBlockState;
 import baritone.behavior.highway.enums.HighwayState;
@@ -66,22 +68,22 @@ public class LiquidRemovalPathing extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        boolean throughWalls = context.liquidThroughWalls();
+        boolean throughWalls = context.liquidRemoval().liquidThroughWalls();
         if (context.timer() < (throughWalls ? 1 : 10)) {
             return;
         }
 
-        context.tickThroughWallVerify();
-        if (throughWalls && context.throughWallPlaceStreak() >= 60) {
+        context.liquidRemoval().tickThroughWallVerify();
+        if (throughWalls && context.liquidRemoval().throughWallPlaceStreak() >= 60) {
             Helper.HELPER.logDirect("Server keeps reverting through-wall placements. Finishing this removal with line-of-sight placing.");
-            context.suppressThroughWalls();
+            context.liquidRemoval().suppressThroughWalls();
             context.baritone().getInputOverrideHandler().clearAllKeys();
             context.transitionTo(HighwayState.LiquidRemovalPrep);
             context.resetTimer();
             return;
         }
 
-        if (!context.sourceBlocks().isEmpty() && context.getIssueType(context.sourceBlocks().getFirst()) == HighwayBlockState.Blocks) {
+        if (!context.liquidRemoval().sourceBlocks().isEmpty() && context.liquidRemoval().getIssueType(context.liquidRemoval().sourceBlocks().getFirst()) == HighwayBlockState.Blocks) {
             context.baritone().getInputOverrideHandler().clearAllKeys();
             context.transitionTo(HighwayState.LiquidRemovalPrep);
             context.resetTimer();
@@ -93,7 +95,7 @@ public class LiquidRemovalPathing extends State {
         // gapple is no worse than none. Bailing on it bounced Prep -> here -> Nothing ->
         // BuildingHighway -> Prep twice a second until the effect ran out completely.
         MobEffectInstance fireRest = context.playerContext().player().getEffect(MobEffects.FIRE_RESISTANCE);
-        if (!throughWalls && fireRest != null && fireRest.getDuration() < context.fireRestMinDuration()) {
+        if (!throughWalls && fireRest != null && fireRest.getDuration() < context.eating().fireRestMinDuration()) {
             Helper.HELPER.logDirect("Running out of fire resistance. Restarting liquid clearing.");
             context.baritone().getInputOverrideHandler().clearAllKeys();
             context.baritone().getPathingBehavior().cancelEverything();
@@ -115,14 +117,14 @@ public class LiquidRemovalPathing extends State {
             return;
         }
 
-        if (context.sourceBlocks().isEmpty()) {
+        if (context.liquidRemoval().sourceBlocks().isEmpty()) {
             context.transitionTo(HighwayState.Nothing);
             return;
         }
 
         if (context.placeLoc() != null && context.playerContext().player().onGround()
                 && context.playerContext().playerFeet().getY() < context.placeLoc().getY()
-                && context.getIssueType(context.playerContext().playerFeet()) != HighwayBlockState.Liquids) {
+                && context.liquidRemoval().getIssueType(context.playerContext().playerFeet()) != HighwayBlockState.Liquids) {
             Helper.HELPER.logDirect("Fell below the liquid clearing level, pathing back");
             context.baritone().getInputOverrideHandler().clearAllKeys();
             context.transitionTo(HighwayState.LiquidRemovalPathingBack);
@@ -167,7 +169,7 @@ public class LiquidRemovalPathing extends State {
                     // Through-wall filling is what forbids mining the cover in front of us, so drop it
                     // for the rest of this removal and dig in with line of sight like the classic flow
                     Helper.HELPER.logDirect("Stuck approaching the liquid. Finishing this removal with line-of-sight placing.");
-                    context.suppressThroughWalls();
+                    context.liquidRemoval().suppressThroughWalls();
                     context.transitionTo(HighwayState.LiquidRemovalPrep);
                     context.resetTimer();
                 } else {
@@ -180,12 +182,12 @@ public class LiquidRemovalPathing extends State {
         }
 
         boolean supportNeeded = false;
-        if (context.getIssueType(approachTarget.north()) != HighwayBlockState.Blocks &&
-                context.getIssueType(approachTarget.east()) != HighwayBlockState.Blocks &&
-                context.getIssueType(approachTarget.south()) != HighwayBlockState.Blocks &&
-                context.getIssueType(approachTarget.west()) != HighwayBlockState.Blocks &&
-                context.getIssueType(approachTarget.below()) != HighwayBlockState.Blocks &&
-                context.getIssueType(approachTarget.above()) != HighwayBlockState.Blocks) {
+        if (context.liquidRemoval().getIssueType(approachTarget.north()) != HighwayBlockState.Blocks &&
+                context.liquidRemoval().getIssueType(approachTarget.east()) != HighwayBlockState.Blocks &&
+                context.liquidRemoval().getIssueType(approachTarget.south()) != HighwayBlockState.Blocks &&
+                context.liquidRemoval().getIssueType(approachTarget.west()) != HighwayBlockState.Blocks &&
+                context.liquidRemoval().getIssueType(approachTarget.below()) != HighwayBlockState.Blocks &&
+                context.liquidRemoval().getIssueType(approachTarget.above()) != HighwayBlockState.Blocks) {
             BlockPos playerPos = context.playerContext().playerFeet();
 
             // Calculate direction from player to lava for non-blocking checks
@@ -195,8 +197,8 @@ public class LiquidRemovalPathing extends State {
             
             if (supportPos != null) {
                 // Clear source blocks and add the support position to place
-                context.clearSourceBlocks();
-                context.sourceBlocks().add(supportPos);
+                context.liquidRemoval().clearSourceBlocks();
+                context.liquidRemoval().sourceBlocks().add(supportPos);
                 supportNeeded = true;
                 Helper.HELPER.logDirect("Can't place around lava, placing support block at " + supportPos);
             } else {
@@ -222,19 +224,19 @@ public class LiquidRemovalPathing extends State {
             // movement below keeps closing in on the rest. Sources first - filling one removes lava
             // for good - then the liquid that is in the way of the approach itself, which is how a
             // dig toward the lava gets to happen without ever opening a lava block.
-            fillTarget = nearestReachableFill(context, context.sourceBlocks());
+            fillTarget = nearestReachableFill(context, context.liquidRemoval().sourceBlocks());
             if (fillTarget == null) {
                 fillTarget = nearestReachableFill(context, sealTargets(context));
             }
         } else {
-            fillTarget = context.sourceBlocks().getFirst();
-            if (!context.placeAimable(fillTarget, (float) context.playerContext().playerController().getBlockReachDistance())) {
+            fillTarget = context.liquidRemoval().sourceBlocks().getFirst();
+            if (!context.placer().placeAimable(fillTarget, (float) context.playerContext().playerController().getBlockReachDistance())) {
                 fillTarget = null;
             }
         }
         boolean fillReachable = fillTarget != null;
         if (fillReachable && supportNeeded) {
-            context.setLiquidPathingCanMine(false);
+            context.liquidRemoval().setLiquidPathingCanMine(false);
         }
 
         if (fillReachable && !aimPaused) {
@@ -252,9 +254,9 @@ public class LiquidRemovalPathing extends State {
                 return; // hotbar swap hasn't landed yet, place on a later tick
             }
 
-            if (context.place(fillTarget, (float) context.playerContext().playerController().getBlockReachDistance(), !throughWalls, false, InteractionHand.MAIN_HAND) == HighwayContext.PlaceResult.Placed) {
+            if (context.placer().place(fillTarget, (float) context.playerContext().playerController().getBlockReachDistance(), !throughWalls, false, InteractionHand.MAIN_HAND) == BlockPlacer.PlaceResult.Placed) {
                 if (throughWalls) {
-                    context.noteThroughWallPlace(fillTarget);
+                    context.liquidRemoval().noteThroughWallPlace(fillTarget);
                 }
                 aimWaitTicks = 0;
                 stallTicks = 0;
@@ -263,7 +265,7 @@ public class LiquidRemovalPathing extends State {
                 aimWaitTicks++;
             }
         } else {
-            int pickSlot = context.putPickaxeHotbar();
+            int pickSlot = context.inventory().putPickaxeHotbar();
             if (pickSlot == -1) {
                 Helper.HELPER.logDirect("Error getting pick slot");
                 context.transitionTo(HighwayState.Nothing);
@@ -292,7 +294,7 @@ public class LiquidRemovalPathing extends State {
                     }
                 }
             }
-            if (!context.liquidPathingCanMine()) {
+            if (!context.liquidRemoval().liquidPathingCanMine()) {
                 possibleIssuePosList.clear();
             }
 
@@ -301,7 +303,7 @@ public class LiquidRemovalPathing extends State {
             for (int x = -2; x <= 2; x++) {
                 for (int z = -2; z <= 2; z++) {
                     BlockPos tempLoc = new BlockPos(context.playerContext().playerFeet().x + x, context.playerContext().playerFeet().y - 1, context.playerContext().playerFeet().z + z);
-                    if (context.getIssueType(tempLoc) != HighwayBlockState.Blocks) {
+                    if (context.liquidRemoval().getIssueType(tempLoc) != HighwayBlockState.Blocks) {
                         //placeAt = tempLoc;
                         placeAtList.add(tempLoc);
                     }
@@ -312,8 +314,8 @@ public class LiquidRemovalPathing extends State {
             if (!aimPaused) {
                 for (BlockPos placeAt : placeAtList) {
                     boolean floorReachable = throughWalls
-                            ? context.placeThroughWallsAimable(placeAt, (float) context.playerContext().playerController().getBlockReachDistance())
-                            : context.placeAimable(placeAt, (float) context.playerContext().playerController().getBlockReachDistance());
+                            ? context.placer().placeThroughWallsAimable(placeAt, (float) context.playerContext().playerController().getBlockReachDistance())
+                            : context.placer().placeAimable(placeAt, (float) context.playerContext().playerController().getBlockReachDistance());
                     if (!floorReachable) {
                         continue;
                     }
@@ -340,17 +342,17 @@ public class LiquidRemovalPathing extends State {
                             lastZ + (context.playerContext().player().getZ() - lastZ) * context.playerContext().minecraft().getDeltaTracker().getGameTimeDeltaPartialTick(true));
                     BetterBlockPos originPos = new BetterBlockPos(pos.x, pos.y+0.5f, pos.z);
                     double l_Offset = pos.y - originPos.getY();
-                    HighwayContext.PlaceResult placeResult = context.place(placeAt, (float) context.playerContext().playerController().getBlockReachDistance(), !throughWalls, l_Offset == -0.5f, InteractionHand.MAIN_HAND);
-                    if (placeResult == HighwayContext.PlaceResult.Placed) {
+                    BlockPlacer.PlaceResult placeResult = context.placer().place(placeAt, (float) context.playerContext().playerController().getBlockReachDistance(), !throughWalls, l_Offset == -0.5f, InteractionHand.MAIN_HAND);
+                    if (placeResult == BlockPlacer.PlaceResult.Placed) {
                         if (throughWalls) {
-                            context.noteThroughWallPlace(placeAt);
+                            context.liquidRemoval().noteThroughWallPlace(placeAt);
                         }
                         aimWaitTicks = 0;
                         stallTicks = 0;
                         context.resetTimer();
                         return;
                     }
-                    if (placeResult == HighwayContext.PlaceResult.Aiming) {
+                    if (placeResult == BlockPlacer.PlaceResult.Aiming) {
                         aimWaitTicks++;
                         // rotation was sent this tick, click on a following tick
                         return;
@@ -366,7 +368,7 @@ public class LiquidRemovalPathing extends State {
             // carries us back while we stand still to dig - hands it a different first block, and
             // switching throws the break progress away. Obsidian takes 40+ ticks, and the bot traded
             // it for a neighbor and back every couple of seconds without finishing either.
-            if (breakTarget != null && context.liquidPathingCanMine() && isDiggable(context, breakTarget)
+            if (breakTarget != null && context.liquidRemoval().liquidPathingCanMine() && isDiggable(context, breakTarget)
                     && !(throughWalls && mustStayAsCover(context, breakTarget))) {
                 digRotation = RotationUtils.reachable(context.playerContext(), breakTarget, reach);
                 if (digRotation.isPresent()) {
@@ -393,7 +395,7 @@ public class LiquidRemovalPathing extends State {
             // Check if player is under any lava source block and can't reach
             BlockPos playerPos = context.playerContext().playerFeet();
             double reachDistance = context.playerContext().playerController().getBlockReachDistance();
-            for (BlockPos lavaPos : context.sourceBlocks()) {
+            for (BlockPos lavaPos : context.liquidRemoval().sourceBlocks()) {
                 int xDiff = Math.abs(playerPos.getX() - lavaPos.getX());
                 int zDiff = Math.abs(playerPos.getZ() - lavaPos.getZ());
                 int yDiff = lavaPos.getY() - playerPos.getY();
@@ -430,7 +432,7 @@ public class LiquidRemovalPathing extends State {
             
             // Find the first obstructing block we can break
             for (BlockPos checkPos : checkPositions) {
-                if (context.getIssueType(checkPos) == HighwayBlockState.Blocks) {
+                if (context.liquidRemoval().getIssueType(checkPos) == HighwayBlockState.Blocks) {
                     if (throughWalls && mustStayAsCover(context, checkPos)) {
                         continue; // still cover for unfilled lava, fill through it instead
                     }
@@ -447,7 +449,7 @@ public class LiquidRemovalPathing extends State {
                 Optional<Rotation> breakRotation = RotationUtils.reachable(context.playerContext(), blockToBreak, context.playerContext().playerController().getBlockReachDistance());
                 if (breakRotation.isPresent()) {
                     // Make sure we have a pickaxe selected
-                    int breakPickSlot = context.putPickaxeHotbar();
+                    int breakPickSlot = context.inventory().putPickaxeHotbar();
                     if (breakPickSlot != -1) {
                         ItemStack breakStack = context.playerContext().player().getInventory().getNonEquipmentItems().get(breakPickSlot);
                         if (breakPickSlot < 9 && HighwayContext.validPicksList.contains(breakStack.getItem())) {
@@ -465,7 +467,7 @@ public class LiquidRemovalPathing extends State {
             }
             
             // Check if we need to bridge (no block directly in front below feet)
-            if (context.getIssueType(bridgePos) != HighwayBlockState.Blocks) {
+            if (context.liquidRemoval().getIssueType(bridgePos) != HighwayBlockState.Blocks) {
                 double edgeDistance = Math.max(
                     Math.abs(context.playerContext().player().getX() - (feetPos.getX() + 0.5)),
                     Math.abs(context.playerContext().player().getZ() - (feetPos.getZ() + 0.5))
@@ -498,7 +500,7 @@ public class LiquidRemovalPathing extends State {
     }
 
     private static int selectFillBlock(HighwayContext context) {
-        int slot = context.putAcceptableThrowawayHotbar();
+        int slot = context.inventory().putAcceptableThrowawayHotbar();
         if (slot == -1) {
             return FILL_NONE;
         }
@@ -516,7 +518,7 @@ public class LiquidRemovalPathing extends State {
      */
     private static boolean mustStayAsCover(HighwayContext context, BlockPos pos) {
         for (Direction dir : Direction.values()) {
-            if (context.getIssueType(pos.relative(dir)) == HighwayBlockState.Liquids) {
+            if (context.liquidRemoval().getIssueType(pos.relative(dir)) == HighwayBlockState.Liquids) {
                 return true;
             }
         }
@@ -548,7 +550,7 @@ public class LiquidRemovalPathing extends State {
                     if (pos.getY() < mainY) {
                         continue;
                     }
-                    HighwayBlockState issue = context.getIssueType(pos);
+                    HighwayBlockState issue = context.liquidRemoval().getIssueType(pos);
                     if (issue == HighwayBlockState.Liquids) {
                         // Lava our body could walk into. The pocket we stand and move in has to be
                         // solid or air, never lava - that is the other half of not needing a gapple.
@@ -558,7 +560,7 @@ public class LiquidRemovalPathing extends State {
                         continue;
                     }
                     // Cover only holds us back if we were going to dig at all
-                    if (!context.liquidPathingCanMine()
+                    if (!context.liquidRemoval().liquidPathingCanMine()
                             || issue != HighwayBlockState.Blocks
                             || context.playerContext().world().getBlockState(pos).getBlock() == Blocks.BEDROCK
                             || !mustStayAsCover(context, pos)) {
@@ -566,7 +568,7 @@ public class LiquidRemovalPathing extends State {
                     }
                     for (Direction dir : Direction.values()) {
                         BlockPos neighbor = pos.relative(dir);
-                        if (context.getIssueType(neighbor) == HighwayBlockState.Liquids && !targets.contains(neighbor)) {
+                        if (context.liquidRemoval().getIssueType(neighbor) == HighwayBlockState.Liquids && !targets.contains(neighbor)) {
                             targets.add(neighbor);
                         }
                     }
@@ -583,7 +585,7 @@ public class LiquidRemovalPathing extends State {
         BlockPos best = null;
         double bestDist = Double.MAX_VALUE;
         for (BlockPos candidate : candidates) {
-            if (context.getIssueType(candidate) == HighwayBlockState.Blocks) {
+            if (context.liquidRemoval().getIssueType(candidate) == HighwayBlockState.Blocks) {
                 continue; // already filled
             }
             double dist = head.distanceToSqr(Vec3.atCenterOf(candidate));
@@ -592,7 +594,7 @@ public class LiquidRemovalPathing extends State {
             if (dist >= bestDist || dist > (reach + 1) * (reach + 1)) {
                 continue;
             }
-            if (context.placeThroughWallsAimable(candidate, reach)) {
+            if (context.placer().placeThroughWallsAimable(candidate, reach)) {
                 best = candidate;
                 bestDist = dist;
             }
@@ -600,13 +602,13 @@ public class LiquidRemovalPathing extends State {
         return best;
     }
 
-    /** The closest entry of {@link HighwayContext#sourceBlocks()} that isn't solid yet. */
+    /** The closest entry of {@link LiquidRemoval#sourceBlocks()} that isn't solid yet. */
     private static BlockPos nearestUnfilled(HighwayContext context) {
         Vec3 head = context.playerContext().playerHead();
         BlockPos best = null;
         double bestDist = Double.MAX_VALUE;
-        for (BlockPos source : context.sourceBlocks()) {
-            if (context.getIssueType(source) == HighwayBlockState.Blocks) {
+        for (BlockPos source : context.liquidRemoval().sourceBlocks()) {
+            if (context.liquidRemoval().getIssueType(source) == HighwayBlockState.Blocks) {
                 continue;
             }
             double dist = head.distanceToSqr(Vec3.atCenterOf(source));
@@ -630,8 +632,8 @@ public class LiquidRemovalPathing extends State {
         BlockPos nearest = null;
         double nearestDist = Double.MAX_VALUE;
         int unfilled = 0;
-        for (BlockPos source : context.sourceBlocks()) {
-            if (context.getIssueType(source) == HighwayBlockState.Blocks) {
+        for (BlockPos source : context.liquidRemoval().sourceBlocks()) {
+            if (context.liquidRemoval().getIssueType(source) == HighwayBlockState.Blocks) {
                 continue;
             }
             unfilled++;
@@ -645,8 +647,8 @@ public class LiquidRemovalPathing extends State {
         StringBuilder sides = new StringBuilder();
         for (Direction dir : Direction.Plane.HORIZONTAL) {
             BlockPos side = feet.relative(dir);
-            sides.append(dir.getName()).append('=').append(context.getIssueType(side));
-            if (context.getIssueType(side) == HighwayBlockState.Blocks && mustStayAsCover(context, side)) {
+            sides.append(dir.getName()).append('=').append(context.liquidRemoval().getIssueType(side));
+            if (context.liquidRemoval().getIssueType(side) == HighwayBlockState.Blocks && mustStayAsCover(context, side)) {
                 sides.append("(cover)");
             }
             sides.append(' ');
@@ -654,7 +656,7 @@ public class LiquidRemovalPathing extends State {
 
         Helper.HELPER.logDirect("Liquid approach made no progress at " + feet + ": " + unfilled + " unfilled source(s), nearest "
                 + nearest + " at " + String.format("%.1f", nearestDist) + " blocks, " + sealTargets(context).size()
-                + " seal target(s), throughWalls=" + throughWalls + ", canMine=" + context.liquidPathingCanMine()
+                + " seal target(s), throughWalls=" + throughWalls + ", canMine=" + context.liquidRemoval().liquidPathingCanMine()
                 + ", sides: " + sides.toString().trim());
     }
 
@@ -674,7 +676,7 @@ public class LiquidRemovalPathing extends State {
         for (Direction dir : directions) {
             BlockPos checkPos = targetPos.relative(dir);
             
-            if (context.getIssueType(checkPos) == HighwayBlockState.Blocks) {
+            if (context.liquidRemoval().getIssueType(checkPos) == HighwayBlockState.Blocks) {
                 continue;
             }
             
@@ -736,7 +738,7 @@ public class LiquidRemovalPathing extends State {
         for (Direction dir : directions) {
             BlockPos checkPos = targetPos.relative(dir);
             
-            if (context.getIssueType(checkPos) == HighwayBlockState.Blocks) {
+            if (context.liquidRemoval().getIssueType(checkPos) == HighwayBlockState.Blocks) {
                 continue;
             }
             

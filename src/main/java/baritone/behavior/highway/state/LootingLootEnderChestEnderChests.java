@@ -36,28 +36,28 @@ public class LootingLootEnderChestEnderChests extends State {
             return;
         }
 
-        if (!context.openContainerReady()) {
+        if (!context.sync().openContainerReady()) {
             return;
         }
 
         int wantShulks = context.settings().highwayEnderChestShulksToHave.value;
-        if (!context.paving()) {
-            wantShulks = context.refillingEnderChests() ? 1 : 0;
+        if (!context.layout().paving()) {
+            wantShulks = context.resupply().refillingEnderChests() ? 1 : 0;
         }
 
-        if (context.getShulkerCountInventory(ShulkerType.EnderChest) >= wantShulks) {
+        if (context.inventory().getShulkerCountInventory(ShulkerType.EnderChest) >= wantShulks) {
             context.transitionTo(HighwayState.LootingLootEnderChestSupplies);
             return;
         }
 
-        if (!context.containerClickReady()) {
+        if (!context.sync().containerClickReady()) {
             return;
         }
 
-        int enderShulksLooted = context.lootShulkerChestSlot(ShulkerType.EnderChest);
-        context.noteContainerClick();
+        int enderShulksLooted = context.looting().lootShulkerChestSlot(ShulkerType.EnderChest);
+        context.sync().noteContainerClick();
         if (enderShulksLooted < 0) {
-            context.pauseNoRoomFor("ender chest");
+            context.looting().pauseNoRoomFor("ender chest");
             return;
         }
         if (enderShulksLooted > 0) {
@@ -66,7 +66,7 @@ public class LootingLootEnderChestEnderChests extends State {
         }
 
         Helper.HELPER.logDirect("No more ender chest shulkers. Rolling with what we have.");
-        context.setEnderChestHasEnderShulks(false);
+        context.resupply().setEnderChestHasEnderShulks(false);
         context.transitionTo(HighwayState.LootingLootEnderChestSupplies);
     }
 }

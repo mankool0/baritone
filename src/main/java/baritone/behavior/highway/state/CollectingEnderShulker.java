@@ -47,7 +47,7 @@ public class CollectingEnderShulker extends State {
         for (Entity entity : context.playerContext().entities()) {
             if (entity instanceof ItemEntity) {
                 if (HighwayContext.shulkerItemList.contains(((ItemEntity) entity).getItem().getItem())) {
-                    if (context.getItemCountInventory(Item.getId(Items.AIR)) == 0) {
+                    if (context.inventory().getItemCountInventory(Item.getId(Items.AIR)) == 0) {
                         // No space for shulker, need to do removal
                         context.transitionTo(HighwayState.InventoryCleaningEnderShulker);
                         context.resetTimer();
@@ -62,21 +62,21 @@ public class CollectingEnderShulker extends State {
         // No box on the ground. The count not having risen usually means the pickup packet has
         // removed the item but the slot update is still in flight, so give it a moment before
         // concluding the box is gone (moving on early counts its slot as free).
-        if (!context.minedShulkerLanded() && boxWaitTicks++ < BOX_LANDING_TICKS) {
+        if (!context.inventory().minedShulkerLanded() && boxWaitTicks++ < BOX_LANDING_TICKS) {
             return;
         }
-        if (!context.minedShulkerLanded()
-                && context.maybeStartThiefHunt(HighwayState.CollectingEnderShulker)) {
+        if (!context.inventory().minedShulkerLanded()
+                && context.threats().maybeStartThiefHunt(HighwayState.CollectingEnderShulker)) {
             return; // The mined box never reached the inventory and a piglin is carrying one
         }
-        if (context.paving()) {
+        if (context.layout().paving()) {
             context.transitionTo(HighwayState.GoingToPlaceLocEnderChest); // paving mines the chests into obsidian
-        } else if (context.getShulkerCountInventory(ShulkerType.EnderChest) > 0) {
+        } else if (context.inventory().getShulkerCountInventory(ShulkerType.EnderChest) > 0) {
             context.transitionTo(HighwayState.EnderChestStashPlaceLocPrep); // digging stashes the shulker back into storage
         } else {
             // Shulker emptied out while topping up: nothing to stash, just resume
-            context.setRefillingEnderChests(false);
-            context.releaseEnderChestAccessLoc();
+            context.resupply().setRefillingEnderChests(false);
+            context.resupply().releaseEnderChestAccessLoc();
             context.transitionTo(HighwayState.Nothing);
         }
     }

@@ -36,19 +36,19 @@ public class GoingToLootEnderChestPlaceLoc extends State {
         if (buildingFloor && !context.baritone().getBuilderProcess().isPaused() && context.baritone().getBuilderProcess().isActive()) {
             return; // Wait for the floor we're going to stand on
         }
-        buildingFloor = context.buildSideStorageStandFloor(HighwayState.LootEnderChestPlaceLocPrep);
+        buildingFloor = context.shulkerPlacement().buildSideStorageStandFloor(HighwayState.LootEnderChestPlaceLocPrep);
         if (buildingFloor) {
             return;
         }
 
         if (context.playerContext().playerFeet().equals(context.placeLocStand(1))) {
             // We have arrived
-            context.reachedSideStorageStand();
+            context.shulkerPlacement().reachedSideStorageStand();
             context.baritone().getPathingBehavior().cancelEverything();
             context.transitionTo(HighwayState.PlacingLootEnderChestSupport);
         } else {
             // Keep trying to get there
-            context.pathToSideStorageStand(context.placeLocStand(1), HighwayState.LootEnderChestPlaceLocPrep);
+            context.shulkerPlacement().pathToSideStorageStand(context.placeLocStand(1), HighwayState.LootEnderChestPlaceLocPrep);
         }
     }
 }

@@ -30,21 +30,21 @@ public class MobCombatReturn extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.combatReturnPos() == null) {
+        if (context.threats().combatReturnPos() == null) {
             // No saved position, just resume
             context.transitionTo(context.previousState());
             return;
         }
 
         if (!context.baritone().getCustomGoalProcess().isActive()) {
-            if (context.playerContext().playerFeet().equals(context.combatReturnPos())) {
+            if (context.playerContext().playerFeet().equals(context.threats().combatReturnPos())) {
                 // Back at the original position, go to previous state
-                context.setCombatReturnPos(null);
+                context.threats().setCombatReturnPos(null);
                 context.transitionTo(context.previousState());
             } else {
                 // Path back to saved position
                 context.baritone().getCustomGoalProcess().setGoalAndPath(
-                        new GoalBlock(context.combatReturnPos())
+                        new GoalBlock(context.threats().combatReturnPos())
                 );
             }
         }

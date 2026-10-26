@@ -119,7 +119,7 @@ public class HighwayConformanceDumpTest {
     public void theProfileSweepPassesItsSelfChecks() throws IOException {
         List<Profile> profiles = sweep();
         for (Profile p : profiles) {
-            assertEquals("the builder stands on mainY == lowestY + 1 (HighwayContext.highwayFloorY); " + p.describe(),
+            assertEquals("the builder stands on mainY == lowestY + 1 (HighwayLayout.highwayFloorY); " + p.describe(),
                     p.lowestY() + 1, p.mainY());
         }
         Settings settings = TestSettings.fresh();

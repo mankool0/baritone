@@ -41,11 +41,11 @@ public class EnderChestStashPlaceLocPrep extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        context.setStashingShulker(true);
+        context.resupply().setStashingShulker(true);
         context.settings().buildRepeat.value = new Vec3i(0, 0, 0);
         context.resetTimer();
 
-        BlockPos reuse = context.enderChestAccessLoc();
+        BlockPos reuse = context.resupply().enderChestAccessLoc();
         if (reuse != null) {
             BlockState atLoc = context.playerContext().world().getBlockState(reuse);
             BlockState above = context.playerContext().world().getBlockState(reuse.above());
@@ -57,17 +57,17 @@ public class EnderChestStashPlaceLocPrep extends State {
         }
 
         // No chest to reuse: place a fresh one
-        BlockPos safeLoc = context.findSafeSideStorageSpot(7, 25);
+        BlockPos safeLoc = context.shulkerPlacement().findSafeSideStorageSpot(7, 25);
         if (safeLoc == null) {
             Helper.HELPER.logDirect("Couldn't find a spot to stash the shulker, keeping it for now.");
-            context.setStashingShulker(false);
-            context.setRefillingEnderChests(false);
-            context.stopRefillingSupplies();
+            context.resupply().setStashingShulker(false);
+            context.resupply().setRefillingEnderChests(false);
+            context.resupply().stopRefillingSupplies();
             context.transitionTo(HighwayState.Nothing);
             return;
         }
 
-        context.setEnderChestAccessLoc(null);
+        context.resupply().setEnderChestAccessLoc(null);
         context.setPlaceLoc(safeLoc, LocationType.SideStorage);
         context.transitionTo(HighwayState.GoingToLootEnderChestPlaceLoc);
     }

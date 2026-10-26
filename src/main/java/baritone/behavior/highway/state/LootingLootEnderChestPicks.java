@@ -35,23 +35,23 @@ public class LootingLootEnderChestPicks extends State {
             return;
         }
 
-        if (!context.openContainerReady()) {
+        if (!context.sync().openContainerReady()) {
             return;
         }
 
-        if (context.getShulkerCountInventory(context.picksToUse()) >= context.settings().highwayPickShulksToHave.value) {
+        if (context.inventory().getShulkerCountInventory(context.resupply().picksToUse()) >= context.settings().highwayPickShulksToHave.value) {
             context.transitionTo(HighwayState.LootingLootEnderChestEnderChests);
             return;
         }
 
-        if (!context.containerClickReady()) {
+        if (!context.sync().containerClickReady()) {
             return;
         }
 
-        int picksShulksLooted = context.lootShulkerChestSlot(context.picksToUse());
-        context.noteContainerClick();
+        int picksShulksLooted = context.looting().lootShulkerChestSlot(context.resupply().picksToUse());
+        context.sync().noteContainerClick();
         if (picksShulksLooted < 0) {
-            context.pauseNoRoomFor("pickaxe");
+            context.looting().pauseNoRoomFor("pickaxe");
             return;
         }
         if (picksShulksLooted > 0) {
@@ -60,7 +60,7 @@ public class LootingLootEnderChestPicks extends State {
         }
 
         Helper.HELPER.logDirect("No more pickaxe shulkers. Rolling with what we have.");
-        context.setEnderChestHasPickShulks(false);
+        context.resupply().setEnderChestHasPickShulks(false);
         context.transitionTo(HighwayState.LootingLootEnderChestEnderChests);
     }
 }

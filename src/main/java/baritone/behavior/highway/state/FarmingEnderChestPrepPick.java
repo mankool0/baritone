@@ -34,7 +34,7 @@ public class FarmingEnderChestPrepPick extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        int pickSlot = context.putPickaxeHotbar(true);
+        int pickSlot = context.inventory().putPickaxeHotbar(true);
         if (pickSlot == -1) {
             Helper.HELPER.logDirect("Error getting pick slot");
             context.transitionTo(HighwayState.Nothing);

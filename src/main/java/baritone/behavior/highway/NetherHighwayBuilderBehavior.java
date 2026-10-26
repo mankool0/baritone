@@ -123,22 +123,22 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
     @Override
     public boolean isHighwayActive() {
-        return highwayContext.schematic() != null && !highwayContext.paused();
+        return highwayContext.layout().schematic() != null && !highwayContext.paused();
     }
 
     @Override
     public boolean hasCustomPattern() {
-        return highwayContext.pattern().isCustom();
+        return highwayContext.layout().pattern().isCustom();
     }
 
     @Override
     public Vec3i repeatAdvance(BlockPos currentOrigin) {
-        return highwayContext.repeatAdvance(currentOrigin);
+        return highwayContext.layout().repeatAdvance(currentOrigin);
     }
 
     @Override
     public ISchematic schematicForOrigin(BlockPos origin) {
-        return highwayContext.hasPatternSchematics() ? highwayContext.schematicForOrigin(origin) : null;
+        return highwayContext.layout().hasPatternSchematics() ? highwayContext.layout().schematicForOrigin(origin) : null;
     }
 
     @Override
@@ -158,6 +158,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
     @Override
     public void build(int startX, int startZ, Vec3i direct, boolean selfSolve, boolean pave, Vec3i endCoords, Vec3i startCoords, String pattern) {
+        HighwayLayout layout = highwayContext.layout();
         HighwayPattern parsedPattern;
         try {
             parsedPattern = HighwayPattern.parse(pattern, direct);
@@ -178,15 +179,15 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             cellOverrides = CellOverrides.parse(settings.highwayCellOverrides.value);
         } catch (IllegalArgumentException e) {
             // built without, a lane would dig the rails it was told to keep
-            highwayContext.setCellOverrides(CellOverrides.NONE);
+            layout.setCellOverrides(CellOverrides.NONE);
             highwayContext.pause("highwayCellOverrides rejected, " + e.getMessage());
             return;
         }
-        highwayContext.setCellOverrides(cellOverrides);
-        highwayContext.resetStateDwell(); // per build, so a stop leaves the last run's timings readable
-        highwayContext.setHighwayDirection(direct);
-        highwayContext.setPaving(pave);
-        highwayContext.setPattern(parsedPattern);
+        layout.setCellOverrides(cellOverrides);
+        highwayContext.diagnostics().resetStateDwell(); // per build, so a stop leaves the last run's timings readable
+        layout.setHighwayDirection(direct);
+        layout.setPaving(pave);
+        layout.setPattern(parsedPattern);
         if (parsedPattern.isCustom()) {
             Helper.HELPER.logDirect("Angled highway pattern: " + parsedPattern.describe());
         }
@@ -194,14 +195,14 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         highwayContext.setCachedAbsorption(ctx.player().getAbsorptionAmount());
         startDimension = ctx.world().dimension();
 
-        if (!highwayContext.paving()) {
+        if (!layout.paving()) {
             // Only digging so any pickaxe works
-            highwayContext.setPicksToUse(ShulkerType.AnyPickaxe);
-            highwayContext.setPicksToHave(settings.highwayPicksToHaveDigging.value);
+            highwayContext.resupply().setPicksToUse(ShulkerType.AnyPickaxe);
+            highwayContext.resupply().setPicksToHave(settings.highwayPicksToHaveDigging.value);
         } else {
             // If paving then we mine echests and need non-silk picks
-            highwayContext.setPicksToUse(ShulkerType.NonSilkPickaxe);
-            highwayContext.setPicksToHave(settings.highwayPicksToHavePaving.value);
+            highwayContext.resupply().setPicksToUse(ShulkerType.NonSilkPickaxe);
+            highwayContext.resupply().setPicksToHave(settings.highwayPicksToHavePaving.value);
         }
 
         int highwayWidth = settings.highwayWidth.value;
@@ -216,117 +217,117 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
         // Custom patterns pick the layout by their driving axis: the cross-section must span the
         // jog axis. Classic builds keep the legacy direction table.
-        boolean groupA = parsedPattern.isCustom() ? parsedPattern.majorIsX() : isGroupA(highwayContext.highwayDirection());
-        boolean groupB = !groupA && (parsedPattern.isCustom() || isGroupB(highwayContext.highwayDirection()));
+        boolean groupA = parsedPattern.isCustom() ? parsedPattern.majorIsX() : isGroupA(layout.highwayDirection());
+        boolean groupB = !groupA && (parsedPattern.isCustom() || isGroupB(layout.highwayDirection()));
 
         // +X, -X, +X +Z, -X -Z
         if (groupA) {
             if (selfSolve) {
-                highwayContext.setOriginVector(canonicalOriginVector(groupA, settings));
+                layout.setOriginVector(canonicalOriginVector(groupA, settings));
                 if (highwayRail) {
-                    highwayContext.setLiqOriginVector(new Vec3(0, 0, highwayWidthLiqOffsetRail));
+                    layout.setLiqOriginVector(new Vec3(0, 0, highwayWidthLiqOffsetRail));
                 } else {
-                    highwayContext.setLiqOriginVector(new Vec3(0, 0, highwayWidthLiqOffset));
+                    layout.setLiqOriginVector(new Vec3(0, 0, highwayWidthLiqOffset));
                 }
-                highwayContext.setBackPathOriginVector(new Vec3(0, 0, highwayWidthOffset + highwayWidthCenterOffset));
-                highwayContext.seteChestEmptyShulkOriginVector(new Vec3(0, 0, highwayWidthLiqOffsetRail));
+                layout.setBackPathOriginVector(new Vec3(0, 0, highwayWidthOffset + highwayWidthCenterOffset));
+                layout.seteChestEmptyShulkOriginVector(new Vec3(0, 0, highwayWidthLiqOffsetRail));
             } else {
-                highwayContext.setOriginVector(new Vec3(startX, 0, startZ - highwayWidthOffset));
+                layout.setOriginVector(new Vec3(startX, 0, startZ - highwayWidthOffset));
                 if (highwayRail) {
-                    highwayContext.setLiqOriginVector(new Vec3(startX, 0, startZ - highwayWidthLiqOffsetRail - 2));
+                    layout.setLiqOriginVector(new Vec3(startX, 0, startZ - highwayWidthLiqOffsetRail - 2));
                 } else {
-                    highwayContext.setLiqOriginVector(new Vec3(startX, 0, startZ - highwayWidthLiqOffset));
+                    layout.setLiqOriginVector(new Vec3(startX, 0, startZ - highwayWidthLiqOffset));
                 }
-                highwayContext.setBackPathOriginVector(new Vec3(startX, 0, startZ - highwayWidthOffset + highwayWidthCenterOffset));
-                highwayContext.seteChestEmptyShulkOriginVector(new Vec3(startX, 0, startZ - highwayWidthOffset - 1));
+                layout.setBackPathOriginVector(new Vec3(startX, 0, startZ - highwayWidthOffset + highwayWidthCenterOffset));
+                layout.seteChestEmptyShulkOriginVector(new Vec3(startX, 0, startZ - highwayWidthOffset - 1));
             }
 
             if (pave) {
-                highwayContext.setLiqOriginVector(highwayContext.liqOriginVector().add(0, 0, 1));
+                layout.setLiqOriginVector(layout.liqOriginVector().add(0, 0, 1));
                 if (highwayRail) {
-                    highwayContext.setLiqCheckSchem(new WhiteBlackSchematic(1, highwayHeight - 1, highwayWidth + 2, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false));
+                    layout.setLiqCheckSchem(new WhiteBlackSchematic(1, highwayHeight - 1, highwayWidth + 2, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false));
                 } else {
-                    highwayContext.setLiqCheckSchem(new WhiteBlackSchematic(1, highwayHeight - 1, highwayWidth, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false));
+                    layout.setLiqCheckSchem(new WhiteBlackSchematic(1, highwayHeight - 1, highwayWidth, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false));
                 }
             } else {
                 if (highwayRail) {
-                    highwayContext.setLiqCheckSchem(new WhiteBlackSchematic(1, highwayHeight + 1, highwayWidth + 4, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false));
+                    layout.setLiqCheckSchem(new WhiteBlackSchematic(1, highwayHeight + 1, highwayWidth + 4, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false));
                 } else {
-                    highwayContext.setLiqCheckSchem(new WhiteBlackSchematic(1, highwayHeight + 1, highwayWidth + 2, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false));
+                    layout.setLiqCheckSchem(new WhiteBlackSchematic(1, highwayHeight + 1, highwayWidth + 2, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false));
                 }
             }
         }
         // +Z, -Z, +X -Z, -X +Z
         else if (groupB) {
             if (selfSolve) {
-                highwayContext.setOriginVector(canonicalOriginVector(groupA, settings));
+                layout.setOriginVector(canonicalOriginVector(groupA, settings));
                 if (highwayRail) {
-                    highwayContext.setLiqOriginVector(new Vec3(highwayWidthLiqOffsetRail, 0, 0));
+                    layout.setLiqOriginVector(new Vec3(highwayWidthLiqOffsetRail, 0, 0));
                 } else {
-                    highwayContext.setLiqOriginVector(new Vec3(highwayWidthLiqOffset, 0, 0));
+                    layout.setLiqOriginVector(new Vec3(highwayWidthLiqOffset, 0, 0));
                 }
-                highwayContext.setBackPathOriginVector(new Vec3(highwayWidthOffset + highwayWidthCenterOffset, 0, 0));
-                highwayContext.seteChestEmptyShulkOriginVector(new Vec3(highwayWidthLiqOffsetRail, 0, 0));
+                layout.setBackPathOriginVector(new Vec3(highwayWidthOffset + highwayWidthCenterOffset, 0, 0));
+                layout.seteChestEmptyShulkOriginVector(new Vec3(highwayWidthLiqOffsetRail, 0, 0));
             } else {
-                highwayContext.setOriginVector(new Vec3(startX - highwayWidthOffset, 0, startZ));
+                layout.setOriginVector(new Vec3(startX - highwayWidthOffset, 0, startZ));
                 if (highwayRail) {
-                    highwayContext.setLiqOriginVector(new Vec3(startX - highwayWidthLiqOffsetRail - 2, 0, startZ));
+                    layout.setLiqOriginVector(new Vec3(startX - highwayWidthLiqOffsetRail - 2, 0, startZ));
                 } else {
-                    highwayContext.setLiqOriginVector(new Vec3(startX - highwayWidthLiqOffset, 0, startZ));
+                    layout.setLiqOriginVector(new Vec3(startX - highwayWidthLiqOffset, 0, startZ));
                 }
-                highwayContext.setBackPathOriginVector(new Vec3(startX - highwayWidthOffset + highwayWidthCenterOffset, 0, startZ));
-                highwayContext.seteChestEmptyShulkOriginVector(new Vec3(startX - highwayWidthOffset - 1, 0, startZ));
+                layout.setBackPathOriginVector(new Vec3(startX - highwayWidthOffset + highwayWidthCenterOffset, 0, startZ));
+                layout.seteChestEmptyShulkOriginVector(new Vec3(startX - highwayWidthOffset - 1, 0, startZ));
             }
 
             if (pave) {
-                highwayContext.setLiqOriginVector(highwayContext.liqOriginVector().add(1, 0, 0));
+                layout.setLiqOriginVector(layout.liqOriginVector().add(1, 0, 0));
                 if (highwayRail) {
-                    highwayContext.setLiqCheckSchem(new WhiteBlackSchematic(highwayWidth + 2, highwayHeight - 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false));
+                    layout.setLiqCheckSchem(new WhiteBlackSchematic(highwayWidth + 2, highwayHeight - 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false));
                 } else {
-                    highwayContext.setLiqCheckSchem(new WhiteBlackSchematic(highwayWidth, highwayHeight - 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false));
+                    layout.setLiqCheckSchem(new WhiteBlackSchematic(highwayWidth, highwayHeight - 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false));
                 }
             } else {
                 if (highwayRail) {
-                    highwayContext.setLiqCheckSchem(new WhiteBlackSchematic(highwayWidth + 4, highwayHeight + 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false));
+                    layout.setLiqCheckSchem(new WhiteBlackSchematic(highwayWidth + 4, highwayHeight + 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false));
                 } else {
-                    highwayContext.setLiqCheckSchem(new WhiteBlackSchematic(highwayWidth + 2, highwayHeight + 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false));
+                    layout.setLiqCheckSchem(new WhiteBlackSchematic(highwayWidth + 2, highwayHeight + 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false));
                 }
             }
         }
 
-        highwayContext.setSchematic(composeHighwaySchematic(highwayContext.highwayDirection(), groupA, groupB, pave, settings));
+        layout.setSchematic(composeHighwaySchematic(layout.highwayDirection(), groupA, groupB, pave, settings));
         // Rails are the one component whose cells differ between slices that share a major
         // coordinate, so an angled build with rails needs the per-slice cross-sections.
-        highwayContext.setPatternSchematics(parsedPattern.isCustom() && highwayRail
-                ? composePatternSchematics(highwayContext.highwayDirection(), groupA, groupB, pave, settings)
+        layout.setPatternSchematics(parsedPattern.isCustom() && highwayRail
+                ? composePatternSchematics(layout.highwayDirection(), groupA, groupB, pave, settings)
                 : null);
         // Side storage is one column below the cross-section's first, so the same column past its
         // last (W+1, a rail or the lane's wall) is W+3 further on along the cross axis
-        Vec3 storageLine = highwayContext.eChestEmptyShulkOriginVector();
-        highwayContext.setFarSideStorageOriginVector(groupA
+        Vec3 storageLine = layout.eChestEmptyShulkOriginVector();
+        layout.setFarSideStorageOriginVector(groupA
                 ? storageLine.add(0, 0, highwayWidth + 3)
                 : storageLine.add(highwayWidth + 3, 0, 0));
 
-        Vec3 origin = new Vec3(highwayContext.originVector().x, highwayContext.originVector().y, highwayContext.originVector().z);
-        Vec3 direction = new Vec3(highwayContext.highwayDirection().getX(), highwayContext.highwayDirection().getY(), highwayContext.highwayDirection().getZ());
+        Vec3 origin = new Vec3(layout.originVector().x, layout.originVector().y, layout.originVector().z);
+        Vec3 direction = new Vec3(layout.highwayDirection().getX(), layout.highwayDirection().getY(), layout.highwayDirection().getZ());
         // A named start replaces the feet projection wholesale: firstStartingPos then clamps every
         // later projection to it, so a start ahead of the bot needs no special handling.
         Vec3 startFrom = (startCoords != null)
                 ? new Vec3(startCoords.getX(), 0, startCoords.getZ())
                 : new Vec3(ctx.playerFeet().getX(), ctx.playerFeet().getY(), ctx.playerFeet().getZ());
-        highwayContext.setOriginBuild(highwayContext.getClosestPoint(origin, direction, startFrom, LocationType.HighwayBuild));
+        layout.setOriginBuild(layout.getClosestPoint(origin, direction, startFrom, LocationType.HighwayBuild));
 
-        highwayContext.setFirstStartingPos(new BetterBlockPos(highwayContext.originBuild()));
+        layout.setFirstStartingPos(new BetterBlockPos(layout.originBuild()));
 
         if (endCoords != null) {
-            BetterBlockPos end = highwayContext.getClosestPoint(origin, direction, new Vec3(endCoords.getX(), 0, endCoords.getZ()), LocationType.HighwayBuild);
-            int endSteps = highwayContext.stepsAlongHighway(highwayContext.firstStartingPos(), end);
+            BetterBlockPos end = layout.getClosestPoint(origin, direction, new Vec3(endCoords.getX(), 0, endCoords.getZ()), LocationType.HighwayBuild);
+            int endSteps = layout.stepsAlongHighway(layout.firstStartingPos(), end);
             if (endSteps < 0) {
-                Helper.HELPER.logDirect("End " + endCoords.getX() + ", " + endCoords.getZ() + " is behind the start " + highwayContext.firstStartingPos().toString() + ", not starting");
+                Helper.HELPER.logDirect("End " + endCoords.getX() + ", " + endCoords.getZ() + " is behind the start " + layout.firstStartingPos().toString() + ", not starting");
                 stop();
                 return;
             }
-            highwayContext.setEndPos(end);
+            layout.setEndPos(end);
             Helper.HELPER.logDirect("Stopping at " + end.toString() + " (" + endSteps + " blocks ahead)");
         }
 
@@ -336,33 +337,33 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 + (!railLow && !railHigh ? "none" : "")
                 + (settings.highwayExcavate.value ? " excavate" : "")
                 + (cellOverrides.isEmpty() ? "" : " overrides=" + cellOverrides.size()));
-        Helper.HELPER.logDirect("Building from " + highwayContext.originBuild().toString());
-        settings.buildRepeat.value = new Vec3i(highwayContext.highwayDirection().getX(), 0, highwayContext.highwayDirection().getZ());
+        Helper.HELPER.logDirect("Building from " + layout.originBuild().toString());
+        settings.buildRepeat.value = new Vec3i(layout.highwayDirection().getX(), 0, layout.highwayDirection().getZ());
 
-        highwayContext.setEnderChestHasPickShulks(true);
-        highwayContext.setEnderChestHasEnderShulks(true);
-        highwayContext.setRefillingEnderChests(false);
-        highwayContext.resetSupplies();
-        highwayContext.setStashingShulker(false);
-        highwayContext.setEnderChestAccessLoc(null);
-        highwayContext.resetFarmForRun();
-        highwayContext.resetObsidianDrop();
-        highwayContext.resetThiefHunt();
-        highwayContext.clearIgnoredMobs();
-        highwayContext.clearLostShulkerRelogAttempt();
-        highwayContext.setStartShulkerCount(highwayContext.getShulkerCountInventory(ShulkerType.Any));
+        highwayContext.resupply().setEnderChestHasPickShulks(true);
+        highwayContext.resupply().setEnderChestHasEnderShulks(true);
+        highwayContext.resupply().setRefillingEnderChests(false);
+        highwayContext.resupply().resetSupplies();
+        highwayContext.resupply().setStashingShulker(false);
+        highwayContext.resupply().setEnderChestAccessLoc(null);
+        highwayContext.farm().resetFarmForRun();
+        highwayContext.sync().resetObsidianDrop();
+        highwayContext.threats().resetThiefHunt();
+        highwayContext.threats().clearIgnoredMobs();
+        highwayContext.containerRecovery().clearLostShulkerRelogAttempt();
+        highwayContext.resupply().setStartShulkerCount(highwayContext.inventory().getShulkerCountInventory(ShulkerType.Any));
         highwayContext.setPaused(false);
-        highwayContext.resetThroughWallDetection();
+        highwayContext.liquidRemoval().resetThroughWallDetection();
         highwayContext.transitionTo(HighwayState.Nothing);
     }
 
     private void teardown() {
         stopWhenSafe = false;
-        highwayContext.clearThresholdConfirm();
+        highwayContext.sync().clearThresholdConfirm();
         wrongDimension = false;
-        highwayContext.resetRecovery(); // held keys, suppressHitResult, and settings (e.g. allowSwimThroughLava) overridden during recovery
+        highwayContext.recovery().resetRecovery(); // held keys, suppressHitResult, and settings (e.g. allowSwimThroughLava) overridden during recovery
         highwayContext.clearInvalidBlockFix();
-        highwayContext.stopTravelTowardsEnd();
+        highwayContext.endTracker().stopTravelTowardsEnd();
         highwayContext.transitionTo(HighwayState.Nothing); // onExit: whatever the state we interrupt holds
         setWalkForward(false);
         edgeStillTicks = 0;
@@ -370,9 +371,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         edgeLastPos = null;
         baritone.getInputOverrideHandler().clearAllKeys();
         baritone.getPathingBehavior().cancelEverything();
-        highwayContext.setFirstStartingPos(null); // a stale start or end clamps every projection the next build makes
-        highwayContext.setOriginBuild(null);
-        highwayContext.setEndPos(null);
+        highwayContext.layout().setFirstStartingPos(null); // a stale start or end clamps every projection the next build makes
+        highwayContext.layout().setOriginBuild(null);
+        highwayContext.layout().setEndPos(null);
         settings.buildRepeatCount.value = -1; // Nothing clamps it while an end is set
     }
 
@@ -619,7 +620,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     }
 
     private boolean safeToStop() {
-        return highwayContext.paused() || highwayContext.schematic() == null
+        return highwayContext.paused() || highwayContext.layout().schematic() == null
                 || SAFE_STOP_STATES.contains(highwayContext.currentState().getState());
     }
 
@@ -646,13 +647,13 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         if (!Baritone.settings().highwayLogBuildSummary.value) {
             return; // left for nhwstatus
         }
-        if (!highwayContext.printerTallied()) {
+        if (!highwayContext.diagnostics().printerTallied()) {
             return; // a second stop right after the first
         }
         Helper.HELPER.logDiagnostic("Build summary up to " + (ctx.player() != null ? ctx.playerFeet() : "here")
-                + (highwayContext.endPos() != null ? ", building towards " + highwayContext.endPos() : "") + ":");
-        Helper.HELPER.logDiagnostic(highwayContext.walkGateDiagnostic());
-        Helper.HELPER.logDiagnostic(highwayContext.printerDiagnostic());
+                + (highwayContext.layout().endPos() != null ? ", building towards " + highwayContext.layout().endPos() : "") + ":");
+        Helper.HELPER.logDiagnostic(highwayContext.diagnostics().walkGateDiagnostic());
+        Helper.HELPER.logDiagnostic(highwayContext.diagnostics().printerDiagnostic());
         Helper.HELPER.logDiagnostic(baritone.getPacketTrace().diagnostic());
         Helper.HELPER.logDiagnostic(setbacks.diagnostic());
     }
@@ -660,22 +661,22 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     @Override
     public void printStatus() {
         Helper.HELPER.logDirect("State: " + highwayContext.currentState().getState());
-        if (highwayContext.endPos() != null) {
-            Helper.HELPER.logDirect("End: " + highwayContext.endPos().toString());
+        if (highwayContext.layout().endPos() != null) {
+            Helper.HELPER.logDirect("End: " + highwayContext.layout().endPos().toString());
         }
         Helper.HELPER.logDirect("Paused: " + highwayContext.paused()); // true/false alone: hive.py reads this line
         if (highwayContext.pauseReason() != null) {
             Helper.HELPER.logDirect("Pause reason: " + highwayContext.pauseReason());
         }
         Helper.HELPER.logDirect("Timer: " + highwayContext.timer());
-        Helper.HELPER.logDirect("startShulkerCount: " + highwayContext.startShulkerCount());
+        Helper.HELPER.logDirect("startShulkerCount: " + highwayContext.resupply().startShulkerCount());
         // nothing reads these off chat, so they go to the game log unless chatDebug is on
-        Helper.HELPER.logDiagnostic(highwayContext.frontDistanceDiagnostic());
-        Helper.HELPER.logDiagnostic(highwayContext.walkGateDiagnostic());
-        Helper.HELPER.logDiagnostic(highwayContext.printerDiagnostic());
+        Helper.HELPER.logDiagnostic(highwayContext.scanner().frontDistanceDiagnostic());
+        Helper.HELPER.logDiagnostic(highwayContext.diagnostics().walkGateDiagnostic());
+        Helper.HELPER.logDiagnostic(highwayContext.diagnostics().printerDiagnostic());
         Helper.HELPER.logDiagnostic(baritone.getPacketTrace().diagnostic());
         Helper.HELPER.logDiagnostic(setbacks.diagnostic());
-        highwayContext.stateDwellDiagnostic(12).forEach(Helper.HELPER::logDiagnostic);
+        highwayContext.diagnostics().stateDwellDiagnostic(12).forEach(Helper.HELPER::logDiagnostic);
     }
 
     @Override
@@ -684,7 +685,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         if (stopWhenSafe && event.getType() == TickEvent.Type.IN && ctx.player() != null && stopIfSafe()) {
             return;
         }
-        if (highwayContext.paused() || highwayContext.schematic() == null || ctx.player() == null || ctx.player().getInventory().isEmpty() || event.getType() == TickEvent.Type.OUT) {
+        if (highwayContext.paused() || highwayContext.layout().schematic() == null || ctx.player() == null || ctx.player().getInventory().isEmpty() || event.getType() == TickEvent.Type.OUT) {
             setWalkForward(false); // never leave the walk key latched while the state machine isn't driving
             if (ctx.player() != null && event.getType() != TickEvent.Type.OUT) {
                 updateEdgeSneak(false, false); // stopped at the edge, the bot still slides
@@ -695,7 +696,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
         highwayContext.incrementTimers();
         // the processes ticked earlier this tick, so the builder's report is this tick's
-        highwayContext.notePrinterTick(baritone.getBuilderProcess().consumePrinterReport());
+        highwayContext.diagnostics().notePrinterTick(baritone.getBuilderProcess().consumePrinterReport());
         setbacks.noteTick(highwayContext.currentState().getState() == HighwayState.BuildingHighway, ctx.player());
 
         if (startDimension != null && !highwayContext.isInQueue()) {
@@ -727,7 +728,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         }
 
         HighwayState curState = highwayContext.currentState().getState();
-        if (curState != HighwayState.PortalEscape && curState != HighwayState.InQueue && highwayContext.isPlayerInPortal()) {
+        if (curState != HighwayState.PortalEscape && curState != HighwayState.InQueue && highwayContext.walk().isPlayerInPortal()) {
             Helper.HELPER.logDirect("Standing inside a nether portal, stepping out.");
             baritone.getInputOverrideHandler().clearAllKeys();
             baritone.getPathingBehavior().cancelEverything();
@@ -735,14 +736,14 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         }
         boolean escaping = highwayContext.currentState().getState() == HighwayState.PortalEscape;
 
-        highwayContext.closeStrayContainer();
+        highwayContext.inventory().closeStrayContainer();
 
         // Offhand rescue/autoTotem/clearCursorItem pause the state machine while they work, but the
         // stuck/health watchdogs must run regardless: a cursor stack that can never be placed (full
         // inventory) used to starve them and freeze the state machine forever with its keys latched.
         // Rescue runs before autoTotem so stranded chests merge onto a loose stack instead of being
         // swapped into the totem's slot.
-        boolean pauseStateMachine = !escaping && (highwayContext.rescueOffhandEnderChests() || highwayContext.autoTotem() || highwayContext.clearCursorItem());
+        boolean pauseStateMachine = !escaping && (highwayContext.inventory().rescueOffhandEnderChests() || highwayContext.inventory().autoTotem() || highwayContext.inventory().clearCursorItem());
         if (highwayContext.stuckCheck() || highwayContext.healthCheck() || pauseStateMachine) {
             setWalkForward(false);
             updateEdgeSneak(false, false);
@@ -762,13 +763,13 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, false);
             }
             // both sides of these comparisons are blocks along the highway, including creepMaxOvershoot
-            int frontDistance = highwayContext.getHighwayFrontDistance();
+            int frontDistance = highwayContext.scanner().getHighwayFrontDistance();
             String walkBlocker = creepBlocker(frontDistance, pathing, builderAim, false);
             frontBeyondCreep = walkBlocker == FRONT_TOO_FAR;
             // read every tick, so a tick the builder didn't run never counts
             boolean printerOutOfReach = baritone.getBuilderProcess().consumePrinterOutOfReach();
             boolean toEdge = false;
-            if ((walkBlocker == FRONT_TOO_CLOSE || walkBlocker == NO_FLOOR_AHEAD) && highwayContext.paving()
+            if ((walkBlocker == FRONT_TOO_CLOSE || walkBlocker == NO_FLOOR_AHEAD) && highwayContext.layout().paving()
                     && printerOutOfReach && edgeGiveUpTicks == 0 && ctx.player().onGround()) {
                 // Out over open air the next block of floor only goes against the face of the last
                 // one that looks along the road, and the server only takes a click on that face from
@@ -780,13 +781,13 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             }
             noteEdgeProgress(toEdge);
             walk = walkBlocker == null || toEdge;
-            highwayContext.noteWalkGate(walk ? null : walkBlocker, toEdge);
+            highwayContext.diagnostics().noteWalkGate(walk ? null : walkBlocker, toEdge);
             if (walk) {
                 // the key walks along the player's yaw, so point it down the highway every tick we
                 // hold it; without this it walks wherever the last rotation left the camera
-                highwayContext.faceHighwayDirection();
+                highwayContext.walk().faceHighwayDirection();
             }
-            mayEdgeSneak = highwayContext.paving() && !pathing;
+            mayEdgeSneak = highwayContext.layout().paving() && !pathing;
         }
         setWalkForward(walk);
         updateEdgeSneak(walk, mayEdgeSneak);
@@ -808,12 +809,12 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             return "invalid-block repair";
         } else if (!toEdge && frontDistance < settings.highwayEndDistance.value) {
             return FRONT_TOO_CLOSE;
-        } else if (frontDistance >= settings.highwayEndDistance.value + highwayContext.creepMaxOvershoot()) {
+        } else if (frontDistance >= settings.highwayEndDistance.value + highwayContext.scanner().creepMaxOvershoot()) {
             // only creep while the build front is right in front of us
             return FRONT_TOO_FAR;
-        } else if (!toEdge && !highwayContext.canWalkOnFloorAhead()) {
+        } else if (!toEdge && !highwayContext.walk().canWalkOnFloorAhead()) {
             return NO_FLOOR_AHEAD;
-        } else if (!highwayContext.canWalkThroughAhead()) {
+        } else if (!highwayContext.walk().canWalkThroughAhead()) {
             // a solid at body height on an all-correct stretch is schematic-valid (the
             // ledge of a paved section, the wall of a pocket in the floor) and will never
             // be dug; the creep can't jump it, so release and let the builder path instead.
@@ -825,13 +826,13 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             // leaves a column like that beside it: its obsidian on one side, the rail
             // column's netherrack at feet level on the other.
             return "blocked at body height ahead";
-        } else if (!highwayContext.noPortalAhead()) {
+        } else if (!highwayContext.walk().noPortalAhead()) {
             // never creep into a lit portal waiting for its frame to be mined
             return "portal ahead";
         } else if (baritone.getInventoryPauserProcess().calmPausePending()) {
             // release the key while an inventory move waits for a tick without movement input
             return "inventory pause";
-        } else if (baritone.getBuilderProcess().placeInFlightLeftBehind(highwayContext.highwayHeading())) {
+        } else if (baritone.getBuilderProcess().placeInFlightLeftBehind(highwayContext.layout().highwayHeading())) {
             // a block further on and the printer couldn't place it again if the server turns it down
             return "waiting on a place behind";
         } else if (pathing) {
@@ -843,7 +844,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             // slides the hit result onto a neighbour and vanilla restarts the progress there
             return "breaking in place";
         } else if (builderAim != null && builderAim.getY() >= ctx.playerFeet().y
-                && !highwayContext.inWalkLane(builderAim.getX(), builderAim.getZ())) {
+                && !highwayContext.layout().inWalkLane(builderAim.getX(), builderAim.getZ())) {
             // A rail column is outside the lane the front scan watches, so nothing above knows
             // the builder is working on one. The walk key runs along the aim yaw, which points
             // at the rail, so it walks the bot into the rail it's trying to clear and slides it
@@ -856,7 +857,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             // tick late like the aim is, which is right: the builder clears every forced input
             // at the top of its own tick, so what's still down is what it set on the last one
             return "sneak placement";
-        } else if (builderAim != null && !highwayContext.paving() && !aimAlongHighway(builderAim)) {
+        } else if (builderAim != null && !highwayContext.layout().paving() && !aimAlongHighway(builderAim)) {
             return "aim off the highway";
         }
         return null;
@@ -876,7 +877,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             if (++edgeStillTicks >= EDGE_STILL_TICKS) {
                 edgeStillTicks = 0;
                 edgeGiveUpTicks = EDGE_GIVE_UP_TICKS;
-                highwayContext.noteEdgeGiveUp();
+                highwayContext.diagnostics().noteEdgeGiveUp();
             }
         } else {
             edgeStillTicks = 0;
@@ -897,7 +898,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
     private void updateEdgeSneak(boolean walking, boolean start) {
         boolean pathing = baritone.getPathingBehavior().isPathing();
         boolean sneak = (start || edgeSneakHeld) && !pathing && ctx.player().onGround()
-                && highwayContext.wouldSlideOffFloor(walking);
+                && highwayContext.walk().wouldSlideOffFloor(walking);
         if (sneak) {
             edgeSneakHeld = true;
             baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
@@ -917,7 +918,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
      */
     private boolean aimAlongHighway(BlockPos target) {
         float yaw = RotationUtils.calcRotationFromVec3d(ctx.playerHead(), VecUtils.getBlockPosCenter(target), ctx.playerRotations()).getYaw();
-        return Math.abs(Mth.degreesDifference(yaw, highwayContext.highwayDirectionYaw())) <= 50;
+        return Math.abs(Mth.degreesDifference(yaw, highwayContext.layout().highwayDirectionYaw())) <= 50;
     }
 
     private void setWalkForward(boolean walk) {
@@ -949,17 +950,17 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
     @Override
     public int lateralColumn(int x, int z) {
-        return highwayContext.lateralColumn(x, z);
+        return highwayContext.layout().lateralColumn(x, z);
     }
 
     @Override
     public boolean inWalkLane(int x, int z) {
-        return highwayContext.inWalkLane(x, z);
+        return highwayContext.layout().inWalkLane(x, z);
     }
 
     @Override
     public Vec3 highwayHeading() {
-        return highwayContext.highwayHeading();
+        return highwayContext.layout().highwayHeading();
     }
 
     @Override
@@ -984,9 +985,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         }
 
         if (settings.highwayRenderLiquidScanArea.value) {
-            highwayContext.renderLockLiquid().lock();
-            AABB liquidArea = highwayContext.renderAreaLiquid();
-            highwayContext.renderLockLiquid().unlock();
+            highwayContext.scanner().renderLockLiquid().lock();
+            AABB liquidArea = highwayContext.scanner().renderAreaLiquid();
+            highwayContext.scanner().renderLockLiquid().unlock();
 
             if (liquidArea != null) {
                 BufferBuilder bufferBuilder = IRenderer.startLines(Color.BLUE);
@@ -998,9 +999,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         }
 
         if (settings.highwayRenderBuildingArea.value) {
-            highwayContext.renderLockBuilding().lock();
+            highwayContext.scanner().renderLockBuilding().lock();
             BlockStateInterface bsi = new BlockStateInterface(BaritoneAPI.getProvider().getPrimaryBaritone().getPlayerContext());
-            highwayContext.renderBlocksBuilding().forEach((pos, color) -> {
+            highwayContext.scanner().renderBlocksBuilding().forEach((pos, color) -> {
                 BufferBuilder bufferBuilder = IRenderer.startLines(color);
 
                 BlockState state = bsi.get0(pos);
@@ -1020,7 +1021,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                     IRenderer.endLines(bufferBuilder, settings.renderSelectionBoxesIgnoreDepth.value);
                 }
             });
-            highwayContext.renderLockBuilding().unlock();
+            highwayContext.scanner().renderLockBuilding().unlock();
         }
     }
 
@@ -1030,7 +1031,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             return;
         }
         if (event.getPacket() instanceof ServerboundUseItemOnPacket use) {
-            highwayContext.noteUseItemOn(use.getHitResult().getBlockPos());
+            highwayContext.sync().noteUseItemOn(use.getHitResult().getBlockPos());
         }
         setbacks.noteSent(event.getPacket());
     }
@@ -1040,10 +1041,10 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         if (event.getState() == EventState.POST) {
             // Runs on the netty thread, so only flags are written here.
             if (event.getPacket() instanceof ClientboundContainerSetContentPacket contents) {
-                highwayContext.noteContainerSync(contents.containerId());
+                highwayContext.sync().noteContainerSync(contents.containerId());
             } else if (event.getPacket() instanceof ClientboundLoginPacket
                     || event.getPacket() instanceof ClientboundRespawnPacket) {
-                highwayContext.noteInventoryDesynced();
+                highwayContext.sync().noteInventoryDesynced();
             }
         }
 

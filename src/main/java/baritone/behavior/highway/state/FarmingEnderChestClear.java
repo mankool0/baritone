@@ -53,7 +53,7 @@ public class FarmingEnderChestClear extends State {
         context.baritone().getPathingBehavior().cancelEverything();
 
         if (!(context.playerContext().world().getBlockState(context.placeLoc()).getBlock() instanceof AirBlock)) {
-            context.setFarmPlaceLocResynced(false); // verify again once this chest is mined
+            context.farm().setFarmPlaceLocResynced(false); // verify again once this chest is mined
             sinceResyncRequest = -1;
             context.baritone().getBuilderProcess().clearArea(context.placeLoc(), context.placeLoc());
             sinceClearDispatch = 0;
@@ -62,9 +62,9 @@ public class FarmingEnderChestClear extends State {
         }
 
         // Make the server resend placeLoc and only trust air it confirmed.
-        if (!context.farmPlaceLocResynced()) {
+        if (!context.farm().farmPlaceLocResynced()) {
             if (context.playerContext().player().getMainHandItem().getItem() instanceof BlockItem) {
-                int pickSlot = context.putPickaxeHotbar(true);
+                int pickSlot = context.inventory().putPickaxeHotbar(true);
                 if (pickSlot == -1) {
                     // Nothing safe to hold for the click; skip verification rather than risk
                     // placing the held block at placeLoc
@@ -77,8 +77,8 @@ public class FarmingEnderChestClear extends State {
                 }
                 return;
             }
-            context.requestBlockResync(context.placeLoc());
-            context.setFarmPlaceLocResynced(true);
+            context.placer().requestBlockResync(context.placeLoc());
+            context.farm().setFarmPlaceLocResynced(true);
             sinceResyncRequest = 0;
             return;
         }
@@ -88,7 +88,7 @@ public class FarmingEnderChestClear extends State {
             return; // resync reply still in flight; a restored chest hits the clear branch above
         }
 
-        context.setFarmPlaceLocResynced(false);
+        context.farm().setFarmPlaceLocResynced(false);
         sinceResyncRequest = -1;
         context.resetTimer();
         context.transitionTo(HighwayState.CollectingObsidian);

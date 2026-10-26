@@ -18,7 +18,9 @@
 package baritone.behavior.highway.state;
 
 import baritone.api.utils.Helper;
+import baritone.behavior.highway.EnderChestFarm;
 import baritone.behavior.highway.HighwayContext;
+import baritone.behavior.highway.HighwayScanner;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.Supply;
 import baritone.behavior.highway.enums.HighwayBlockState;
@@ -39,15 +41,15 @@ public class BuildingHighway extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        if (context.endPos() != null && !context.baritone().getBuilderProcess().isActive() && context.isHighwayEndComplete()) {
-            Helper.HELPER.logDirect("Reached the end of the highway at " + context.endPos().toString() + ", stopping.");
+        if (context.layout().endPos() != null && !context.baritone().getBuilderProcess().isActive() && context.endTracker().isHighwayEndComplete()) {
+            Helper.HELPER.logDirect("Reached the end of the highway at " + context.layout().endPos().toString() + ", stopping.");
             context.baritone().getNetherHighwayBuilderBehavior().stop();
             return;
         }
 
         if (!context.baritone().getBuilderProcess().isActive()) {
-            if (!context.travelTowardsEnd()) {
-                switch (context.endStall()) {
+            if (!context.endTracker().travelTowardsEnd()) {
+                switch (context.endTracker().endStall()) {
                     case RESTART_BUILDER -> {
                         Helper.HELPER.logDirect("Restarting builder");
                         context.transitionTo(HighwayState.Nothing);
@@ -62,8 +64,8 @@ public class BuildingHighway extends State {
                 }
             }
         } else {
-            context.stopTravelTowardsEnd();
-            context.clearEndStall();
+            context.endTracker().stopTravelTowardsEnd();
+            context.endTracker().clearEndStall();
         }
 
         if (context.walkBackTimer() > 120 && context.baritone().getPathingControlManager().mostRecentCommand().isPresent()) {
@@ -79,16 +81,16 @@ public class BuildingHighway extends State {
         // of, and each refill holds this state on its threshold confirm for longer than the 10
         // ticks this waits, so placed after them it never ran before the storage trip went out.
         if (context.timer() >= 10) {
-            int shulkerCount = context.getShulkerCountInventory(ShulkerType.Any);
-            if (shulkerCount < context.startShulkerCount()) {
+            int shulkerCount = context.inventory().getShulkerCountInventory(ShulkerType.Any);
+            if (shulkerCount < context.resupply().startShulkerCount()) {
                 // Lost a shulker somewhere :(
-                if (context.maybeStartThiefHunt(HighwayState.BuildingHighway)) {
+                if (context.threats().maybeStartThiefHunt(HighwayState.BuildingHighway)) {
                     return; // A piglin is carrying it; get it back before resorting to the ground search
                 }
-                if (context.maybeMineMisplacedShulker(32, 8)) {
+                if (context.containerRecovery().maybeMineMisplacedShulker(32, 8)) {
                     return; // Inventory desync placed the box into the highway; mine it back instead of searching
                 }
-                if (context.maybeLostShulkerRelog()) {
+                if (context.containerRecovery().maybeLostShulkerRelog()) {
                     return;
                 }
                 Helper.HELPER.logDirect("We lost a shulker somewhere. Going back a maximum of " + context.settings().highwayMaxLostShulkerSearchDist.value + " blocks to look for it.");
@@ -98,23 +100,23 @@ public class BuildingHighway extends State {
                 return;
             }
             // Nothing missing (or the loss was accepted); the next loss gets a fresh relog attempt
-            context.clearLostShulkerRelogAttempt();
-            if (shulkerCount > context.startShulkerCount()) {
-                Helper.HELPER.logDirect("We picked up a shulker somewhere, updating startShulkerCount from " + context.startShulkerCount() + " to " + shulkerCount);
-                context.setStartShulkerCount(shulkerCount);
+            context.containerRecovery().clearLostShulkerRelogAttempt();
+            if (shulkerCount > context.resupply().startShulkerCount()) {
+                Helper.HELPER.logDirect("We picked up a shulker somewhere, updating startShulkerCount from " + context.resupply().startShulkerCount() + " to " + shulkerCount);
+                context.resupply().setStartShulkerCount(shulkerCount);
                 context.resetTimer();
                 return;
             }
         }
 
-        if (context.getPickCountInventory() < context.settings().highwayPicksThreshold.value) {
-            if (context.getShulkerCountInventory(context.picksToUse()) == 0) {
+        if (context.inventory().getPickCountInventory() < context.settings().highwayPicksThreshold.value) {
+            if (context.inventory().getShulkerCountInventory(context.resupply().picksToUse()) == 0) {
                 // No shulker in hand, so this costs a storage trip or a pause: confirm the count
                 // is real before committing to it.
-                if (!context.thresholdConfirmed("Pick shulker count")) {
+                if (!context.sync().thresholdConfirmed("Pick shulker count")) {
                     return;
                 }
-                if (!context.enderChestHasPickShulks()) {
+                if (!context.resupply().enderChestHasPickShulks()) {
                     context.baritone().getPathingBehavior().cancelEverything();
                     context.pause("Out of picks, refill ender chest and inventory and restart.");
                     return;
@@ -130,32 +132,32 @@ public class BuildingHighway extends State {
         }
 
         // TODO: Change shulker threshold from 0 to a customizable value
-        int obsidian = context.getObsidianCountInventory();
-        int runNeed = obsidian <= context.settings().highwayObsidianThreshold.value && context.paving() ? context.runObsidianNeed(obsidian) : -1;
-        if (obsidian <= context.settings().highwayObsidianThreshold.value && context.paving() && (runNeed < 0 || obsidian < runNeed)) {
-            int runChests = runNeed < 0 ? -1 : HighwayContext.chestsForObsidian(runNeed, obsidian);
-            boolean looseChests = context.looseChestsCoverRun(runChests);
-            boolean fetchShulker = !looseChests && context.getShulkerCountInventory(ShulkerType.EnderChest) == 0;
+        int obsidian = context.inventory().getObsidianCountInventory();
+        int runNeed = obsidian <= context.settings().highwayObsidianThreshold.value && context.layout().paving() ? context.farm().runObsidianNeed(obsidian) : -1;
+        if (obsidian <= context.settings().highwayObsidianThreshold.value && context.layout().paving() && (runNeed < 0 || obsidian < runNeed)) {
+            int runChests = runNeed < 0 ? -1 : EnderChestFarm.chestsForObsidian(runNeed, obsidian);
+            boolean looseChests = context.farm().looseChestsCoverRun(runChests);
+            boolean fetchShulker = !looseChests && context.inventory().getShulkerCountInventory(ShulkerType.EnderChest) == 0;
             // The count reads near zero for a tick or two while our last stack is swapped onto the
             // hotbar, so a jump under the threshold is confirmed first. One confirm covers the whole
             // decision: two in a row would keep resetting each other's key. A count spent down to the
             // threshold acts at once, or the builder paves the rest away while the confirm runs.
-            if (!context.inventorySynced()
-                    || (context.obsidianDroppedSuddenly() && !context.thresholdConfirmed(fetchShulker ? "Ender chest shulker count" : "Obsidian count"))) {
+            if (!context.sync().inventorySynced()
+                    || (context.sync().obsidianDroppedSuddenly() && !context.sync().thresholdConfirmed(fetchShulker ? "Ender chest shulker count" : "Obsidian count"))) {
                 return;
             }
             // A farm with nowhere to put its drops would cycle the box forever: place, loot nothing, mine, repeat.
-            if (!context.enderChestFarmCanProgress()) {
+            if (!context.farm().enderChestFarmCanProgress()) {
                 context.baritone().getPathingBehavior().cancelEverything();
                 context.pause("Obsidian is under the threshold but the inventory has no room for more, clear some slots and restart.");
                 return;
             }
-            context.setFarmRunChests(runChests);
-            context.setFarmLooseChests(looseChests);
-            if (context.farmLooseChests()) {
+            context.farm().setFarmRunChests(runChests);
+            context.farm().setFarmLooseChests(looseChests);
+            if (context.farm().farmLooseChests()) {
                 Helper.HELPER.logDirect("The rest of the run needs " + runNeed + " obsidian and we have " + obsidian + ", farming " + runChests + " loose ender chests");
             } else if (fetchShulker) {
-                if (!context.enderChestHasEnderShulks()) {
+                if (!context.resupply().enderChestHasEnderShulks()) {
                     context.baritone().getPathingBehavior().cancelEverything();
                     context.pause("Out of ender chests, refill ender chest and inventory and restart.");
                     return;
@@ -169,46 +171,46 @@ public class BuildingHighway extends State {
             context.resetTimer();
             return;
         }
-        context.clearThresholdConfirm("Obsidian count");
-        context.clearThresholdConfirm("Ender chest shulker count");
-        context.clearObsidianDrop();
+        context.sync().clearThresholdConfirm("Obsidian count");
+        context.sync().clearThresholdConfirm("Ender chest shulker count");
+        context.sync().clearObsidianDrop();
 
         // Digging: keep loose ender chests topped up for storage access (paving refills them via the obsidian farm above).
         // Cap the threshold below a full stack: a refill tops us up to ~64, and topping fits a single slot (<=64), so a
         // threshold too close to 64 could never be satisfied and would drain every shulker from storage in a loop.
         int enderChestThreshold = Math.min(context.settings().highwayEnderChestsThreshold.value, 56);
-        if (!context.paving() && context.getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) < enderChestThreshold) {
-            if (context.getShulkerCountInventory(ShulkerType.EnderChest) > 0) {
+        if (!context.layout().paving() && context.inventory().getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) < enderChestThreshold) {
+            if (context.inventory().getShulkerCountInventory(ShulkerType.EnderChest) > 0) {
                 // We already hold an ender chest shulker: open it and top up. No grab happened, so the stash places a fresh chest.
-                if (!context.refillingEnderChests()) {
-                    context.setRefillingEnderChests(true);
-                    context.setEnderChestAccessLoc(null);
+                if (!context.resupply().refillingEnderChests()) {
+                    context.resupply().setRefillingEnderChests(true);
+                    context.resupply().setEnderChestAccessLoc(null);
                 }
-                context.clearThresholdConfirm();
+                context.sync().clearThresholdConfirm();
                 context.transitionTo(HighwayState.EchestMiningPlaceLocPrep);
                 context.baritone().getPathingBehavior().cancelEverything();
                 context.resetTimer();
                 return;
             }
-            if (!context.thresholdConfirmed("Ender chest count")) {
+            if (!context.sync().thresholdConfirmed("Ender chest count")) {
                 return;
             }
-            if (!context.enderChestHasEnderShulks()) {
+            if (!context.resupply().enderChestHasEnderShulks()) {
                 context.baritone().getPathingBehavior().cancelEverything();
                 context.pause("Low on ender chests, and none in storage to fetch.");
                 return;
             }
             // Fetch a shulker (also tops picks/gapples) from storage, then loop back here to top up
             Helper.HELPER.logDirect("Low on ender chests, fetching an ender chest shulker from storage.");
-            context.setRefillingEnderChests(true);
+            context.resupply().setRefillingEnderChests(true);
             context.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);
             return;
         }
 
         for (Supply supply : Supply.values()) {
             if (supply.enabled(context.settings()) && supply.count(context) <= supply.threshold(context.settings())) {
-                if (context.getShulkerCountInventory(supply.shulkerType()) > 0) {
-                    context.setActiveSupply(supply);
+                if (context.inventory().getShulkerCountInventory(supply.shulkerType()) > 0) {
+                    context.resupply().setActiveSupply(supply);
                     context.transitionTo(HighwayState.SupplyShulkerPlaceLocPrep);
                     context.baritone().getPathingBehavior().cancelEverything();
                     context.resetTimer();
@@ -217,11 +219,11 @@ public class BuildingHighway extends State {
                 // With storage out of its shulkers, a supply the build can do without (totems,
                 // golden carrots) is just gone without, and stops costing trips until the next
                 // startBuild resets the flag
-                boolean stocked = context.enderChestHasShulks(supply);
+                boolean stocked = context.resupply().enderChestHasShulks(supply);
                 if (stocked || supply.pausesWhenStorageEmpty(context.settings())) {
                     // No shulker in hand, so this costs a storage trip or a pause: confirm the count
                     // is real before committing to it
-                    if (!context.thresholdConfirmed(supply.countKey())) {
+                    if (!context.sync().thresholdConfirmed(supply.countKey())) {
                         return;
                     }
                     if (!stocked) {
@@ -230,24 +232,24 @@ public class BuildingHighway extends State {
                         return;
                     }
                     Helper.HELPER.logDirect("Low on " + supply.plural() + ", fetching a " + supply.noun() + " shulker from the ender chest.");
-                    context.setRefilling(supply, true);
+                    context.resupply().setRefilling(supply, true);
                     context.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);
                     return;
                 }
             }
 
-            if (context.refilling(supply)) {
+            if (context.resupply().refilling(supply)) {
                 // A refill cycle got interrupted after the threshold cleared (e.g. the place/loot
                 // flow bailed because we already had enough): stash the fetched shulker back, or just
                 // drop the flag when there is nothing left to stash.
-                if (supply.stash(context.settings()) && context.getShulkerCountInventory(supply.shulkerType()) > 0) {
+                if (supply.stash(context.settings()) && context.inventory().getShulkerCountInventory(supply.shulkerType()) > 0) {
                     context.transitionTo(HighwayState.EnderChestStashPlaceLocPrep);
                     context.baritone().getPathingBehavior().cancelEverything();
                     context.resetTimer();
                     return;
                 }
-                context.setRefilling(supply, false);
-                context.releaseEnderChestAccessLoc();
+                context.resupply().setRefilling(supply, false);
+                context.resupply().releaseEnderChestAccessLoc();
             }
         }
 
@@ -257,7 +259,7 @@ public class BuildingHighway extends State {
             return;
         }
 
-        if (context.timer() >= 10 && context.isShulkerOnGround()) {
+        if (context.timer() >= 10 && context.inventory().isShulkerOnGround()) {
             Helper.HELPER.logDirect("Detected shulker on the ground, trying to collect.");
             context.transitionTo(HighwayState.ShulkerCollection);
             context.baritone().getPathingBehavior().cancelEverything();
@@ -267,32 +269,32 @@ public class BuildingHighway extends State {
 
         if (context.checkBackTimer() >= 10) {
             context.resetCheckBackTimer();
-            context.resetThroughWallDetection();
+            context.liquidRemoval().resetThroughWallDetection();
             // Time to check highway for correctness
-            Vec3 direction = new Vec3(context.highwayDirection().getX(), context.highwayDirection().getY(), context.highwayDirection().getZ());
+            Vec3 direction = new Vec3(context.layout().highwayDirection().getX(), context.layout().highwayDirection().getY(), context.layout().highwayDirection().getZ());
 
             Vec3 curPosNotOffset = new Vec3(context.playerContext().playerFeet().getX(), context.playerContext().playerFeet().getY(), context.playerContext().playerFeet().getZ());
             // Back up the scan in slices, not in world blocks: the scan length below is a slice
             // count, and on an angled pattern a block of the minor axis is several slices
-            BlockPos startCheckPos = context.sliceAlongLine(context.originVector(), curPosNotOffset, -context.highwayCheckBackDistance(), LocationType.HighwayBuild);
-            BlockPos startCheckPosLiq = context.sliceAlongLine(context.liqOriginVector(), curPosNotOffset, -context.highwayCheckBackDistance(), LocationType.ShulkerEchestInteraction);
+            BlockPos startCheckPos = context.layout().sliceAlongLine(context.layout().originVector(), curPosNotOffset, -context.layout().highwayCheckBackDistance(), LocationType.HighwayBuild);
+            BlockPos startCheckPosLiq = context.layout().sliceAlongLine(context.layout().liqOriginVector(), curPosNotOffset, -context.layout().highwayCheckBackDistance(), LocationType.ShulkerEchestInteraction);
 
             // Slice count from the scan start to the player's projected position; both points
             // are anchors on the highway path, so this is exact for straight, diagonal and
             // pattern highways alike
-            BlockPos feetClosestPoint = context.getClosestPoint(new Vec3(context.originVector().x, context.originVector().y, context.originVector().z), direction, curPosNotOffset, LocationType.HighwayBuild);
-            int distToWantedStart = Math.abs(context.stepsAlongHighway(startCheckPos, feetClosestPoint));
+            BlockPos feetClosestPoint = context.layout().getClosestPoint(new Vec3(context.layout().originVector().x, context.layout().originVector().y, context.layout().originVector().z), direction, curPosNotOffset, LocationType.HighwayBuild);
+            int distToWantedStart = Math.abs(context.layout().stepsAlongHighway(startCheckPos, feetClosestPoint));
 
-            int tempCheckBackDist = Math.min(context.highwayCheckBackDistance(), distToWantedStart);
+            int tempCheckBackDist = Math.min(context.layout().highwayCheckBackDistance(), distToWantedStart);
 
             // Also check a few blocks in front of us, farther when through-wall filling is on: it
             // must detect sealed pockets before their cover comes into break reach
-            HighwayContext.ScanFront front = context.scanAheadFront(context.baritone().getBuilderProcess().isPaused());
-            HighwayBlockState curState = context.isHighwayCorrect(startCheckPos, startCheckPosLiq, tempCheckBackDist + front.slicesAhead(), front, context.settings().highwayRenderLiquidScanArea.value);
+            HighwayScanner.ScanFront front = context.scanner().scanAheadFront(context.baritone().getBuilderProcess().isPaused());
+            HighwayBlockState curState = context.scanner().isHighwayCorrect(startCheckPos, startCheckPosLiq, tempCheckBackDist + front.slicesAhead(), front, context.settings().highwayRenderLiquidScanArea.value);
             if (curState == HighwayBlockState.Liquids) {
                 Helper.HELPER.logDirect("Removing liquids.");
                 context.transitionTo(HighwayState.LiquidRemovalPrep);
-                context.setLiquidPathingCanMine(true);
+                context.liquidRemoval().setLiquidPathingCanMine(true);
                 context.resetTimer();
                 return;
             }
@@ -306,7 +308,7 @@ public class BuildingHighway extends State {
             }
 
             if (curState == HighwayBlockState.Crystal) {
-                Helper.HELPER.logDirect("Found an end crystal in the way at " + context.crystalLocation().toShortString() + ", breaking it from behind cover.");
+                Helper.HELPER.logDirect("Found an end crystal in the way at " + context.scanner().crystalLocation().toShortString() + ", breaking it from behind cover.");
                 context.transitionTo(HighwayState.CrystalRemoval);
                 context.baritone().getPathingBehavior().cancelEverything();
                 context.resetTimer();
@@ -321,16 +323,16 @@ public class BuildingHighway extends State {
                 blocksCheckPosLiq = context.invalidBlockFixScanStartLiq();
                 blocksCheckDist = context.invalidBlockFixScanDist();
             }
-            curState = context.isHighwayCorrect(blocksCheckPos, blocksCheckPosLiq, blocksCheckDist, false);
+            curState = context.scanner().isHighwayCorrect(blocksCheckPos, blocksCheckPosLiq, blocksCheckDist, false);
             if (curState == HighwayBlockState.Blocks) {
                 if (!context.invalidBlockFixActive()) {
-                    Helper.HELPER.logDirect("Fixing invalid blocks: " + String.join("; ", context.lastMismatches()));
+                    Helper.HELPER.logDirect("Fixing invalid blocks: " + String.join("; ", context.scanner().lastMismatches()));
                     context.startInvalidBlockFix(startCheckPos, startCheckPosLiq, blocksCheckDist);
                     context.transitionTo(HighwayState.Nothing);
                     context.resetTimer();
                     return;
                 }
-                context.noteInvalidBlockFixProgress(context.lastMismatches());
+                context.noteInvalidBlockFixProgress(context.scanner().lastMismatches());
                 if (context.invalidBlockFixStalled()) {
                     Helper.HELPER.logDirect("Invalid block fix stalled, restarting builder.");
                     context.startInvalidBlockFix(context.invalidBlockFixScanStart(), context.invalidBlockFixScanStartLiq(), context.invalidBlockFixScanDist());
@@ -349,20 +351,20 @@ public class BuildingHighway extends State {
         if (context.timer() >= 10) {
             int food = context.playerContext().player().getFoodData().getFoodLevel();
             MobEffectInstance fireRest = context.playerContext().player().getEffect(MobEffects.FIRE_RESISTANCE);
-            boolean burning = context.playerContext().player().isOnFire() && (fireRest == null || fireRest.getDuration() < context.fireRestMinDuration());
+            boolean burning = context.playerContext().player().isOnFire() && (fireRest == null || fireRest.getDuration() < context.eating().fireRestMinDuration());
             // Golden carrots feed us far more per eat; gapples are kept for fire, lava and low health
-            boolean carrots = context.canEatGoldenCarrots();
+            boolean carrots = context.eating().canEatGoldenCarrots();
             if (burning || !carrots && food <= 16) {
                 Helper.HELPER.logDirect("Eating a gapple.");
-                context.clearSourceBlocks(); // Should fix occasional crash after eating gapples
+                context.liquidRemoval().clearSourceBlocks(); // Should fix occasional crash after eating gapples
                 context.transitionTo(HighwayState.LiquidRemovalGapplePrep);
                 context.baritone().getInputOverrideHandler().clearAllKeys();
                 context.baritone().getPathingBehavior().cancelEverything();
                 return;
             }
-            if (carrots && food <= context.goldenCarrotEatFoodThreshold()) {
+            if (carrots && food <= context.eating().goldenCarrotEatFoodThreshold()) {
                 Helper.HELPER.logDirect("Eating a golden carrot.");
-                context.setGoldenCarrotEatReturnState(HighwayState.Nothing);
+                context.eating().setGoldenCarrotEatReturnState(HighwayState.Nothing);
                 context.transitionTo(HighwayState.GoldenCarrotEatPrep);
                 context.baritone().getInputOverrideHandler().clearAllKeys();
                 context.baritone().getPathingBehavior().cancelEverything();

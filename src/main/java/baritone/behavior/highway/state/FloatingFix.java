@@ -34,7 +34,7 @@ public class FloatingFix extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        int pickSlot = context.putPickaxeHotbar();
+        int pickSlot = context.inventory().putPickaxeHotbar();
         if (pickSlot == -1) {
             Helper.HELPER.logDirect("Error getting pick slot");
             context.transitionTo(HighwayState.Nothing);
@@ -45,7 +45,7 @@ public class FloatingFix extends State {
             context.playerContext().player().getInventory().setSelectedSlot(pickSlot);
         }
 
-        Rotation floatingReachable = context.floatingFixReachablesRemoveFirst();
+        Rotation floatingReachable = context.recovery().floatingFixReachablesRemoveFirst();
         if (floatingReachable != null) {
             context.baritone().getLookBehavior().updateTarget(floatingReachable, true);
             context.baritone().getInputOverrideHandler().clearAllKeys();

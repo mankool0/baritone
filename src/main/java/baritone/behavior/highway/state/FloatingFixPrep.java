@@ -37,7 +37,7 @@ public class FloatingFixPrep extends State {
 
     @Override
     public void handle(HighwayContext context) {
-        context.clearFloatingFixReachables();
+        context.recovery().clearFloatingFixReachables();
         for (int x = -1; x <= 1; x++) {
             for (int z = -1; z <= 1; z++) {
                 for (int y = -1; y <= 1; y++) {
@@ -45,7 +45,7 @@ public class FloatingFixPrep extends State {
                     BlockState state = context.playerContext().world().getBlockState(context.playerContext().playerFeet().offset(x, y, z));
                     Block block = state.getBlock();
                     if (block != Blocks.BEDROCK && !(block instanceof LiquidBlock) && !(block instanceof AirBlock) && curIssuePosReachable.isPresent()) {
-                        context.addFloatingFixReachables(curIssuePosReachable.get());
+                        context.recovery().addFloatingFixReachables(curIssuePosReachable.get());
                     }
                 }
             }
