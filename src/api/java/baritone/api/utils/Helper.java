@@ -24,6 +24,7 @@ import net.minecraft.client.GuiMessageTag;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
+import org.slf4j.LoggerFactory;
 
 import java.util.Arrays;
 import java.util.Calendar;
@@ -157,6 +158,21 @@ public interface Helper {
         // We won't log debug chat into toasts
         // Because only a madman would want that extreme spam -_-
         logDirect(message, false);
+    }
+
+    /**
+     * Send a message to chat if chatDebug is on, otherwise only to the game log. For diagnostics worth keeping
+     * that nobody needs to see in chat
+     *
+     * @param message The message to log
+     */
+    default void logDiagnostic(String message) {
+        if (BaritoneAPI.getSettings().chatDebug.value) {
+            logDirect(message, false);
+            return;
+        }
+        // the game log's pattern leaves out the logger name, so the prefix keeps these greppable
+        LoggerFactory.getLogger("Baritone").info("[Baritone] {}", message);
     }
 
     /**

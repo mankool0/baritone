@@ -649,12 +649,12 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         if (!highwayContext.printerTallied()) {
             return; // a second stop right after the first
         }
-        Helper.HELPER.logDirect("Build summary up to " + (ctx.player() != null ? ctx.playerFeet() : "here")
+        Helper.HELPER.logDiagnostic("Build summary up to " + (ctx.player() != null ? ctx.playerFeet() : "here")
                 + (highwayContext.endPos() != null ? ", building towards " + highwayContext.endPos() : "") + ":");
-        Helper.HELPER.logDirect(highwayContext.walkGateDiagnostic());
-        Helper.HELPER.logDirect(highwayContext.printerDiagnostic());
-        Helper.HELPER.logDirect(baritone.getPacketTrace().diagnostic());
-        Helper.HELPER.logDirect(setbacks.diagnostic());
+        Helper.HELPER.logDiagnostic(highwayContext.walkGateDiagnostic());
+        Helper.HELPER.logDiagnostic(highwayContext.printerDiagnostic());
+        Helper.HELPER.logDiagnostic(baritone.getPacketTrace().diagnostic());
+        Helper.HELPER.logDiagnostic(setbacks.diagnostic());
     }
 
     @Override
@@ -669,12 +669,13 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         }
         Helper.HELPER.logDirect("Timer: " + highwayContext.timer());
         Helper.HELPER.logDirect("startShulkerCount: " + highwayContext.startShulkerCount());
-        Helper.HELPER.logDirect(highwayContext.frontDistanceDiagnostic());
-        Helper.HELPER.logDirect(highwayContext.walkGateDiagnostic());
-        Helper.HELPER.logDirect(highwayContext.printerDiagnostic());
-        Helper.HELPER.logDirect(baritone.getPacketTrace().diagnostic());
-        Helper.HELPER.logDirect(setbacks.diagnostic());
-        highwayContext.stateDwellDiagnostic(12).forEach(Helper.HELPER::logDirect);
+        // nothing reads these off chat, so they go to the game log unless chatDebug is on
+        Helper.HELPER.logDiagnostic(highwayContext.frontDistanceDiagnostic());
+        Helper.HELPER.logDiagnostic(highwayContext.walkGateDiagnostic());
+        Helper.HELPER.logDiagnostic(highwayContext.printerDiagnostic());
+        Helper.HELPER.logDiagnostic(baritone.getPacketTrace().diagnostic());
+        Helper.HELPER.logDiagnostic(setbacks.diagnostic());
+        highwayContext.stateDwellDiagnostic(12).forEach(Helper.HELPER::logDiagnostic);
     }
 
     @Override
