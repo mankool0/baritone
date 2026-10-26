@@ -44,9 +44,11 @@ public class GoldenCarrotEat extends State {
             return;
         }
 
-        boolean screenOpen = context.playerContext().minecraft().screen != null;
-        if (!screenOpen) {
-            // Only count while the key can actually be held; with a screen open not progressing is expected
+        boolean containerOpen = context.playerContext().player().hasContainerOpen();
+        if (!containerOpen) {
+            // Only count while we can eat; an open container is closed first, so no progress then is expected.
+            // isUsingItem() is the client's prediction, so this only catches an eat the client won't
+            // start; holdUseToEat() retries the ones the server dropped.
             if (context.playerContext().player().isUsingItem()) {
                 heldWithoutEatingTicks = 0;
             } else {
@@ -54,21 +56,19 @@ public class GoldenCarrotEat extends State {
             }
         }
 
-        if (context.timer() <= 120 && heldWithoutEatingTicks <= 40) {
+        if (heldWithoutEatingTicks <= 40) {
             NetherHighwayBuilderBehavior.suppressHitResult = true;
-            if (!screenOpen) {
-                context.playerContext().minecraft().options.keyUse.setDown(true);
-            } else if (context.playerContext().player().hasContainerOpen()) {
+            if (containerOpen) {
                 context.playerContext().player().closeContainer();
+            } else {
+                context.holdUseToEat();
             }
         } else {
-            if (heldWithoutEatingTicks > 40) {
-                Helper.HELPER.logDirect("Golden carrot eat isn't progressing (server never confirmed it), re-syncing the hotbar slot.");
-            }
+            Helper.HELPER.logDirect("Golden carrot eat isn't starting, re-selecting the golden carrot slot.");
             NetherHighwayBuilderBehavior.suppressHitResult = false;
             context.playerContext().minecraft().options.keyUse.setDown(false);
             context.baritone().getInputOverrideHandler().clearAllKeys();
-            context.transitionTo(HighwayState.GoldenCarrotEatPrep); // Check if we're fed now
+            context.transitionTo(HighwayState.GoldenCarrotEatPrep);
             context.resetTimer();
         }
     }

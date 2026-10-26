@@ -29,7 +29,6 @@ public enum HighwayState {
     LiquidRemovalPrepWait,
     LiquidRemovalPathingBack,
     LiquidRemovalGapplePrep,
-    LiquidRemovalGapplePreEat,
     LiquidRemovalGappleEat,
     LiquidRemovalPathing,
     //LiquidRemovalPlacing,
@@ -101,11 +100,9 @@ public enum HighwayState {
     CrystalRemoval,
 
     EmergencyGapplePrep,
-    EmergencyGapplePreEat,
     EmergencyGappleEat,
 
     GoldenCarrotEatPrep,
-    GoldenCarrotPreEat,
     GoldenCarrotEat,
 
     MobCombat,

@@ -41,6 +41,8 @@ import baritone.utils.EntityHole;
 import baritone.utils.PendingPlaces;
 import baritone.utils.ServerDigTarget;
 import baritone.utils.accessor.IClientLevel;
+import baritone.utils.accessor.ILivingEntity;
+import baritone.utils.accessor.IMinecraft;
 import it.unimi.dsi.fastutil.ints.IntArrayFIFOQueue;
 import net.minecraft.client.multiplayer.prediction.BlockStatePredictionHandler;
 import net.minecraft.client.player.LocalPlayer;
@@ -1069,10 +1071,48 @@ public class HighwayContext {
     // effects when any code path (mob combat, floating fix, stuck handling, ...) yanks the state
     // machine out of them.
     private static final EnumSet<HighwayState> EAT_STATES = EnumSet.of(
-            HighwayState.EmergencyGapplePrep, HighwayState.EmergencyGapplePreEat, HighwayState.EmergencyGappleEat,
-            HighwayState.LiquidRemovalGapplePrep, HighwayState.LiquidRemovalGapplePreEat, HighwayState.LiquidRemovalGappleEat,
-            HighwayState.GoldenCarrotEatPrep, HighwayState.GoldenCarrotPreEat, HighwayState.GoldenCarrotEat
+            HighwayState.EmergencyGapplePrep, HighwayState.EmergencyGappleEat,
+            HighwayState.LiquidRemovalGapplePrep, HighwayState.LiquidRemovalGappleEat,
+            HighwayState.GoldenCarrotEatPrep, HighwayState.GoldenCarrotEat
     );
+
+    // Ticks a predicted eat may go without the server confirming it before we press use again
+    private static final int EAT_CONFIRM_TICKS = 20;
+
+    /**
+     * Eats the selected food for this tick. Call it with no container open; a screen is fine.
+     * Vanilla presses a held use key only from handleKeybinds(), which never runs while a screen is
+     * open (an unfocused window opens the pause menu), so we press it ourselves. That sets
+     * rightClickDelay, so handleKeybinds() won't start a second use this tick. The held key keeps
+     * it from releasing ours.
+     * The client predicts a use as soon as it sends one, and only the server's using-item flag
+     * ends it again. A use the server dropped stays predicted, and nothing sends another. Once a use
+     * goes unconfirmed for EAT_CONFIRM_TICKS, release it and leave the key up this tick, so the
+     * next tick starts a fresh one.
+     */
+    public void holdUseToEat() {
+        LocalPlayer player = playerContext.player();
+        if (player.isUsingItem()) {
+            if (player.getTicksUsingItem() > EAT_CONFIRM_TICKS && !((ILivingEntity) player).isServerUsingItem()) {
+                Helper.HELPER.logDiagnostic("Server never confirmed the eat after " + player.getTicksUsingItem() + " ticks, pressing use again.");
+                releaseUseToEat();
+                return;
+            }
+        } else if (player.connection.hasClientLoaded() && ((IMinecraft) playerContext.minecraft()).getRightClickDelay() == 0) {
+            // The server drops uses until the client has loaded, and the loading screen no longer stops us pressing
+            ((IMinecraft) playerContext.minecraft()).callStartUseItem();
+        }
+        playerContext.minecraft().options.keyUse.setDown(true);
+    }
+
+    /** Lets go of an eat. Releasing the key alone does that only through handleKeybinds(), which a screen stops. */
+    public void releaseUseToEat() {
+        playerContext.minecraft().options.keyUse.setDown(false);
+        LocalPlayer player = playerContext.player();
+        if (player != null && player.isUsingItem()) {
+            playerContext.minecraft().gameMode.releaseUsingItem(player);
+        }
+    }
 
     public void transitionTo(HighwayState nextState) {
         Helper.HELPER.logDebug(currentState + " -> " + nextState);
@@ -1088,7 +1128,7 @@ public class HighwayContext {
                 && !EAT_STATES.contains(nextState)) {
             NetherHighwayBuilderBehavior.suppressHitResult = false;
             if (playerContext.minecraft() != null) {
-                playerContext.minecraft().options.keyUse.setDown(false);
+                releaseUseToEat();
             }
         }
         if (currentState != null && currentState.getState() != nextState) {
@@ -1339,7 +1379,7 @@ public class HighwayContext {
         NetherHighwayBuilderBehavior.suppressHitResult = false;
         if (playerContext.minecraft() != null) {
             playerContext.minecraft().options.keyJump.setDown(false);
-            playerContext.minecraft().options.keyUse.setDown(false);
+            releaseUseToEat();
         }
     }
 
@@ -2033,8 +2073,8 @@ public class HighwayContext {
 
     public void handle() {
         HighwayState currentStateEnum = currentState.getState();
-        boolean inEmergencyEat = currentStateEnum == HighwayState.EmergencyGapplePrep || currentStateEnum == HighwayState.EmergencyGapplePreEat || currentStateEnum == HighwayState.EmergencyGappleEat;
-        boolean inCarrotEat = currentStateEnum == HighwayState.GoldenCarrotEatPrep || currentStateEnum == HighwayState.GoldenCarrotPreEat || currentStateEnum == HighwayState.GoldenCarrotEat;
+        boolean inEmergencyEat = currentStateEnum == HighwayState.EmergencyGapplePrep || currentStateEnum == HighwayState.EmergencyGappleEat;
+        boolean inCarrotEat = currentStateEnum == HighwayState.GoldenCarrotEatPrep || currentStateEnum == HighwayState.GoldenCarrotEat;
         boolean inCombat = currentStateEnum == HighwayState.MobCombat || currentStateEnum == HighwayState.MobCombatReturn;
         boolean inRecovery = currentStateEnum == HighwayState.FallRecovery;
         boolean inPortalEscape = currentStateEnum == HighwayState.PortalEscape;
@@ -2058,7 +2098,7 @@ public class HighwayContext {
                 return;
             }
         }
-        boolean inLiquidEat = currentStateEnum == HighwayState.LiquidRemovalGapplePrep || currentStateEnum == HighwayState.LiquidRemovalGapplePreEat || currentStateEnum == HighwayState.LiquidRemovalGappleEat;
+        boolean inLiquidEat = currentStateEnum == HighwayState.LiquidRemovalGapplePrep || currentStateEnum == HighwayState.LiquidRemovalGappleEat;
         if (!inEmergencyEat && !inLiquidEat && !inRecovery && !inPortalEscape && (!inCombat || settings.highwayEmergencyEatDuringCombat.value)) {
             if (currentStateEnum != HighwayState.Nothing) {
                 float healthThreshold = gappleEatHealthThreshold();
@@ -2802,8 +2842,8 @@ public class HighwayContext {
 
     public boolean healthCheck() {
         if (settings.highwayDcOnHealthLoss.value && playerContext.player().getHealth() < cachedHealth &&
-                currentState.getState() != HighwayState.LiquidRemovalGapplePrep && currentState.getState() != HighwayState.LiquidRemovalGapplePreEat && currentState.getState() != HighwayState.LiquidRemovalGappleEat &&
-                currentState.getState() != HighwayState.EmergencyGapplePrep && currentState.getState() != HighwayState.EmergencyGapplePreEat && currentState.getState() != HighwayState.EmergencyGappleEat &&
+                currentState.getState() != HighwayState.LiquidRemovalGapplePrep && currentState.getState() != HighwayState.LiquidRemovalGappleEat &&
+                currentState.getState() != HighwayState.EmergencyGapplePrep && currentState.getState() != HighwayState.EmergencyGappleEat &&
                 currentState.getState() != HighwayState.FallRecovery) {
             Component dcMsg = Component.literal("Lost " + (cachedHealth - playerContext.player().getHealth()) + " health. Reconnect");
             Helper.HELPER.logDirect(dcMsg);

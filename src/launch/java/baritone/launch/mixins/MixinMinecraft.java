@@ -24,6 +24,7 @@ import baritone.api.event.events.TickEvent;
 import baritone.api.event.events.WorldEvent;
 import baritone.api.event.events.type.EventState;
 import baritone.behavior.highway.NetherHighwayBuilderBehavior;
+import baritone.utils.accessor.IMinecraft;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -33,6 +34,8 @@ import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
+import org.spongepowered.asm.mixin.gen.Accessor;
+import org.spongepowered.asm.mixin.gen.Invoker;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
@@ -46,7 +49,7 @@ import java.util.function.BiFunction;
  * @since 7/31/2018
  */
 @Mixin(Minecraft.class)
-public class MixinMinecraft {
+public abstract class MixinMinecraft implements IMinecraft {
 
     @Shadow
     public LocalPlayer player;
@@ -55,6 +58,14 @@ public class MixinMinecraft {
 
     @Unique
     private BiFunction<EventState, TickEvent.Type, TickEvent> tickProvider;
+
+    @Accessor("rightClickDelay")
+    @Override
+    public abstract int getRightClickDelay();
+
+    @Invoker("startUseItem")
+    @Override
+    public abstract void callStartUseItem();
 
     @Inject(
             method = "<init>",

@@ -46,8 +46,10 @@ public class LiquidRemovalGappleEat extends State {
             return;
         }
 
-        boolean screenOpen = context.playerContext().minecraft().screen != null;
-        if (!screenOpen) {
+        boolean containerOpen = context.playerContext().player().hasContainerOpen();
+        if (!containerOpen) {
+            // isUsingItem() is the client's prediction, so this only catches an eat the client won't
+            // start; holdUseToEat() retries the ones the server dropped.
             if (context.playerContext().player().isUsingItem()) {
                 heldWithoutEatingTicks = 0;
             } else {
@@ -55,21 +57,19 @@ public class LiquidRemovalGappleEat extends State {
             }
         }
 
-        if (context.timer() <= 120 && heldWithoutEatingTicks <= 40) {
+        if (heldWithoutEatingTicks <= 40) {
             NetherHighwayBuilderBehavior.suppressHitResult = true;
-            if (!screenOpen) {
-                context.playerContext().minecraft().options.keyUse.setDown(true);
-            } else if (context.playerContext().player().hasContainerOpen()) {
+            if (containerOpen) {
                 context.playerContext().player().closeContainer();
+            } else {
+                context.holdUseToEat();
             }
         } else {
-            if (heldWithoutEatingTicks > 40) {
-                Helper.HELPER.logDirect("Gapple eat isn't progressing (server never confirmed it), re-syncing the hotbar slot.");
-            }
+            Helper.HELPER.logDirect("Gapple eat isn't starting, re-selecting the gapple slot.");
             NetherHighwayBuilderBehavior.suppressHitResult = false;
             context.playerContext().minecraft().options.keyUse.setDown(false);
             context.baritone().getInputOverrideHandler().clearAllKeys();
-            context.transitionTo(HighwayState.LiquidRemovalGapplePrep); // Check if we have fire resistance now
+            context.transitionTo(HighwayState.LiquidRemovalGapplePrep);
             context.resetTimer();
         }
     }

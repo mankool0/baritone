@@ -49,9 +49,6 @@ public class StateFactory {
             case LiquidRemovalGapplePrep -> {
                 return new LiquidRemovalGapplePrep(highwayState);
             }
-            case LiquidRemovalGapplePreEat -> {
-                return new LiquidRemovalGapplePreEat(highwayState);
-            }
             case LiquidRemovalGappleEat -> {
                 return new LiquidRemovalGappleEat(highwayState);
             }
@@ -232,17 +229,11 @@ public class StateFactory {
             case EmergencyGapplePrep -> {
                 return new EmergencyGapplePrep(highwayState);
             }
-            case EmergencyGapplePreEat -> {
-                return new EmergencyGapplePreEat(highwayState);
-            }
             case EmergencyGappleEat -> {
                 return new EmergencyGappleEat(highwayState);
             }
             case GoldenCarrotEatPrep -> {
                 return new GoldenCarrotEatPrep(highwayState);
-            }
-            case GoldenCarrotPreEat -> {
-                return new GoldenCarrotPreEat(highwayState);
             }
             case GoldenCarrotEat -> {
                 return new GoldenCarrotEat(highwayState);

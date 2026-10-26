@@ -50,7 +50,7 @@ public class LiquidRemovalGapplePrep extends State {
         }
 
         context.playerContext().player().getInventory().setSelectedSlot(gappleSlot);
-        context.transitionTo(HighwayState.LiquidRemovalGapplePreEat);
+        context.transitionTo(HighwayState.LiquidRemovalGappleEat);
         context.resetTimer();
     }
 }

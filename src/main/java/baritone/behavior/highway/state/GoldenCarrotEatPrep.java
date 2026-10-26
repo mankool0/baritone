@@ -51,7 +51,7 @@ public class GoldenCarrotEatPrep extends State {
         }
 
         context.playerContext().player().getInventory().setSelectedSlot(carrotSlot);
-        context.transitionTo(HighwayState.GoldenCarrotPreEat);
+        context.transitionTo(HighwayState.GoldenCarrotEat);
         context.resetTimer();
     }
 }

@@ -20,7 +20,6 @@ package baritone.behavior.highway.state;
 import baritone.api.pathing.goals.GoalBlock;
 import baritone.api.utils.BetterBlockPos;
 import baritone.api.utils.Helper;
-import baritone.api.utils.input.Input;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.NetherHighwayBuilderBehavior;
 import baritone.behavior.highway.State;
@@ -71,7 +70,7 @@ public class FallRecovery extends State {
         }
         // Done eating
         NetherHighwayBuilderBehavior.suppressHitResult = false;
-        context.playerContext().minecraft().options.keyUse.setDown(false);
+        context.releaseUseToEat();
 
         if (context.recoveryTarget() == null) {
             BetterBlockPos target = context.computeRecoveryTarget();
@@ -120,10 +119,10 @@ public class FallRecovery extends State {
         // suppressHitResult nulls the hitResult inside startUseItem() via a mixin redirect, preventing
         // block/container interaction while keyUse is held.
         NetherHighwayBuilderBehavior.suppressHitResult = true;
-        if (context.playerContext().minecraft().screen == null) {
-            context.playerContext().minecraft().options.keyUse.setDown(true);
+        if (context.playerContext().player().hasContainerOpen()) {
+            context.playerContext().player().closeContainer();
         } else {
-            context.baritone().getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
+            context.holdUseToEat();
         }
         return true;
     }
