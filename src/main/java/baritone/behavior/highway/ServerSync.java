@@ -64,6 +64,16 @@ public class ServerSync extends ContextComponent {
         super(ctx);
     }
 
+    @Override
+    void onBuildStart() {
+        resetObsidianDrop();
+    }
+
+    @Override
+    void onTeardown() {
+        clearThresholdConfirm();
+    }
+
     /**
      * Latch a full container content sync. Called off the netty thread from the packet handler, so
      * the field is volatile and nothing here touches the world or the player.
@@ -248,7 +258,7 @@ public class ServerSync extends ContextComponent {
         obsidianDroppedSuddenly = false;
     }
 
-    public void resetObsidianDrop() {
+    private void resetObsidianDrop() {
         lastObsidianCount = -1;
         obsidianDroppedSuddenly = false;
     }

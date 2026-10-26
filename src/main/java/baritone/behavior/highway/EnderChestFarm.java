@@ -111,6 +111,11 @@ public class EnderChestFarm extends ContextComponent {
         super(ctx);
     }
 
+    @Override
+    void onBuildStart() {
+        resetFarmForRun();
+    }
+
     /** Rate limit for the "obsidian doesn't fit" log: states are re-created on every transition, so the throttle lives here. */
     public boolean obsidianStuckLogDue() {
         if (ctx.contextTick() - lastObsidianStuckLogTick < 200) {
@@ -562,25 +567,25 @@ public class EnderChestFarm extends ContextComponent {
 
     private int scanRunObsidianNeed() {
         int max = settings.highwayFarmForRunMaxObsidian.value;
-        if (layout.endPos() == null || max <= 0) {
+        if (layout().endPos() == null || max <= 0) {
             return -1;
         }
         // The range isHighwayEndComplete scans, so the count is what stands between us and the end
-        Vec3 direction = new Vec3(layout.highwayDirection().getX(), layout.highwayDirection().getY(), layout.highwayDirection().getZ());
+        Vec3 direction = new Vec3(layout().highwayDirection().getX(), layout().highwayDirection().getY(), layout().highwayDirection().getZ());
         Vec3 feet = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
-        BetterBlockPos feetClosest = layout.getClosestPoint(layout.originVector(), direction, feet, LocationType.HighwayBuild);
-        BlockPos startPos = layout.sliceAlongLine(layout.originVector(), new Vec3(feetClosest.getX(), feetClosest.getY(), feetClosest.getZ()), -layout.highwayCheckBackDistance(), LocationType.HighwayBuild);
-        int distanceToCheck = layout.stepsAlongHighway(startPos, layout.endPos()) + 1;
-        int scanT0 = layout.pattern().isCustom() ? layout.sliceIndexOf(startPos, layout.originVector()) : 0;
+        BetterBlockPos feetClosest = layout().getClosestPoint(layout().originVector(), direction, feet, LocationType.HighwayBuild);
+        BlockPos startPos = layout().sliceAlongLine(layout().originVector(), new Vec3(feetClosest.getX(), feetClosest.getY(), feetClosest.getZ()), -layout().highwayCheckBackDistance(), LocationType.HighwayBuild);
+        int distanceToCheck = layout().stepsAlongHighway(startPos, layout().endPos()) + 1;
+        int scanT0 = layout().pattern().isCustom() ? layout().sliceIndexOf(startPos, layout().originVector()) : 0;
         int need = 0;
         for (int i = distanceToCheck - 1; i >= 1; i--) {
-            BlockPos curPos = layout.pattern().isCustom()
-                    ? startPos.offset(layout.sliceDelta(scanT0, i))
-                    : startPos.offset(i * layout.highwayDirection().getX(), 0, i * layout.highwayDirection().getZ());
-            CompositeSchematic sliceSchem = layout.schematicForSlice(scanT0 + i, curPos);
-            for (int y = 0; y < layout.schematic().heightY(); y++) {
-                for (int z = 0; z < layout.schematic().lengthZ(); z++) {
-                    for (int x = 0; x < layout.schematic().widthX(); x++) {
+            BlockPos curPos = layout().pattern().isCustom()
+                    ? startPos.offset(layout().sliceDelta(scanT0, i))
+                    : startPos.offset(i * layout().highwayDirection().getX(), 0, i * layout().highwayDirection().getZ());
+            CompositeSchematic sliceSchem = layout().schematicForSlice(scanT0 + i, curPos);
+            for (int y = 0; y < layout().schematic().heightY(); y++) {
+                for (int z = 0; z < layout().schematic().lengthZ(); z++) {
+                    for (int x = 0; x < layout().schematic().widthX(); x++) {
                         BlockPos pos = new BlockPos(x + curPos.getX(), y + curPos.getY(), z + curPos.getZ());
                         if (!baritone.bsi.worldContainsLoadedChunk(pos.getX(), pos.getZ())) {
                             return -1;
@@ -617,14 +622,14 @@ public class EnderChestFarm extends ContextComponent {
 
     /** The farm being set up breaks loose chests only and never places the ender chest shulker */
     public boolean farmLooseChests() {
-        return farmLooseChests && layout.paving();
+        return farmLooseChests && layout().paving();
     }
 
     public void setFarmLooseChests(boolean farmLooseChests) {
         this.farmLooseChests = farmLooseChests;
     }
 
-    public void resetFarmForRun() {
+    private void resetFarmForRun() {
         runObsidianNeedTick = -1;
         farmRunChests = -1;
         farmLooseChests = false;

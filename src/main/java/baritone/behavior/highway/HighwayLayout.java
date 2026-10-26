@@ -31,8 +31,10 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * Where the highway runs: its direction, pattern and schematics, and the parallel lines everything
- * along it is anchored to, all set up by nhwbuild. Also the slice arithmetic for stepping along them.
+ * Where the highway runs: its direction, pattern and schematics, the parallel lines everything along
+ * it is anchored to, and the start and end it is clamped to. nhwbuild works it out once and it never
+ * changes after that; the next nhwbuild builds a new one. Also the slice arithmetic for stepping
+ * along those lines.
  */
 public class HighwayLayout {
     private final Baritone baritone;
@@ -40,32 +42,54 @@ public class HighwayLayout {
 
     private final int highwayCheckBackDistance = 32;
 
-    private CompositeSchematic schematic;
-    /** Per-slice cross-sections for an angled build with rails; null when every slice is the same. */
-    private CompositeSchematic[] patternSchematics;
+    private final Vec3i highwayDirection;
+    private final HighwayPattern pattern;
+    private final boolean paving;
     /** highwayCellOverrides as parsed at nhwbuild; NONE off a lane. */
-    private CellOverrides cellOverrides = CellOverrides.NONE;
-    private WhiteBlackSchematic liqCheckSchem;
-    private BetterBlockPos originBuild;
-    private BetterBlockPos firstStartingPos;
-    private BetterBlockPos endPos; // on the highway line at HighwayBuild Y; null = build forever
-    private Vec3 originVector = new Vec3(0, 0, 0);
-    private Vec3 liqOriginVector = new Vec3(0, 0, 0);
-    private Vec3 backPathOriginVector = new Vec3(0, 0, 0);
-    private Vec3 eChestEmptyShulkOriginVector = new Vec3(0, 0, 0);
+    private final CellOverrides cellOverrides;
+    private final CompositeSchematic schematic;
+    /** Per-slice cross-sections for an angled build with rails; null when every slice is the same. */
+    private final CompositeSchematic[] patternSchematics;
+    private final WhiteBlackSchematic liqCheckSchem;
+    private final Vec3 originVector;
+    private final Vec3 liqOriginVector;
+    private final Vec3 backPathOriginVector;
+    private final Vec3 eChestEmptyShulkOriginVector;
     // the side-storage line mirrored to the road's other side, c=W+2
-    private Vec3 farSideStorageOriginVector = new Vec3(0, 0, 0);
-    private Vec3i highwayDirection = new Vec3i(1, 0, -1);
-    private HighwayPattern pattern = HighwayPattern.NONE;
-    private boolean paving = false;
+    private final Vec3 farSideStorageOriginVector;
+    private final BetterBlockPos firstStartingPos; // projections never land behind it; null = not clamped
+    private final BetterBlockPos endPos; // on the highway line at HighwayBuild Y; null = build forever
 
-    HighwayLayout(Baritone baritone, Settings settings) {
-        this.baritone = baritone;
-        this.settings = settings;
+    private HighwayLayout(Builder b, BetterBlockPos firstStartingPos, BetterBlockPos endPos) {
+        this.baritone = b.baritone;
+        this.settings = b.settings;
+        this.highwayDirection = b.highwayDirection;
+        this.pattern = b.pattern;
+        this.paving = b.paving;
+        this.cellOverrides = b.cellOverrides;
+        this.schematic = b.schematic;
+        this.patternSchematics = b.patternSchematics;
+        this.liqCheckSchem = b.liqCheckSchem;
+        this.originVector = b.originVector;
+        this.liqOriginVector = b.liqOriginVector;
+        this.backPathOriginVector = b.backPathOriginVector;
+        this.eChestEmptyShulkOriginVector = b.eChestEmptyShulkOriginVector;
+        this.farSideStorageOriginVector = b.farSideStorageOriginVector;
+        this.firstStartingPos = firstStartingPos;
+        this.endPos = endPos;
     }
 
-    public BetterBlockPos originBuild() {
-        return originBuild;
+    /** The layout before any nhwbuild: no schematic, so no highway to build. */
+    static HighwayLayout none(Baritone baritone, Settings settings) {
+        return new Builder(baritone, settings).build();
+    }
+
+    /**
+     * This layout clamped to a build's start and end, so no projection lands behind the start or
+     * past the end. Null leaves that side open.
+     */
+    HighwayLayout withBounds(BetterBlockPos firstStartingPos, BetterBlockPos endPos) {
+        return new HighwayLayout(new Builder(this), firstStartingPos, endPos);
     }
 
     public Vec3 originVector() {
@@ -80,16 +104,8 @@ public class HighwayLayout {
         return schematic;
     }
 
-    public void setSchematic(CompositeSchematic schematic) {
-        this.schematic = schematic;
-    }
-
     public CellOverrides cellOverrides() {
         return cellOverrides;
-    }
-
-    public void setCellOverrides(CellOverrides cellOverrides) {
-        this.cellOverrides = cellOverrides == null ? CellOverrides.NONE : cellOverrides;
     }
 
     /** {@code schematic} with the cell overrides applied, its origin at {@code origin}. */
@@ -97,80 +113,36 @@ public class HighwayLayout {
         return cellOverrides.bind(schematic, origin);
     }
 
-    public void setOriginBuild(BetterBlockPos originBuild) {
-        this.originBuild = originBuild;
-    }
-
     public BetterBlockPos firstStartingPos() {
         return firstStartingPos;
-    }
-
-    public void setFirstStartingPos(BetterBlockPos firstStartingPos) {
-        this.firstStartingPos = firstStartingPos;
     }
 
     public BetterBlockPos endPos() {
         return endPos;
     }
 
-    public void setEndPos(BetterBlockPos endPos) {
-        this.endPos = endPos;
-    }
-
-    public void setOriginVector(Vec3 originVector) {
-        this.originVector = originVector;
-    }
-
     public Vec3 liqOriginVector() {
         return liqOriginVector;
-    }
-
-    public void setLiqOriginVector(Vec3 liqOriginVector) {
-        this.liqOriginVector = liqOriginVector;
     }
 
     public Vec3 backPathOriginVector() {
         return backPathOriginVector;
     }
 
-    public void setBackPathOriginVector(Vec3 backPathOriginVector) {
-        this.backPathOriginVector = backPathOriginVector;
-    }
-
     public Vec3 eChestEmptyShulkOriginVector() {
         return eChestEmptyShulkOriginVector;
-    }
-
-    public void seteChestEmptyShulkOriginVector(Vec3 eChestEmptyShulkOriginVector) {
-        this.eChestEmptyShulkOriginVector = eChestEmptyShulkOriginVector;
     }
 
     public Vec3 farSideStorageOriginVector() {
         return farSideStorageOriginVector;
     }
 
-    public void setFarSideStorageOriginVector(Vec3 farSideStorageOriginVector) {
-        this.farSideStorageOriginVector = farSideStorageOriginVector;
-    }
-
     public WhiteBlackSchematic liqCheckSchem() {
         return liqCheckSchem;
     }
 
-    public void setLiqCheckSchem(WhiteBlackSchematic liqCheckSchem) {
-        this.liqCheckSchem = liqCheckSchem;
-    }
-
-    public void setHighwayDirection(Vec3i highwayDirection) {
-        this.highwayDirection = highwayDirection;
-    }
-
     public HighwayPattern pattern() {
         return pattern;
-    }
-
-    public void setPattern(HighwayPattern pattern) {
-        this.pattern = pattern == null ? HighwayPattern.NONE : pattern;
     }
 
     /**
@@ -267,10 +239,6 @@ public class HighwayLayout {
         return pattern.standOffSlices(sliceIndexOf(from, lineOriginFor(locType)), slices, lowSideLane(locType));
     }
 
-    public void setPatternSchematics(CompositeSchematic[] patternSchematics) {
-        this.patternSchematics = patternSchematics;
-    }
-
     /** True when the cross-section varies from slice to slice (an angled build with rails). */
     public boolean hasPatternSchematics() {
         return patternSchematics != null;
@@ -316,10 +284,6 @@ public class HighwayLayout {
             return new Vec3i(highwayDirection.getX(), 0, highwayDirection.getZ());
         }
         return sliceDelta(sliceIndexOf(currentOrigin, originVector), 1);
-    }
-
-    public void setPaving(boolean paving) {
-        this.paving = paving;
     }
 
     public boolean paving() {
@@ -533,5 +497,104 @@ public class HighwayLayout {
         // back through the projection for the start and end clamps
         return getClosestPoint(lineOrigin, direction,
                 new Vec3(on.getX() + step.getX(), on.getY(), on.getZ() + step.getZ()), locType);
+    }
+
+    /** Collects a layout piece by piece while nhwbuild works it out, then builds it unclamped. */
+    static final class Builder {
+        private final Baritone baritone;
+        private final Settings settings;
+        private Vec3i highwayDirection = new Vec3i(1, 0, -1);
+        private HighwayPattern pattern = HighwayPattern.NONE;
+        private boolean paving = false;
+        private CellOverrides cellOverrides = CellOverrides.NONE;
+        private CompositeSchematic schematic;
+        private CompositeSchematic[] patternSchematics;
+        private WhiteBlackSchematic liqCheckSchem;
+        private Vec3 originVector = new Vec3(0, 0, 0);
+        private Vec3 liqOriginVector = new Vec3(0, 0, 0);
+        private Vec3 backPathOriginVector = new Vec3(0, 0, 0);
+        private Vec3 eChestEmptyShulkOriginVector = new Vec3(0, 0, 0);
+        private Vec3 farSideStorageOriginVector = new Vec3(0, 0, 0);
+
+        Builder(Baritone baritone, Settings settings) {
+            this.baritone = baritone;
+            this.settings = settings;
+        }
+
+        private Builder(HighwayLayout from) {
+            this(from.baritone, from.settings);
+            highwayDirection = from.highwayDirection;
+            pattern = from.pattern;
+            paving = from.paving;
+            cellOverrides = from.cellOverrides;
+            schematic = from.schematic;
+            patternSchematics = from.patternSchematics;
+            liqCheckSchem = from.liqCheckSchem;
+            originVector = from.originVector;
+            liqOriginVector = from.liqOriginVector;
+            backPathOriginVector = from.backPathOriginVector;
+            eChestEmptyShulkOriginVector = from.eChestEmptyShulkOriginVector;
+            farSideStorageOriginVector = from.farSideStorageOriginVector;
+        }
+
+        HighwayLayout build() {
+            return new HighwayLayout(this, null, null);
+        }
+
+        void setHighwayDirection(Vec3i highwayDirection) {
+            this.highwayDirection = highwayDirection;
+        }
+
+        void setPattern(HighwayPattern pattern) {
+            this.pattern = pattern == null ? HighwayPattern.NONE : pattern;
+        }
+
+        void setPaving(boolean paving) {
+            this.paving = paving;
+        }
+
+        void setCellOverrides(CellOverrides cellOverrides) {
+            this.cellOverrides = cellOverrides == null ? CellOverrides.NONE : cellOverrides;
+        }
+
+        void setSchematic(CompositeSchematic schematic) {
+            this.schematic = schematic;
+        }
+
+        void setPatternSchematics(CompositeSchematic[] patternSchematics) {
+            this.patternSchematics = patternSchematics;
+        }
+
+        void setLiqCheckSchem(WhiteBlackSchematic liqCheckSchem) {
+            this.liqCheckSchem = liqCheckSchem;
+        }
+
+        void setOriginVector(Vec3 originVector) {
+            this.originVector = originVector;
+        }
+
+        Vec3 liqOriginVector() {
+            return liqOriginVector;
+        }
+
+        void setLiqOriginVector(Vec3 liqOriginVector) {
+            this.liqOriginVector = liqOriginVector;
+        }
+
+        void setBackPathOriginVector(Vec3 backPathOriginVector) {
+            this.backPathOriginVector = backPathOriginVector;
+        }
+
+        Vec3 eChestEmptyShulkOriginVector() {
+            return eChestEmptyShulkOriginVector;
+        }
+
+        void seteChestEmptyShulkOriginVector(Vec3 eChestEmptyShulkOriginVector) {
+            this.eChestEmptyShulkOriginVector = eChestEmptyShulkOriginVector;
+        }
+
+        void setFarSideStorageOriginVector(Vec3 farSideStorageOriginVector) {
+            this.farSideStorageOriginVector = farSideStorageOriginVector;
+        }
     }
 }

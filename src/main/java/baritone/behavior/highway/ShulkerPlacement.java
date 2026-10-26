@@ -63,11 +63,9 @@ public class ShulkerPlacement extends ContextComponent {
     private final Set<BlockPos> badShulkerSpots = new HashSet<>();
 
     private static final int STAND_FLOOR_TRIES = 3; // builds of a missing side-storage stand floor before giving up on the spot
-    private BlockPos standFloorSpot = null; // floor cell the stand-floor builds are counted against
-    private int standFloorTries = 0;
+    private final SpotAttempts standFloorTries = new SpotAttempts(); // counted against the floor cell
     private static final int STAND_PATH_TRIES = 5; // paths to a side-storage stand that end short of it before giving up on the spot
-    private BlockPos standPathSpot = null; // spot the stand path requests below are counted against
-    private int standPathTries = 0;
+    private final SpotAttempts standPathTries = new SpotAttempts(); // counted against the placing spot
 
     ShulkerPlacement(HighwayContext ctx) {
         super(ctx);
@@ -82,11 +80,11 @@ public class ShulkerPlacement extends ContextComponent {
      * <p>{@code back} counts slices, not blocks - see {@link HighwayLayout#alongLine}.
      */
     private BetterBlockPos shulkerPlaceLocAt(int back) {
-        Vec3 origin = new Vec3(layout.backPathOriginVector().x, layout.backPathOriginVector().y, layout.backPathOriginVector().z);
-        Vec3 direction = new Vec3(layout.highwayDirection().getX(), layout.highwayDirection().getY(), layout.highwayDirection().getZ());
+        Vec3 origin = new Vec3(layout().backPathOriginVector().x, layout().backPathOriginVector().y, layout().backPathOriginVector().z);
+        Vec3 direction = new Vec3(layout().highwayDirection().getX(), layout().highwayDirection().getY(), layout().highwayDirection().getZ());
         Vec3 feet = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
-        BetterBlockPos lane = layout.getClosestPoint(origin, direction, feet, LocationType.ShulkerEchestInteraction);
-        return layout.liftOntoPavement(layout.alongLine(lane, LocationType.ShulkerEchestInteraction, -back));
+        BetterBlockPos lane = layout().getClosestPoint(origin, direction, feet, LocationType.ShulkerEchestInteraction);
+        return layout().liftOntoPavement(layout().alongLine(lane, LocationType.ShulkerEchestInteraction, -back));
     }
 
     /**
@@ -99,7 +97,7 @@ public class ShulkerPlacement extends ContextComponent {
      */
     public BetterBlockPos shulkerPlaceLocClearOfThieves() {
         double radius = settings.highwayShulkerTheftGuardRadius.value;
-        int anchorBack = layout.slicesForBlocks(SHULKER_PLACE_ANCHOR_BACK);
+        int anchorBack = layout().slicesForBlocks(SHULKER_PLACE_ANCHOR_BACK);
         BetterBlockPos anchor = shulkerPlaceLocAt(anchorBack);
         boolean anchorUsable = isShulkerPlaceSpotUsable(anchor);
         BetterBlockPos thiefDirty = null;
@@ -116,8 +114,8 @@ public class ShulkerPlacement extends ContextComponent {
             }
             if (back != anchorBack) {
                 String where = back >= 0
-                        ? Math.round((back - anchorBack) * layout.stepLength()) + " blocks further back"
-                        : Math.round(-back * layout.stepLength()) + " blocks ahead";
+                        ? Math.round((back - anchorBack) * layout().stepLength()) + " blocks further back"
+                        : Math.round(-back * layout().stepLength()) + " blocks ahead";
                 Helper.HELPER.logDirect(anchorUsable
                         ? "Piglins that could steal the shulker are near the placing location, placing it " + where + "."
                         : "Nothing to set the shulker on at the placing location, placing it " + where + ".");
@@ -134,9 +132,9 @@ public class ShulkerPlacement extends ContextComponent {
      * heading - an angled pattern's slice is shorter than a block.
      */
     private int[] shulkerPlaceScanOffsets() {
-        int anchorBack = layout.slicesForBlocks(SHULKER_PLACE_ANCHOR_BACK);
-        int maxBack = layout.slicesForBlocks(SHULKER_PLACE_MAX_BACK);
-        int maxAhead = layout.slicesForBlocks(SHULKER_PLACE_MAX_AHEAD);
+        int anchorBack = layout().slicesForBlocks(SHULKER_PLACE_ANCHOR_BACK);
+        int maxBack = layout().slicesForBlocks(SHULKER_PLACE_MAX_BACK);
+        int maxAhead = layout().slicesForBlocks(SHULKER_PLACE_MAX_AHEAD);
         int[] offsets = new int[maxBack + maxAhead + 1];
         int i = 0;
         for (int back = anchorBack; back <= maxBack; back++) {
@@ -168,12 +166,12 @@ public class ShulkerPlacement extends ContextComponent {
         }
         // Every cell from the ender chest flow's stand spot up to the shulker flows' - which is one
         // slice further back than -2 wherever an angled pattern jogs there, see standOffSlices
-        int backStand = layout.standOffSlices(placeLoc, LocationType.ShulkerEchestInteraction, -2);
+        int backStand = layout().standOffSlices(placeLoc, LocationType.ShulkerEchestInteraction, -2);
         for (int step = backStand; step <= 1; step++) {
             if (step == 0) {
                 continue;
             }
-            if (!hasFloorUnder(layout.alongLine(placeLoc, LocationType.ShulkerEchestInteraction, step))) {
+            if (!hasFloorUnder(layout().alongLine(placeLoc, LocationType.ShulkerEchestInteraction, step))) {
                 return false;
             }
         }
@@ -319,25 +317,25 @@ public class ShulkerPlacement extends ContextComponent {
     }
 
     public BlockPos findSafeSideStorageSpot(int minBack, int maxBack) {
-        BlockPos behind = scanSideStorageSpots(layout.eChestEmptyShulkOriginVector(), minBack, maxBack, -1);
+        BlockPos behind = scanSideStorageSpots(layout().eChestEmptyShulkOriginVector(), minBack, maxBack, -1);
         if (behind != null) {
             return behind;
         }
         // Nothing usable behind us. At a crossing with another highway the side lane is that
         // highway's corridor rather than our own rail: open air with nothing to set a box on and no
         // floor to stand on. Look the same distance ahead along our own highway instead.
-        BlockPos ahead = scanSideStorageSpots(layout.eChestEmptyShulkOriginVector(), minBack, maxBack, 1);
-        if (ahead != null || layout.pattern().isCustom()) {
+        BlockPos ahead = scanSideStorageSpots(layout().eChestEmptyShulkOriginVector(), minBack, maxBack, 1);
+        if (ahead != null || layout().pattern().isCustom()) {
             // an angled pattern's lane steps follow the low side's slices, which aren't the far side's
             return ahead;
         }
         // A road can run right alongside ours, its rail in our side-storage column the whole way,
         // like the road an area-clearing lane is cut next to. Try the same column on our other side.
-        behind = scanSideStorageSpots(layout.farSideStorageOriginVector(), minBack, maxBack, -1);
+        behind = scanSideStorageSpots(layout().farSideStorageOriginVector(), minBack, maxBack, -1);
         if (behind != null) {
             return behind;
         }
-        return scanSideStorageSpots(layout.farSideStorageOriginVector(), minBack, maxBack, 1);
+        return scanSideStorageSpots(layout().farSideStorageOriginVector(), minBack, maxBack, 1);
     }
 
     /**
@@ -347,18 +345,18 @@ public class ShulkerPlacement extends ContextComponent {
      * @param line a point on the line: this side's or the far side's
      */
     private BlockPos scanSideStorageSpots(Vec3 line, int minDist, int maxDist, int sign) {
-        Vec3 direction = new Vec3(layout.highwayDirection().getX(), layout.highwayDirection().getY(), layout.highwayDirection().getZ());
+        Vec3 direction = new Vec3(layout().highwayDirection().getX(), layout().highwayDirection().getY(), layout().highwayDirection().getZ());
         Vec3 origin = new Vec3(line.x, line.y, line.z);
         // Project our feet once and walk the line in slices from there. Projecting every candidate
         // instead ran each one through the build's start and end clamps: on a short run they all
         // collapsed onto the first and last slice, and the pavement behind the start never got
         // looked at. Slice steps also keep an angled pattern on its path, where shifting our feet
         // by the direction vector would step a 45 degree diagonal away from it.
-        BetterBlockPos feetOnLine = layout.getClosestPoint(origin, direction,
+        BetterBlockPos feetOnLine = layout().getClosestPoint(origin, direction,
                 new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ()),
                 LocationType.SideStorage);
-        for (int slices = layout.slicesForBlocks(minDist); slices <= layout.slicesForBlocks(maxDist); slices++) {
-            BetterBlockPos candidate = layout.alongLine(feetOnLine, LocationType.SideStorage, slices * sign);
+        for (int slices = layout().slicesForBlocks(minDist); slices <= layout().slicesForBlocks(maxDist); slices++) {
+            BetterBlockPos candidate = layout().alongLine(feetOnLine, LocationType.SideStorage, slices * sign);
             if (isSideStorageSpotUsable(candidate)) {
                 return candidate;
             }
@@ -388,7 +386,7 @@ public class ShulkerPlacement extends ContextComponent {
         // We stand one step along the highway from the box to place it and to open it, and one
         // step further back when our own body turns out to be in the way of the placement
         for (int step : new int[]{1, 2}) {
-            BlockPos stand = layout.standOffAlongLine(placeLoc, LocationType.SideStorage, step);
+            BlockPos stand = layout().standOffAlongLine(placeLoc, LocationType.SideStorage, step);
             if (!hasFloorUnder(stand) && !canBuildFloorAt(stand.below())) {
                 return false;
             }
@@ -429,15 +427,10 @@ public class ShulkerPlacement extends ContextComponent {
      * {@code relocateState} instead.
      */
     public void pathToSideStorageStand(BlockPos stand, HighwayState relocateState) {
-        if (!ctx.placeLoc().equals(standPathSpot)) {
-            standPathSpot = ctx.placeLoc();
-            standPathTries = 0;
-        }
-        if (standPathTries++ >= STAND_PATH_TRIES) {
+        if (standPathTries.at(ctx.placeLoc()).next() > STAND_PATH_TRIES) {
             rememberBadShulkerSpot(ctx.placeLoc());
             Helper.HELPER.logDirect("Couldn't find a path to stand next to " + ctx.placeLoc().toShortString() + ", picking a different spot.");
-            standPathSpot = null;
-            standPathTries = 0;
+            standPathTries.clear();
             baritone.getPathingBehavior().cancelEverything();
             ctx.transitionTo(relocateState);
             return;
@@ -447,8 +440,7 @@ public class ShulkerPlacement extends ContextComponent {
 
     /** We made it onto a side-storage stand, so the path requests it took were no failures. */
     public void reachedSideStorageStand() {
-        standPathSpot = null;
-        standPathTries = 0;
+        standPathTries.clear();
     }
 
     /**
@@ -490,15 +482,11 @@ public class ShulkerPlacement extends ContextComponent {
                 continue;
             }
             BlockPos floor = new BlockPos(stand.getX(), stand.getY() - 1, stand.getZ());
-            if (!floor.equals(standFloorSpot)) {
-                standFloorSpot = floor;
-                standFloorTries = 0;
-            }
-            if (!canBuildFloorAt(floor) || standFloorTries++ >= STAND_FLOOR_TRIES) {
+            standFloorTries.at(floor);
+            if (!canBuildFloorAt(floor) || standFloorTries.next() > STAND_FLOOR_TRIES) {
                 rememberBadShulkerSpot(ctx.placeLoc());
                 Helper.HELPER.logDirect("Couldn't build a floor to stand on next to " + ctx.placeLoc().toShortString() + ", picking a different spot.");
-                standFloorSpot = null;
-                standFloorTries = 0;
+                standFloorTries.clear();
                 ctx.transitionTo(relocateState);
                 return true;
             }
@@ -593,7 +581,7 @@ public class ShulkerPlacement extends ContextComponent {
      */
     private boolean clearOrClearable(BlockPos pos) {
         BlockState state = playerContext.world().getBlockState(pos);
-        if (state.getFluidState().is(FluidTags.LAVA) || layout.cellOverrides().kindAt(pos.getX(), pos.getY(), pos.getZ()) != null) {
+        if (state.getFluidState().is(FluidTags.LAVA) || layout().cellOverrides().kindAt(pos.getX(), pos.getY(), pos.getZ()) != null) {
             return false;
         }
         return state.canBeReplaced() || state.getDestroySpeed(playerContext.world(), pos) >= 0;

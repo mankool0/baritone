@@ -46,27 +46,24 @@ public class ContainerRecovery extends ContextComponent {
     private static final int SHULKER_OPEN_RETRIES = 3; // plain re-places to spend before treating an open as stuck
     private static final int SHULKER_OPEN_UNBLOCK_TRIES = 3; // digs at whatever the lid is pushing into, after those
 
-    private BlockPos shulkerOpenFailSpot = null; // spot the open failures below are counted against
-    private int shulkerOpenFailTries = 0;
+    private final SpotAttempts shulkerOpenFails = new SpotAttempts(); // tries at a box or chest that won't open
 
     private static final int SHULKER_SIGHT_DIGS = 6; // a reach-length of blocks is the most that can be in the way
     private static final int SHULKER_SIGHT_WALKS = 3; // rounds of stepping back onto the standing spot
     private static final int SHULKER_SIGHT_DIG_SPINUP = 5; // ticks a dispatched clearArea takes to read as an active builder
     private static final int SHULKER_STAND_CLEAR_TRIES = 3; // walks off the spot to try before giving it up
     private static final int SHULKER_PLACE_REFUSALS = 40; // refused clicks to sit through before the spot is the problem
-    private BlockPos placeRefusedSpot = null;
-    private int placeRefusedTries = 0;
-    private BlockPos standClearSpot = null; // spot the step-off-it attempts below are counted against
-    private int standClearTries = 0;
+    private final SpotAttempts placeRefusals = new SpotAttempts();
+    private final SpotAttempts standClearTries = new SpotAttempts(); // walks off a spot we stand in
     private boolean standClearWalking = false; // a step-off walk we sent and haven't seen finish yet
 
-    private BlockPos shulkerSightFailSpot = null; // spot the sight failures below are counted against
-    private int shulkerSightDigs = 0;
-    private int shulkerSightWalks = 0;
+    // digs at what blocks the line to a placing spot, and walks back onto where we place it from
+    private final SpotAttempts shulkerSightDigs = new SpotAttempts();
+    private final SpotAttempts shulkerSightWalks = new SpotAttempts();
     private long shulkerSightLastDigTick = Long.MIN_VALUE / 2;
-    private BlockPos reachFailSpot = null; // placed container the can't-reach failures below are counted against
-    private int reachDigs = 0;
-    private int reachWalks = 0;
+    // the same for a placed container we can't reach
+    private final SpotAttempts reachDigs = new SpotAttempts();
+    private final SpotAttempts reachWalks = new SpotAttempts();
     private long reachLastDigTick = Long.MIN_VALUE / 2;
     private boolean reachWalking = false; // a walk back onto the standing spot we sent and haven't seen finish yet
     private static final int SNEAK_TAP_TICKS = 4; // two down, two up: see runSneakTap
@@ -81,32 +78,37 @@ public class ContainerRecovery extends ContextComponent {
         super(ctx);
     }
 
+    @Override
+    void onBuildStart() {
+        clearLostShulkerRelogAttempt();
+    }
+
     public BlockPos findMisplacedShulkerBox(int distBack, int distAhead) {
-        if (layout.schematic() == null) {
+        if (layout().schematic() == null) {
             return null;
         }
         // The scan steps the pattern's path a slice at a time, so its start and its length have to
         // be counted the same way: shifting our feet by the direction vector first would anchor the
         // box off the path, and a block count would stop the sweep short of distAhead.
-        int backSlices = layout.slicesForBlocks(distBack);
-        int aheadSlices = layout.slicesForBlocks(distAhead);
+        int backSlices = layout().slicesForBlocks(distBack);
+        int aheadSlices = layout().slicesForBlocks(distAhead);
         Vec3 feetPos = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
-        BlockPos startPos = layout.sliceAlongLine(layout.originVector(), feetPos, -backSlices, LocationType.HighwayBuild);
-        int scanT0 = layout.pattern().isCustom() ? layout.sliceIndexOf(startPos, layout.originVector()) : 0;
+        BlockPos startPos = layout().sliceAlongLine(layout().originVector(), feetPos, -backSlices, LocationType.HighwayBuild);
+        int scanT0 = layout().pattern().isCustom() ? layout().sliceIndexOf(startPos, layout().originVector()) : 0;
         for (int i = 0; i < backSlices + aheadSlices; i++) {
-            BlockPos curPos = layout.pattern().isCustom()
-                    ? startPos.offset(layout.sliceDelta(scanT0, i))
-                    : startPos.offset(i * layout.highwayDirection().getX(), 0, i * layout.highwayDirection().getZ());
-            for (int y = 0; y < layout.schematic().heightY(); y++) {
-                for (int z = 0; z < layout.schematic().lengthZ(); z++) {
-                    for (int x = 0; x < layout.schematic().widthX(); x++) {
+            BlockPos curPos = layout().pattern().isCustom()
+                    ? startPos.offset(layout().sliceDelta(scanT0, i))
+                    : startPos.offset(i * layout().highwayDirection().getX(), 0, i * layout().highwayDirection().getZ());
+            for (int y = 0; y < layout().schematic().heightY(); y++) {
+                for (int z = 0; z < layout().schematic().lengthZ(); z++) {
+                    for (int x = 0; x < layout().schematic().widthX(); x++) {
                         int blockX = x + curPos.getX();
                         int blockY = y + curPos.getY();
                         int blockZ = z + curPos.getZ();
                         if (!baritone.bsi.worldContainsLoadedChunk(blockX, blockZ)) {
                             continue;
                         }
-                        if (layout.cellOverrides().kindAt(blockX, blockY, blockZ) != null) {
+                        if (layout().cellOverrides().kindAt(blockX, blockY, blockZ) != null) {
                             continue; // another road's storage, not our lost box
                         }
                         if (HighwayContext.shulkerBlockList.contains(playerContext.world().getBlockState(new BlockPos(blockX, blockY, blockZ)).getBlock())) {
@@ -179,11 +181,8 @@ public class ContainerRecovery extends ContextComponent {
         if (ctx.shulkerPlacement().canReachShulkerPlacement(key)) {
             return false;
         }
-        if (!key.equals(shulkerSightFailSpot)) {
-            shulkerSightFailSpot = key;
-            shulkerSightDigs = 0;
-            shulkerSightWalks = 0;
-        }
+        shulkerSightDigs.at(key);
+        shulkerSightWalks.at(key);
 
         BlockPos blocker = shulkerPlaceSightBlocker(key);
         if (blocker != null) {
@@ -194,7 +193,7 @@ public class ContainerRecovery extends ContextComponent {
                 ctx.resetTimer();
                 return true;
             }
-            if (shulkerSightDigs++ < SHULKER_SIGHT_DIGS) {
+            if (shulkerSightDigs.next() <= SHULKER_SIGHT_DIGS) {
                 Helper.HELPER.logDirect("No line to the shulker spot at " + key.toShortString() + ", digging out the "
                         + playerContext.world().getBlockState(blocker).getBlock().getName().getString()
                         + " at " + blocker.toShortString() + ".");
@@ -205,7 +204,7 @@ public class ContainerRecovery extends ContextComponent {
                 ctx.resetTimer();
                 return true;
             }
-        } else if (shulkerSightWalks++ < SHULKER_SIGHT_WALKS) {
+        } else if (shulkerSightWalks.next() <= SHULKER_SIGHT_WALKS) {
             ctx.transitionTo(walkCloserState); // nothing in the way, we just aren't on the standing spot
             ctx.resetTimer();
             return true;
@@ -214,7 +213,8 @@ public class ContainerRecovery extends ContextComponent {
         ctx.shulkerPlacement().rememberBadShulkerSpot(key);
         Helper.HELPER.logDirect("Still can't get a clear line to the shulker spot at " + key.toShortString()
                 + ", picking a different one.");
-        shulkerSightFailSpot = null;
+        shulkerSightDigs.clear();
+        shulkerSightWalks.clear();
         baritone.getPathingBehavior().cancelEverything();
         ctx.transitionTo(relocateState != null ? relocateState : HighwayState.Nothing);
         ctx.resetTimer();
@@ -239,11 +239,8 @@ public class ContainerRecovery extends ContextComponent {
         BlockPos key = new BlockPos(spot.getX(), spot.getY(), spot.getZ());
         // a click the last open tick forced would land on whatever the crosshair is on instead
         baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, false);
-        if (!key.equals(reachFailSpot)) {
-            reachFailSpot = key;
-            reachDigs = 0;
-            reachWalks = 0;
-        }
+        reachDigs.at(key);
+        reachWalks.at(key);
         if (!baritone.getBuilderProcess().isPaused() && baritone.getBuilderProcess().isActive()) {
             ctx.transitionTo(retryState);
             ctx.resetTimer();
@@ -260,7 +257,7 @@ public class ContainerRecovery extends ContextComponent {
         if (blocker != null) {
             // a bare clearArea collects nothing, so a box in the way would just be lost
             if (!(playerContext.world().getBlockState(blocker).getBlock() instanceof ShulkerBoxBlock)
-                    && reachDigs++ < SHULKER_SIGHT_DIGS) {
+                    && reachDigs.next() <= SHULKER_SIGHT_DIGS) {
                 Helper.HELPER.logDirect(what + " at " + key.toShortString() + " can't be reached, digging out the "
                         + playerContext.world().getBlockState(blocker).getBlock().getName().getString()
                         + " at " + blocker.toShortString() + ".");
@@ -272,7 +269,7 @@ public class ContainerRecovery extends ContextComponent {
                 ctx.resetTimer();
                 return;
             }
-        } else if (!playerContext.playerFeet().equals(stand) && reachWalks++ < SHULKER_SIGHT_WALKS) {
+        } else if (!playerContext.playerFeet().equals(stand) && reachWalks.next() <= SHULKER_SIGHT_WALKS) {
             // Straight there rather than through the go-to state: the supply, pickaxe and loot chest
             // ones give up once the inventory runs out of what they place, which this just did
             Helper.HELPER.logDirect(what + " at " + key.toShortString() + " can't be reached, walking back to "
@@ -285,7 +282,8 @@ public class ContainerRecovery extends ContextComponent {
         }
 
         ctx.shulkerPlacement().rememberBadShulkerSpot(key);
-        reachFailSpot = null;
+        reachDigs.clear();
+        reachWalks.clear();
         baritone.getPathingBehavior().cancelEverything();
         if (playerContext.world().getBlockState(key).getBlock() instanceof EnderChestBlock) {
             Helper.HELPER.logDirect("Still can't reach the " + what + " at " + key.toShortString()
@@ -312,23 +310,17 @@ public class ContainerRecovery extends ContextComponent {
 
     /** A placement that went through is proof the spot works; drop the line-of-sight failures there. */
     public void noteShulkerPlaced() {
-        shulkerSightFailSpot = null;
-        shulkerSightDigs = 0;
-        shulkerSightWalks = 0;
-        standClearSpot = null;
-        standClearTries = 0;
-        placeRefusedSpot = null;
-        placeRefusedTries = 0;
+        shulkerSightDigs.clear();
+        shulkerSightWalks.clear();
+        standClearTries.clear();
+        placeRefusals.clear();
     }
 
     HighwayState noteShulkerPlaceRefused(BlockPos spot, HighwayState prevHighwayState) {
         BlockPos key = new BlockPos(spot.getX(), spot.getY(), spot.getZ());
-        if (!key.equals(placeRefusedSpot)) {
-            placeRefusedSpot = key;
-            placeRefusedTries = 0;
-        }
-        if (placeRefusedTries++ < SHULKER_PLACE_REFUSALS) {
-            if (placeRefusedTries == 1) {
+        int tries = placeRefusals.at(key).next();
+        if (tries <= SHULKER_PLACE_REFUSALS) {
+            if (tries == 1) {
                 Helper.HELPER.logDirect("Failed to place shulker at " + key.toShortString() + ", retrying");
             }
             return prevHighwayState;
@@ -336,8 +328,7 @@ public class ContainerRecovery extends ContextComponent {
         ctx.shulkerPlacement().rememberBadShulkerSpot(key);
         Helper.HELPER.logDirect("Placing a shulker at " + key.toShortString()
                 + " keeps being refused, picking a different spot.");
-        placeRefusedSpot = null;
-        placeRefusedTries = 0;
+        placeRefusals.clear();
         return HighwayState.Nothing;
     }
 
@@ -351,15 +342,15 @@ public class ContainerRecovery extends ContextComponent {
         BetterBlockPos feet = playerContext.playerFeet();
         // Step back on whichever side of the spot we already stand: the flows differ on that, and
         // crossing over the box to reach the far side is a walk we don't need to make
-        int side = Integer.signum(layout.pattern().isCustom()
-                ? layout.stepsAlongHighway(placeLoc, feet)
-                : (feet.x - placeLoc.getX()) * layout.highwayDirection().getX()
-                + (feet.z - placeLoc.getZ()) * layout.highwayDirection().getZ());
+        int side = Integer.signum(layout().pattern().isCustom()
+                ? layout().stepsAlongHighway(placeLoc, feet)
+                : (feet.x - placeLoc.getX()) * layout().highwayDirection().getX()
+                + (feet.z - placeLoc.getZ()) * layout().highwayDirection().getZ());
         if (side == 0) {
             side = 1;
         }
         for (int step : new int[]{2 * side, 3 * side, -2 * side, -3 * side}) {
-            BlockPos candidate = layout.standOffAlongLine(placeLoc, ctx.placeLocLine(), step);
+            BlockPos candidate = layout().standOffAlongLine(placeLoc, ctx.placeLocLine(), step);
             if (candidate.getX() == feet.x && candidate.getZ() == feet.z) {
                 continue; // where we already are, so pathing there would move us nowhere
             }
@@ -384,21 +375,17 @@ public class ContainerRecovery extends ContextComponent {
             standClearWalking = false;
         }
         if (!playerInWayOfPlacement(key)) {
-            standClearSpot = null;
-            standClearTries = 0;
+            standClearTries.clear();
             return false;
         }
         if (baritone.getCustomGoalProcess().isActive()) {
             ctx.resetTimer();
             return true; // already walking off it
         }
-        if (!key.equals(standClearSpot)) {
-            standClearSpot = key;
-            standClearTries = 0;
-        }
+        standClearTries.at(key);
 
         BlockPos clear = clearStandingSpotFor(key);
-        if (clear != null && standClearTries++ < SHULKER_STAND_CLEAR_TRIES) {
+        if (clear != null && standClearTries.next() <= SHULKER_STAND_CLEAR_TRIES) {
             Helper.HELPER.logDirect("Standing in the shulker spot at " + key.toShortString()
                     + ", stepping back to " + clear.toShortString() + ".");
             baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(new BetterBlockPos(clear)));
@@ -410,8 +397,7 @@ public class ContainerRecovery extends ContextComponent {
         // Nowhere to step to, or the walk never took: the spot itself is the thing to give up on
         ctx.shulkerPlacement().rememberBadShulkerSpot(key);
         Helper.HELPER.logDirect("Can't get out of the shulker spot at " + key.toShortString() + ", picking a different one.");
-        standClearSpot = null;
-        standClearTries = 0;
+        standClearTries.clear();
         baritone.getPathingBehavior().cancelEverything();
         ctx.transitionTo(relocateState != null ? relocateState : HighwayState.Nothing);
         ctx.resetTimer();
@@ -420,9 +406,9 @@ public class ContainerRecovery extends ContextComponent {
 
     /** A box or loot chest that opened is proof its spot is fine; don't carry earlier failures there forward. */
     public void noteContainerOpened() {
-        shulkerOpenFailSpot = null;
-        shulkerOpenFailTries = 0;
-        reachFailSpot = null;
+        shulkerOpenFails.clear();
+        reachDigs.clear();
+        reachWalks.clear();
         refusedOpenSpot = null;
         sneakTapSpot = null;
         sneakTapTicks = 0;
@@ -519,11 +505,7 @@ public class ContainerRecovery extends ContextComponent {
 
     public boolean handleShulkerWouldNotOpen(BlockPos spot) {
         BlockPos key = new BlockPos(spot.getX(), spot.getY(), spot.getZ());
-        if (!key.equals(shulkerOpenFailSpot)) {
-            shulkerOpenFailSpot = key;
-            shulkerOpenFailTries = 0;
-        }
-        shulkerOpenFailTries++;
+        int tries = shulkerOpenFails.at(key).next();
 
         BlockState state = playerContext.world().getBlockState(key);
         if (!(state.getBlock() instanceof ShulkerBoxBlock)) {
@@ -532,13 +514,13 @@ public class ContainerRecovery extends ContextComponent {
         Direction facing = state.getValue(ShulkerBoxBlock.FACING);
         boolean lidHasRoom = ctx.shulkerPlacement().canShulkerOpenToward(key, facing);
 
-        if (lidHasRoom && shulkerOpenFailTries <= SHULKER_OPEN_RETRIES) {
+        if (lidHasRoom && tries <= SHULKER_OPEN_RETRIES) {
             return false; // nothing in the way, so something transient ate the open - retry as before
         }
 
         // Something is in the lid's way. Digging it out beats a new spot
         if (!lidHasRoom && facing != Direction.DOWN
-                && shulkerOpenFailTries <= SHULKER_OPEN_RETRIES + SHULKER_OPEN_UNBLOCK_TRIES) {
+                && tries <= SHULKER_OPEN_RETRIES + SHULKER_OPEN_UNBLOCK_TRIES) {
             BlockPos blocked = key.relative(facing);
             Helper.HELPER.logDirect("Shulker at " + key.toShortString() + " is facing " + facing + " into "
                     + playerContext.world().getBlockState(blocked).getBlock().getName().getString()
@@ -551,9 +533,8 @@ public class ContainerRecovery extends ContextComponent {
 
         ctx.shulkerPlacement().rememberBadShulkerSpot(key);
         Helper.HELPER.logDirect("Shulker at " + key.toShortString() + " still won't open after "
-                + shulkerOpenFailTries + " tries, mining it back to place it somewhere else.");
-        shulkerOpenFailSpot = null;
-        shulkerOpenFailTries = 0;
+                + tries + " tries, mining it back to place it somewhere else.");
+        shulkerOpenFails.clear();
         baritone.getPathingBehavior().cancelEverything();
         ctx.setPlaceLoc(key);
         ctx.transitionTo(HighwayState.MiningMisplacedShulker);
@@ -568,19 +549,15 @@ public class ContainerRecovery extends ContextComponent {
      */
     public boolean handleLootEnderChestWouldNotOpen(BlockPos spot) {
         BlockPos key = new BlockPos(spot.getX(), spot.getY(), spot.getZ());
-        if (!key.equals(shulkerOpenFailSpot)) {
-            shulkerOpenFailSpot = key;
-            shulkerOpenFailTries = 0;
-        }
-        if (++shulkerOpenFailTries <= SHULKER_OPEN_RETRIES) {
+        int tries = shulkerOpenFails.at(key).next();
+        if (tries <= SHULKER_OPEN_RETRIES) {
             return false;
         }
 
         ctx.shulkerPlacement().rememberBadShulkerSpot(key);
         Helper.HELPER.logDirect("Ender chest at " + key.toShortString() + " still won't open after "
-                + shulkerOpenFailTries + " tries, placing one somewhere else.");
-        shulkerOpenFailSpot = null;
-        shulkerOpenFailTries = 0;
+                + tries + " tries, placing one somewhere else.");
+        shulkerOpenFails.clear();
         ctx.resupply().forgetEnderChestAccessLoc(key);
         baritone.getPathingBehavior().cancelEverything();
         ctx.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);

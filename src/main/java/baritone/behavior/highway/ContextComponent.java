@@ -23,20 +23,31 @@ import baritone.api.utils.IPlayerContext;
 
 /**
  * One part of the {@link HighwayContext}, with the handles every part works through. The parts reach
- * each other through {@link #ctx}, except for the layout, which nearly all of them read.
+ * each other through {@link #ctx}, and the running build's layout through {@link #layout()}.
  */
 abstract class ContextComponent {
     protected final HighwayContext ctx;
     protected final Baritone baritone;
     protected final IPlayerContext playerContext;
     protected final Settings settings;
-    protected final HighwayLayout layout;
 
     ContextComponent(HighwayContext ctx) {
         this.ctx = ctx;
         this.baritone = ctx.baritone();
         this.playerContext = ctx.playerContext();
         this.settings = ctx.settings();
-        this.layout = ctx.layout();
+    }
+
+    /** The running build's layout. Every nhwbuild replaces it, so it is never worth keeping. */
+    protected HighwayLayout layout() {
+        return ctx.layout();
+    }
+
+    /** A new build starts, with its layout already in place: forget what the last build left behind. */
+    void onBuildStart() {
+    }
+
+    /** The build is stopping, or about to restart: let go of whatever it holds outside the context. */
+    void onTeardown() {
     }
 }

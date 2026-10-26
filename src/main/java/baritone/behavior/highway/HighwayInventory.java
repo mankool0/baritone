@@ -770,7 +770,7 @@ public class HighwayInventory extends ContextComponent {
 
     public int getThrowawaySlotToToss() {
         return throwawaySlotToToss(playerContext.player().getInventory().getNonEquipmentItems(), junkSlots(),
-                settings.acceptableThrowawayItems.value, layout.paving());
+                settings.acceptableThrowawayItems.value, layout().paving());
     }
 
     /**
@@ -806,7 +806,7 @@ public class HighwayInventory extends ContextComponent {
      */
     public int roomSlotToToss() {
         return roomSlotToToss(playerContext.player().getInventory().getNonEquipmentItems(), junkSlots(),
-                settings.acceptableThrowawayItems.value, layout.paving());
+                settings.acceptableThrowawayItems.value, layout().paving());
     }
 
     static int roomSlotToToss(List<ItemStack> inventory, IntPredicate junkSlot, List<Item> throwaway, boolean paving) {
@@ -849,7 +849,7 @@ public class HighwayInventory extends ContextComponent {
         if (stopping) {
             baritone.getPathingBehavior().cancelEverything();
         }
-        Rotation aim = new Rotation(layout.highwayDirectionYaw() + 180, -30);
+        Rotation aim = new Rotation(layout().highwayDirectionYaw() + 180, -30);
         baritone.getLookBehavior().updateTarget(aim, true);
         Rotation sent = baritone.getLookBehavior().getServerRotation().orElse(null);
         if (!stopping && sent != null && Math.abs(Mth.wrapDegrees(sent.getYaw() - aim.getYaw())) < 10 && Math.abs(sent.getPitch() - aim.getPitch()) < 10) {

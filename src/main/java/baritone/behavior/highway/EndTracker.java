@@ -60,8 +60,13 @@ public class EndTracker extends ContextComponent {
         super(ctx);
     }
 
+    @Override
+    void onTeardown() {
+        stopTravelTowardsEnd();
+    }
+
     public boolean travelTowardsEnd() {
-        if (layout.endPos() == null || ctx.invalidBlockFixActive()) {
+        if (layout().endPos() == null || ctx.invalidBlockFixActive()) {
             stopTravelTowardsEnd();
             return false;
         }
@@ -73,7 +78,7 @@ public class EndTracker extends ContextComponent {
                 stopTravelTowardsEnd();
                 return false;
             }
-            int remaining = layout.stepsAlongHighway(playerContext.playerFeet(), travelTarget);
+            int remaining = layout().stepsAlongHighway(playerContext.playerFeet(), travelTarget);
             if (remaining < travelBestSteps) {
                 travelBestSteps = remaining;
                 travelNoProgressTicks = 0;
@@ -91,23 +96,23 @@ public class EndTracker extends ContextComponent {
             return false;
         }
 
-        Vec3 direction = new Vec3(layout.highwayDirection().getX(), layout.highwayDirection().getY(), layout.highwayDirection().getZ());
+        Vec3 direction = new Vec3(layout().highwayDirection().getX(), layout().highwayDirection().getY(), layout().highwayDirection().getZ());
         Vec3 feetVec = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
-        BetterBlockPos feetSlice = layout.getClosestPoint(new Vec3(layout.originVector().x, layout.originVector().y, layout.originVector().z), direction, feetVec, LocationType.HighwayBuild);
+        BetterBlockPos feetSlice = layout().getClosestPoint(new Vec3(layout().originVector().x, layout().originVector().y, layout().originVector().z), direction, feetVec, LocationType.HighwayBuild);
 
         // builtSlicesAhead counts slices while the stand-off distance is in blocks, and a diagonal
         // slice is sqrt(2) of them
-        int standOffSlices = (int) Math.ceil(Math.max(0, settings.highwayEndDistance.value) / layout.stepLength());
+        int standOffSlices = (int) Math.ceil(Math.max(0, settings.highwayEndDistance.value) / layout().stepLength());
         int hop = ctx.scanner().builtSlicesAhead(Math.max(32, playerContext.minecraft().options.renderDistance().get() * 16)) - 1
                 - standOffSlices;
-        hop = Math.min(hop, layout.stepsAlongHighway(feetSlice, layout.endPos()));
+        hop = Math.min(hop, layout().stepsAlongHighway(feetSlice, layout().endPos()));
         if (hop <= 0) {
             return false;
         }
-        BetterBlockPos target = laneOnSlice(layout.pattern().isCustom()
-                ? feetSlice.offset(layout.sliceDelta(layout.sliceIndexOf(feetSlice, layout.originVector()), hop))
-                : feetSlice.offset(hop * layout.highwayDirection().getX(), 0, hop * layout.highwayDirection().getZ()));
-        int steps = layout.stepsAlongHighway(playerContext.playerFeet(), target);
+        BetterBlockPos target = laneOnSlice(layout().pattern().isCustom()
+                ? feetSlice.offset(layout().sliceDelta(layout().sliceIndexOf(feetSlice, layout().originVector()), hop))
+                : feetSlice.offset(hop * layout().highwayDirection().getX(), 0, hop * layout().highwayDirection().getZ()));
+        int steps = layout().stepsAlongHighway(playerContext.playerFeet(), target);
         if (steps <= 0) {
             // On a -X diagonal the slice our feet project onto lies a slice or two behind where we
             // stand, so a hop that short lands on our own cell or behind it. The walk would arrive
@@ -144,7 +149,7 @@ public class EndTracker extends ContextComponent {
      * otherwise reconnects, once per spot, to load the world afresh.
      */
     public EndStall endStall() {
-        if (layout.endPos() == null || ctx.invalidBlockFixActive()) {
+        if (layout().endPos() == null || ctx.invalidBlockFixActive()) {
             clearEndStall();
             return EndStall.RESTART_BUILDER;
         }
@@ -174,7 +179,7 @@ public class EndTracker extends ContextComponent {
                         case Air -> "nothing any more";
                     };
             Helper.HELPER.logDirect("The builder has had nothing to do for " + stalled / 20 + " s short of the end at "
-                    + layout.endPos().toShortString() + ", where the end check finds " + why);
+                    + layout().endPos().toShortString() + ", where the end check finds " + why);
             if (found == HighwayBlockState.Liquids) {
                 Helper.HELPER.logDirect("Removing liquids.");
                 ctx.transitionTo(HighwayState.LiquidRemovalPrep);
@@ -248,20 +253,20 @@ public class EndTracker extends ContextComponent {
     }
 
     private BetterBlockPos laneOnSlice(BlockPos buildLinePos) {
-        Vec3 direction = new Vec3(layout.highwayDirection().getX(), layout.highwayDirection().getY(), layout.highwayDirection().getZ());
-        BetterBlockPos lane = layout.getClosestPoint(new Vec3(layout.backPathOriginVector().x, layout.backPathOriginVector().y, layout.backPathOriginVector().z),
+        Vec3 direction = new Vec3(layout().highwayDirection().getX(), layout().highwayDirection().getY(), layout().highwayDirection().getZ());
+        BetterBlockPos lane = layout().getClosestPoint(new Vec3(layout().backPathOriginVector().x, layout().backPathOriginVector().y, layout().backPathOriginVector().z),
                 direction, new Vec3(buildLinePos.getX(), buildLinePos.getY(), buildLinePos.getZ()), LocationType.ShulkerEchestInteraction);
-        int off = layout.stepsAlongHighway(lane, buildLinePos);
+        int off = layout().stepsAlongHighway(lane, buildLinePos);
         if (off == 0) {
-            return layout.liftOntoPavement(lane);
+            return layout().liftOntoPavement(lane);
         }
-        return layout.liftOntoPavement(new BetterBlockPos(layout.pattern().isCustom()
-                ? lane.offset(layout.sliceDelta(layout.sliceIndexOf(lane, layout.backPathOriginVector()), off))
-                : lane.offset(off * layout.highwayDirection().getX(), 0, off * layout.highwayDirection().getZ())));
+        return layout().liftOntoPavement(new BetterBlockPos(layout().pattern().isCustom()
+                ? lane.offset(layout().sliceDelta(layout().sliceIndexOf(lane, layout().backPathOriginVector()), off))
+                : lane.offset(off * layout().highwayDirection().getX(), 0, off * layout().highwayDirection().getZ())));
     }
 
     public boolean isHighwayEndComplete() {
-        if (layout.endPos() == null) {
+        if (layout().endPos() == null) {
             return false;
         }
         EndCheck check = endCheck();
@@ -278,23 +283,23 @@ public class EndTracker extends ContextComponent {
     private record EndCheck(BlockPos start, BlockPos startLiq, int slices) {}
 
     private EndCheck endCheck() {
-        Vec3 direction = new Vec3(layout.highwayDirection().getX(), layout.highwayDirection().getY(), layout.highwayDirection().getZ());
+        Vec3 direction = new Vec3(layout().highwayDirection().getX(), layout().highwayDirection().getY(), layout().highwayDirection().getZ());
         Vec3 curPosPlayer = new Vec3(playerContext.playerFeet().getX(), playerContext.playerFeet().getY(), playerContext.playerFeet().getZ());
         // feetClosest is clamped to the end: even if we wandered past the end the scan still covers
         // the final checkBackDistance slices instead of degenerating
-        BetterBlockPos feetClosest = layout.getClosestPoint(new Vec3(layout.originVector().x, layout.originVector().y, layout.originVector().z), direction, curPosPlayer, LocationType.HighwayBuild);
+        BetterBlockPos feetClosest = layout().getClosestPoint(new Vec3(layout().originVector().x, layout().originVector().y, layout().originVector().z), direction, curPosPlayer, LocationType.HighwayBuild);
         Vec3 feetClosestVec = new Vec3(feetClosest.getX(), feetClosest.getY(), feetClosest.getZ());
-        BlockPos startCheckPos = layout.sliceAlongLine(layout.originVector(), feetClosestVec, -layout.highwayCheckBackDistance(), LocationType.HighwayBuild);
-        BlockPos startCheckPosLiq = layout.sliceAlongLine(layout.liqOriginVector(), feetClosestVec, -layout.highwayCheckBackDistance(), LocationType.ShulkerEchestInteraction);
-        return new EndCheck(startCheckPos, startCheckPosLiq, layout.stepsAlongHighway(startCheckPos, layout.endPos()) + 1);
+        BlockPos startCheckPos = layout().sliceAlongLine(layout().originVector(), feetClosestVec, -layout().highwayCheckBackDistance(), LocationType.HighwayBuild);
+        BlockPos startCheckPosLiq = layout().sliceAlongLine(layout().liqOriginVector(), feetClosestVec, -layout().highwayCheckBackDistance(), LocationType.ShulkerEchestInteraction);
+        return new EndCheck(startCheckPos, startCheckPosLiq, layout().stepsAlongHighway(startCheckPos, layout().endPos()) + 1);
     }
 
     /**
      * @return a cell of the end check's stretch in a chunk we haven't got, or null if it's all loaded
      */
     private BlockPos endCheckUnloadedCell(EndCheck check) {
-        BlockPos unloaded = ctx.scanner().firstUnloadedCell(check.start(), layout.originVector(), layout.schematic().widthX(), layout.schematic().lengthZ(), 1, check.slices());
+        BlockPos unloaded = ctx.scanner().firstUnloadedCell(check.start(), layout().originVector(), layout().schematic().widthX(), layout().schematic().lengthZ(), 1, check.slices());
         return unloaded != null ? unloaded
-                : ctx.scanner().firstUnloadedCell(check.startLiq(), layout.liqOriginVector(), layout.liqCheckSchem().widthX(), layout.liqCheckSchem().lengthZ(), 1, check.slices());
+                : ctx.scanner().firstUnloadedCell(check.startLiq(), layout().liqOriginVector(), layout().liqCheckSchem().widthX(), layout().liqCheckSchem().lengthZ(), 1, check.slices());
     }
 }

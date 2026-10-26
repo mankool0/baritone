@@ -89,12 +89,12 @@ public class Nothing extends State {
 
         context.settings().buildRepeat.value = new Vec3i(context.layout().highwayDirection().getX(), 0, context.layout().highwayDirection().getZ());
 
-        context.layout().setOriginBuild(buildStart);
+        context.setOriginBuild(buildStart);
 
         if (context.layout().endPos() != null) {
             // Bound the repeat so the builder never places past the end slice; originBuild is
             // clamped to the end, so this is always >= 1
-            context.settings().buildRepeatCount.value = context.layout().stepsAlongHighway(context.layout().originBuild(), context.layout().endPos()) + 1;
+            context.settings().buildRepeatCount.value = context.layout().stepsAlongHighway(context.originBuild(), context.layout().endPos()) + 1;
         } else {
             context.settings().buildRepeatCount.value = -1;
         }
@@ -103,7 +103,7 @@ public class Nothing extends State {
 
         // The context keeps the single-slice schematic that the correctness scans size themselves
         // against; the builder gets several slices at once so the printer always has targets.
-        BlockPos buildOrigin = context.layout().originBuild();
+        BlockPos buildOrigin = context.originBuild();
         ISchematic buildSchem = context.layout().schematicForOrigin(buildOrigin);
         int lookahead = context.settings().highwayPrinterLookahead.value;
         int slicesToEnd = context.settings().buildRepeatCount.value;

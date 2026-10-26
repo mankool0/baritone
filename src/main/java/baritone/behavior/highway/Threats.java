@@ -61,6 +61,12 @@ public class Threats extends ContextComponent {
         super(ctx);
     }
 
+    @Override
+    void onBuildStart() {
+        resetThiefHunt();
+        clearIgnoredMobs();
+    }
+
     public Entity currentMobTarget() {
         return currentMobTarget;
     }
@@ -80,7 +86,7 @@ public class Threats extends ContextComponent {
         return until != null && until > playerContext.world().getGameTime();
     }
 
-    public void clearIgnoredMobs() {
+    private void clearIgnoredMobs() {
         ignoredMobs.clear();
         ignoredCrystals.clear();
     }
@@ -180,7 +186,7 @@ public class Threats extends ContextComponent {
         this.thiefHuntBestDist = dist;
     }
 
-    public void resetThiefHunt() {
+    private void resetThiefHunt() {
         thiefTarget = null;
         thiefHuntReturnState = null;
         thiefHuntStartPos = null;
@@ -207,16 +213,16 @@ public class Threats extends ContextComponent {
     }
 
     private boolean isEntityInHighwayCorridor(Entity entity) {
-        if (layout.schematic() == null) return false;
-        Vec3 dir = new Vec3(layout.highwayDirection().getX(), layout.highwayDirection().getY(), layout.highwayDirection().getZ());
+        if (layout().schematic() == null) return false;
+        Vec3 dir = new Vec3(layout().highwayDirection().getX(), layout().highwayDirection().getY(), layout().highwayDirection().getZ());
         if (dir.lengthSqr() == 0) return true;
-        BetterBlockPos closest = layout.getClosestPoint(layout.originVector(), dir, entity.position(), LocationType.HighwayBuild);
+        BetterBlockPos closest = layout().getClosestPoint(layout().originVector(), dir, entity.position(), LocationType.HighwayBuild);
         BlockPos ep = entity.blockPosition();
         // widthX/lengthZ == 1 means that's the along-highway axis; getClosestPoint rounds to the nearest block
         // so we skip the size-1 dimension to avoid off-by-one failures at block boundaries
-        boolean xOk = layout.schematic().widthX() == 1 || (ep.getX() >= closest.getX() && ep.getX() < closest.getX() + layout.schematic().widthX());
-        boolean zOk = layout.schematic().lengthZ() == 1 || (ep.getZ() >= closest.getZ() && ep.getZ() < closest.getZ() + layout.schematic().lengthZ());
-        boolean yOk = ep.getY() >= closest.getY() && ep.getY() < closest.getY() + layout.schematic().heightY();
+        boolean xOk = layout().schematic().widthX() == 1 || (ep.getX() >= closest.getX() && ep.getX() < closest.getX() + layout().schematic().widthX());
+        boolean zOk = layout().schematic().lengthZ() == 1 || (ep.getZ() >= closest.getZ() && ep.getZ() < closest.getZ() + layout().schematic().lengthZ());
+        boolean yOk = ep.getY() >= closest.getY() && ep.getY() < closest.getY() + layout().schematic().heightY();
         return xOk && yOk && zOk;
     }
 

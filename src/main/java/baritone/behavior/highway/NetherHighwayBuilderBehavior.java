@@ -36,7 +36,6 @@ import baritone.api.utils.input.Input;
 import baritone.behavior.Behavior;
 import baritone.behavior.highway.enums.HighwayState;
 import baritone.behavior.highway.enums.LocationType;
-import baritone.behavior.highway.enums.ShulkerType;
 import baritone.utils.BlockStateInterface;
 import baritone.utils.IRenderer;
 import com.mojang.blaze3d.vertex.BufferBuilder;
@@ -158,7 +157,6 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
     @Override
     public void build(int startX, int startZ, Vec3i direct, boolean selfSolve, boolean pave, Vec3i endCoords, Vec3i startCoords, String pattern) {
-        HighwayLayout layout = highwayContext.layout();
         HighwayPattern parsedPattern;
         try {
             parsedPattern = HighwayPattern.parse(pattern, direct);
@@ -179,31 +177,18 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             cellOverrides = CellOverrides.parse(settings.highwayCellOverrides.value);
         } catch (IllegalArgumentException e) {
             // built without, a lane would dig the rails it was told to keep
-            layout.setCellOverrides(CellOverrides.NONE);
             highwayContext.pause("highwayCellOverrides rejected, " + e.getMessage());
             return;
         }
+        HighwayLayout.Builder layout = new HighwayLayout.Builder(baritone, settings);
         layout.setCellOverrides(cellOverrides);
-        highwayContext.diagnostics().resetStateDwell(); // per build, so a stop leaves the last run's timings readable
         layout.setHighwayDirection(direct);
         layout.setPaving(pave);
         layout.setPattern(parsedPattern);
         if (parsedPattern.isCustom()) {
             Helper.HELPER.logDirect("Angled highway pattern: " + parsedPattern.describe());
         }
-        highwayContext.setCachedHealth(ctx.player().getHealth());
-        highwayContext.setCachedAbsorption(ctx.player().getAbsorptionAmount());
         startDimension = ctx.world().dimension();
-
-        if (!layout.paving()) {
-            // Only digging so any pickaxe works
-            highwayContext.resupply().setPicksToUse(ShulkerType.AnyPickaxe);
-            highwayContext.resupply().setPicksToHave(settings.highwayPicksToHaveDigging.value);
-        } else {
-            // If paving then we mine echests and need non-silk picks
-            highwayContext.resupply().setPicksToUse(ShulkerType.NonSilkPickaxe);
-            highwayContext.resupply().setPicksToHave(settings.highwayPicksToHavePaving.value);
-        }
 
         int highwayWidth = settings.highwayWidth.value;
         int highwayHeight = settings.highwayHeight.value;
@@ -217,8 +202,8 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
         // Custom patterns pick the layout by their driving axis: the cross-section must span the
         // jog axis. Classic builds keep the legacy direction table.
-        boolean groupA = parsedPattern.isCustom() ? parsedPattern.majorIsX() : isGroupA(layout.highwayDirection());
-        boolean groupB = !groupA && (parsedPattern.isCustom() || isGroupB(layout.highwayDirection()));
+        boolean groupA = parsedPattern.isCustom() ? parsedPattern.majorIsX() : isGroupA(direct);
+        boolean groupB = !groupA && (parsedPattern.isCustom() || isGroupB(direct));
 
         // +X, -X, +X +Z, -X -Z
         if (groupA) {
@@ -295,11 +280,11 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             }
         }
 
-        layout.setSchematic(composeHighwaySchematic(layout.highwayDirection(), groupA, groupB, pave, settings));
+        layout.setSchematic(composeHighwaySchematic(direct, groupA, groupB, pave, settings));
         // Rails are the one component whose cells differ between slices that share a major
         // coordinate, so an angled build with rails needs the per-slice cross-sections.
         layout.setPatternSchematics(parsedPattern.isCustom() && highwayRail
-                ? composePatternSchematics(layout.highwayDirection(), groupA, groupB, pave, settings)
+                ? composePatternSchematics(direct, groupA, groupB, pave, settings)
                 : null);
         // Side storage is one column below the cross-section's first, so the same column past its
         // last (W+1, a rail or the lane's wall) is W+3 further on along the cross axis
@@ -308,26 +293,29 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 ? storageLine.add(0, 0, highwayWidth + 3)
                 : storageLine.add(highwayWidth + 3, 0, 0));
 
-        Vec3 origin = new Vec3(layout.originVector().x, layout.originVector().y, layout.originVector().z);
-        Vec3 direction = new Vec3(layout.highwayDirection().getX(), layout.highwayDirection().getY(), layout.highwayDirection().getZ());
+        // The start is projected unclamped; the end is clamped to the start, as every later projection is
+        HighwayLayout unbounded = layout.build();
+        Vec3 origin = new Vec3(unbounded.originVector().x, unbounded.originVector().y, unbounded.originVector().z);
+        Vec3 direction = new Vec3(direct.getX(), direct.getY(), direct.getZ());
         // A named start replaces the feet projection wholesale: firstStartingPos then clamps every
         // later projection to it, so a start ahead of the bot needs no special handling.
         Vec3 startFrom = (startCoords != null)
                 ? new Vec3(startCoords.getX(), 0, startCoords.getZ())
                 : new Vec3(ctx.playerFeet().getX(), ctx.playerFeet().getY(), ctx.playerFeet().getZ());
-        layout.setOriginBuild(layout.getClosestPoint(origin, direction, startFrom, LocationType.HighwayBuild));
+        BetterBlockPos start = unbounded.getClosestPoint(origin, direction, startFrom, LocationType.HighwayBuild);
 
-        layout.setFirstStartingPos(new BetterBlockPos(layout.originBuild()));
-
+        BetterBlockPos end = null;
         if (endCoords != null) {
-            BetterBlockPos end = layout.getClosestPoint(origin, direction, new Vec3(endCoords.getX(), 0, endCoords.getZ()), LocationType.HighwayBuild);
-            int endSteps = layout.stepsAlongHighway(layout.firstStartingPos(), end);
-            if (endSteps < 0) {
-                Helper.HELPER.logDirect("End " + endCoords.getX() + ", " + endCoords.getZ() + " is behind the start " + layout.firstStartingPos().toString() + ", not starting");
+            Vec3 endFrom = new Vec3(endCoords.getX(), 0, endCoords.getZ());
+            end = unbounded.withBounds(start, null).getClosestPoint(origin, direction, endFrom, LocationType.HighwayBuild);
+            int endSteps = unbounded.stepsAlongHighway(start, end);
+            // An end on the start is a one-slice leg. The start clamp lands an end behind the start
+            // there as well, so tell the two apart by whether the clamp had to move it.
+            if (!end.equals(unbounded.getClosestPoint(origin, direction, endFrom, LocationType.HighwayBuild))) {
+                Helper.HELPER.logDirect("End " + endCoords.getX() + ", " + endCoords.getZ() + " is behind the start " + start.toString() + ", not starting");
                 stop();
                 return;
             }
-            layout.setEndPos(end);
             Helper.HELPER.logDirect("Stopping at " + end.toString() + " (" + endSteps + " blocks ahead)");
         }
 
@@ -337,43 +325,22 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
                 + (!railLow && !railHigh ? "none" : "")
                 + (settings.highwayExcavate.value ? " excavate" : "")
                 + (cellOverrides.isEmpty() ? "" : " overrides=" + cellOverrides.size()));
-        Helper.HELPER.logDirect("Building from " + layout.originBuild().toString());
-        settings.buildRepeat.value = new Vec3i(layout.highwayDirection().getX(), 0, layout.highwayDirection().getZ());
+        Helper.HELPER.logDirect("Building from " + start.toString());
+        settings.buildRepeat.value = new Vec3i(direct.getX(), 0, direct.getZ());
 
-        highwayContext.resupply().setEnderChestHasPickShulks(true);
-        highwayContext.resupply().setEnderChestHasEnderShulks(true);
-        highwayContext.resupply().setRefillingEnderChests(false);
-        highwayContext.resupply().resetSupplies();
-        highwayContext.resupply().setStashingShulker(false);
-        highwayContext.resupply().setEnderChestAccessLoc(null);
-        highwayContext.farm().resetFarmForRun();
-        highwayContext.sync().resetObsidianDrop();
-        highwayContext.threats().resetThiefHunt();
-        highwayContext.threats().clearIgnoredMobs();
-        highwayContext.containerRecovery().clearLostShulkerRelogAttempt();
-        highwayContext.resupply().setStartShulkerCount(highwayContext.inventory().getShulkerCountInventory(ShulkerType.Any));
-        highwayContext.setPaused(false);
-        highwayContext.liquidRemoval().resetThroughWallDetection();
-        highwayContext.transitionTo(HighwayState.Nothing);
+        highwayContext.startBuild(unbounded.withBounds(start, end));
     }
 
     private void teardown() {
         stopWhenSafe = false;
-        highwayContext.sync().clearThresholdConfirm();
         wrongDimension = false;
-        highwayContext.recovery().resetRecovery(); // held keys, suppressHitResult, and settings (e.g. allowSwimThroughLava) overridden during recovery
-        highwayContext.clearInvalidBlockFix();
-        highwayContext.endTracker().stopTravelTowardsEnd();
-        highwayContext.transitionTo(HighwayState.Nothing); // onExit: whatever the state we interrupt holds
+        highwayContext.teardown();
         setWalkForward(false);
         edgeStillTicks = 0;
         edgeGiveUpTicks = 0;
         edgeLastPos = null;
         baritone.getInputOverrideHandler().clearAllKeys();
         baritone.getPathingBehavior().cancelEverything();
-        highwayContext.layout().setFirstStartingPos(null); // a stale start or end clamps every projection the next build makes
-        highwayContext.layout().setOriginBuild(null);
-        highwayContext.layout().setEndPos(null);
         settings.buildRepeatCount.value = -1; // Nothing clamps it while an end is set
     }
 

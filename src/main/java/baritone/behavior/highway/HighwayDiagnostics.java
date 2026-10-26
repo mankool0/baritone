@@ -70,6 +70,12 @@ public class HighwayDiagnostics extends ContextComponent {
         super(ctx);
     }
 
+    /** Per build, so a stop leaves the last run's timings readable. */
+    @Override
+    void onBuildStart() {
+        resetStateDwell();
+    }
+
     void noteStateTick(HighwayState state) {
         int[] entry = stateDwell.computeIfAbsent(state, k -> new int[2]);
         entry[0]++;
@@ -80,7 +86,7 @@ public class HighwayDiagnostics extends ContextComponent {
         dwellTotalTicks++;
     }
 
-    public void resetStateDwell() {
+    private void resetStateDwell() {
         stateDwell.clear();
         lastDwellState = null;
         dwellTotalTicks = 0;
@@ -146,8 +152,8 @@ public class HighwayDiagnostics extends ContextComponent {
         if (ctx.currentState().getState() == HighwayState.BuildingHighway) {
             Vec3 pos = playerContext.player().position();
             if (continuous && pavingLastPos != null) {
-                double headX = layout.pattern().isCustom() ? layout.pattern().periodWorldX() : layout.highwayDirection().getX();
-                double headZ = layout.pattern().isCustom() ? layout.pattern().periodWorldZ() : layout.highwayDirection().getZ();
+                double headX = layout().pattern().isCustom() ? layout().pattern().periodWorldX() : layout().highwayDirection().getX();
+                double headZ = layout().pattern().isCustom() ? layout().pattern().periodWorldZ() : layout().highwayDirection().getZ();
                 pavingNanos += now - printerLastTickNanos;
                 pavingBlocksAlong += ((pos.x - pavingLastPos.x) * headX + (pos.z - pavingLastPos.z) * headZ) / Math.sqrt(headX * headX + headZ * headZ);
             }
@@ -232,7 +238,7 @@ public class HighwayDiagnostics extends ContextComponent {
                     seconds, pavingBlocksAlong / seconds, pavingPlacedBlocks / seconds));
             if (pavingBlocksAlong >= 1) {
                 // per slice rather than per block of travel, to compare with the cross-section
-                sb.append(String.format(", %.1f blocks a slice", pavingPlacedBlocks / (pavingBlocksAlong / layout.stepLength())));
+                sb.append(String.format(", %.1f blocks a slice", pavingPlacedBlocks / (pavingBlocksAlong / layout().stepLength())));
             }
         }
         printerTally.entrySet().stream()

@@ -17,7 +17,6 @@
 
 package baritone.behavior.highway;
 
-import baritone.api.utils.VecUtils;
 import baritone.behavior.highway.enums.HighwayBlockState;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.AirBlock;
@@ -42,6 +41,11 @@ public class LiquidRemoval extends ContextComponent {
 
     LiquidRemoval(HighwayContext ctx) {
         super(ctx);
+    }
+
+    @Override
+    void onBuildStart() {
+        resetThroughWallDetection();
     }
 
     public ArrayList<BlockPos> sourceBlocks() {
@@ -95,40 +99,6 @@ public class LiquidRemoval extends ContextComponent {
         throughWallsSuppressed = false;
         throughWallPlaceStreak = 0;
         throughWallVerifyPos = null;
-    }
-
-    public BlockPos closestAirBlockWithSideBlock(BlockPos pos, int radius, boolean allowUp) {
-        ArrayList<BlockPos> surroundingBlocks = new ArrayList<>();
-        int yRadius = radius;
-        if (!allowUp) {
-            yRadius = 0;
-        }
-        for (int x = -radius; x <= radius; x++) {
-            for (int y = -radius; y <= yRadius; y++) {
-                for (int z = -radius; z <= radius; z++) {
-                    BlockPos curPos = pos.offset(x, y, z);
-                    if (getIssueType(curPos) != HighwayBlockState.Blocks &&
-                            (getIssueType(curPos.north()) == HighwayBlockState.Blocks ||
-                                    getIssueType(curPos.east()) == HighwayBlockState.Blocks ||
-                                    getIssueType(curPos.south()) == HighwayBlockState.Blocks ||
-                                    getIssueType(curPos.west()) == HighwayBlockState.Blocks ||
-                                    getIssueType(curPos.below()) == HighwayBlockState.Blocks)) {
-                        surroundingBlocks.add(curPos);
-                    }
-                }
-            }
-        }
-
-        BlockPos closestBlock = null;
-        double closestDistance = Double.MAX_VALUE;
-        for (BlockPos curBlock : surroundingBlocks) {
-            if (VecUtils.distanceToCenter(curBlock, pos.getX(), pos.getY(), pos.getZ()) < closestDistance) {
-                closestDistance = VecUtils.distanceToCenter(curBlock, pos.getX(), pos.getY(), pos.getZ());
-                closestBlock = curBlock;
-            }
-        }
-
-        return closestBlock;
     }
 
     public HighwayBlockState getIssueType(BlockPos blockPos) {

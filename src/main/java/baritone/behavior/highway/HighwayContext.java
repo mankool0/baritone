@@ -65,7 +65,7 @@ public class HighwayContext {
     private final Baritone baritone;
     private final IPlayerContext playerContext;
     private final Settings settings = BaritoneAPI.getSettings();
-    private final HighwayLayout layout;
+    private HighwayLayout layout;
     private final HighwayInventory inventory;
     private final ContainerLooting looting;
     private final EnderChestFarm farm;
@@ -82,6 +82,7 @@ public class HighwayContext {
     private final BlockPlacer placer;
     private final ServerSync sync;
     private final HighwayDiagnostics diagnostics;
+    private final List<ContextComponent> parts;
 
     private State currentState;
     private HighwayState previousState = HighwayState.Nothing;
@@ -95,6 +96,8 @@ public class HighwayContext {
 
     private boolean paused = false;
     private String pauseReason = null;
+
+    private BetterBlockPos originBuild; // where the builder restarts from; Nothing moves it up as the build goes
 
     private BlockPos placeLoc;
     private LocationType placeLocLine = LocationType.ShulkerEchestInteraction;
@@ -147,8 +150,7 @@ public class HighwayContext {
     public HighwayContext(Baritone baritone) {
         this.baritone = baritone;
         this.playerContext = baritone.getPlayerContext();
-        // the layout first: the others keep a handle on it
-        this.layout = new HighwayLayout(baritone, settings);
+        this.layout = HighwayLayout.none(baritone, settings);
         this.inventory = new HighwayInventory(this);
         this.looting = new ContainerLooting(this);
         this.farm = new EnderChestFarm(this);
@@ -165,6 +167,8 @@ public class HighwayContext {
         this.placer = new BlockPlacer(this);
         this.sync = new ServerSync(this);
         this.diagnostics = new HighwayDiagnostics(this);
+        this.parts = List.of(inventory, looting, farm, shulkerPlacement, containerRecovery, resupply, eating, threats,
+                recovery, scanner, liquidRemoval, endTracker, walk, placer, sync, diagnostics);
         currentState = StateFactory.getState(HighwayState.Nothing);
     }
 
@@ -248,6 +252,41 @@ public class HighwayContext {
         return diagnostics;
     }
 
+    /**
+     * Starts a build on {@code layout}: every part forgets what the last build left behind, and the
+     * machine starts over from Nothing.
+     */
+    public void startBuild(HighwayLayout layout) {
+        this.layout = layout;
+        originBuild = layout.firstStartingPos();
+        cachedHealth = playerContext.player().getHealth();
+        cachedAbsorption = playerContext.player().getAbsorptionAmount();
+        for (ContextComponent part : parts) {
+            part.onBuildStart();
+        }
+        setPaused(false);
+        transitionTo(HighwayState.Nothing);
+    }
+
+    /** Lets go of everything the running build holds, ahead of a stop or a new build. */
+    public void teardown() {
+        for (ContextComponent part : parts) {
+            part.onTeardown();
+        }
+        clearInvalidBlockFix();
+        transitionTo(HighwayState.Nothing); // onExit: whatever the state we interrupt holds
+        layout = layout.withBounds(null, null); // a stopped build has no start or end to clamp to, or to report
+        originBuild = null;
+    }
+
+    public BetterBlockPos originBuild() {
+        return originBuild;
+    }
+
+    public void setOriginBuild(BetterBlockPos originBuild) {
+        this.originBuild = originBuild;
+    }
+
     public BlockPos placeLoc() {
         return placeLoc;
     }
@@ -280,22 +319,6 @@ public class HighwayContext {
 
     public State currentState() {
         return currentState;
-    }
-
-    public float cachedHealth() {
-        return cachedHealth;
-    }
-
-    public void setCachedHealth(float cachedHealth) {
-        this.cachedHealth = cachedHealth;
-    }
-
-    public float cachedAbsorption() {
-        return cachedAbsorption;
-    }
-
-    public void setCachedAbsorption(float cachedAbsorption) {
-        this.cachedAbsorption = cachedAbsorption;
     }
 
     public void transitionTo(HighwayState nextState) {

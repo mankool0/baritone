@@ -60,6 +60,12 @@ public class RecoveryTracker extends ContextComponent {
         super(ctx);
     }
 
+    /** Held keys, suppressHitResult, and settings (e.g. allowSwimThroughLava) overridden during recovery. */
+    @Override
+    void onTeardown() {
+        resetRecovery();
+    }
+
     public Rotation floatingFixReachablesRemoveFirst() {
         if (!floatingFixReachables.isEmpty()) {
             return floatingFixReachables.removeFirst();
@@ -160,7 +166,7 @@ public class RecoveryTracker extends ContextComponent {
         for (int d = start; d < behindAt; d++) {
             BetterBlockPos ahead = standableSpotAcross(d);
             if (ahead != null) {
-                boolean skipsNothing = layout.originBuild() == null || layout.stepsAlongHighway(layout.originBuild(), ahead) <= layout.highwayCheckBackDistance();
+                boolean skipsNothing = ctx.originBuild() == null || layout().stepsAlongHighway(ctx.originBuild(), ahead) <= layout().highwayCheckBackDistance();
                 return skipsNothing ? ahead : behind;
             }
         }
@@ -172,27 +178,27 @@ public class RecoveryTracker extends ContextComponent {
      * from our feet (negative is behind), scanning outward from the walk lane, or null.
      */
     private BetterBlockPos standableSpotAcross(int slices) {
-        int floorY = settings.highwayLowestY.value + (layout.paving() ? 1 : 0);
+        int floorY = settings.highwayLowestY.value + (layout().paving() ? 1 : 0);
         BetterBlockPos feet = playerContext.playerFeet();
         int maxLateral = settings.highwayWidth.value + 2;
         int baseX;
         int baseZ;
         int crossX;
         int crossZ;
-        if (layout.pattern().isCustom()) {
+        if (layout().pattern().isCustom()) {
             // Walk slice by slice along the pattern (a straight walk leaves the road within a few
             // slices), scanning across the road width from the walk lane.
-            int t = layout.sliceIndexNear(feet.x, feet.z) + slices;
-            baseX = (int) Math.round(layout.backPathOriginVector().x) + layout.pattern().worldOffsetX(t);
-            baseZ = (int) Math.round(layout.backPathOriginVector().z) + layout.pattern().worldOffsetZ(t);
-            crossX = layout.pattern().majorIsX() ? 0 : 1;
-            crossZ = layout.pattern().majorIsX() ? 1 : 0;
+            int t = layout().sliceIndexNear(feet.x, feet.z) + slices;
+            baseX = (int) Math.round(layout().backPathOriginVector().x) + layout().pattern().worldOffsetX(t);
+            baseZ = (int) Math.round(layout().backPathOriginVector().z) + layout().pattern().worldOffsetZ(t);
+            crossX = layout().pattern().majorIsX() ? 0 : 1;
+            crossZ = layout().pattern().majorIsX() ? 1 : 0;
         } else {
-            baseX = feet.x + layout.highwayDirection().getX() * slices;
-            baseZ = feet.z + layout.highwayDirection().getZ() * slices;
+            baseX = feet.x + layout().highwayDirection().getX() * slices;
+            baseZ = feet.z + layout().highwayDirection().getZ() * slices;
             // perpendicular to the highway in the XZ plane
-            crossX = layout.highwayDirection().getZ();
-            crossZ = -layout.highwayDirection().getX();
+            crossX = layout().highwayDirection().getZ();
+            crossZ = -layout().highwayDirection().getX();
         }
         // scan laterally outward from our column to snap onto a built part of the highway
         for (int w = 0; w <= maxLateral; w++) {
@@ -216,7 +222,7 @@ public class RecoveryTracker extends ContextComponent {
      */
     public boolean roadOverhead() {
         BetterBlockPos feet = playerContext.playerFeet();
-        Block above = baritone.bsi.get0(feet.x, layout.highwayFloorY(), feet.z).getBlock();
+        Block above = baritone.bsi.get0(feet.x, layout().highwayFloorY(), feet.z).getBlock();
         return above == Blocks.OBSIDIAN || above == Blocks.CRYING_OBSIDIAN;
     }
 
@@ -227,14 +233,14 @@ public class RecoveryTracker extends ContextComponent {
      */
     public boolean highwayWalkSpaceOpen() {
         BetterBlockPos feet = playerContext.playerFeet();
-        return passableForRecovery(feet.x, layout.highwayFeetY(), feet.z)
-                && passableForRecovery(feet.x, layout.highwayFeetY() + 1, feet.z);
+        return passableForRecovery(feet.x, layout().highwayFeetY(), feet.z)
+                && passableForRecovery(feet.x, layout().highwayFeetY() + 1, feet.z);
     }
 
     /** True if we're stuck below the road with it sealing us in, so we have to walk back on top of it. */
     public boolean sealedUnderHighway() {
         return underRoadChecksApply()
-                && playerContext.playerFeet().y < layout.highwayFloorY()
+                && playerContext.playerFeet().y < layout().highwayFloorY()
                 && roadOverhead();
     }
 
@@ -273,7 +279,7 @@ public class RecoveryTracker extends ContextComponent {
      */
     boolean fellOffHighway(boolean building) {
         BetterBlockPos feet = playerContext.playerFeet();
-        if (feet.y > layout.highwayFeetY() - settings.highwayFallDetectThreshold.value) {
+        if (feet.y > layout().highwayFeetY() - settings.highwayFallDetectThreshold.value) {
             descentPlanned = null;
             return false;
         }
@@ -325,13 +331,13 @@ public class RecoveryTracker extends ContextComponent {
      */
     public boolean belowBuiltHighway() {
         return underRoadChecksApply()
-                && playerContext.playerFeet().y < layout.highwayFeetY()
+                && playerContext.playerFeet().y < layout().highwayFeetY()
                 && (roadOverhead() || highwayWalkSpaceOpen());
     }
 
     /** A digging build lays no floor, so there is nothing that could ever pave us in. */
     private boolean underRoadChecksApply() {
-        return layout.paving() && settings.highwayUnderRoadRecovery.value;
+        return layout().paving() && settings.highwayUnderRoadRecovery.value;
     }
 
     /** Air, liquid, or something the printer replaces - nothing that could box us in. */

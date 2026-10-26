@@ -100,15 +100,15 @@ public class HighwayWalk extends ContextComponent {
 
     public boolean canWalkOnFloorAhead() {
         BetterBlockPos feet = playerContext.playerFeet();
-        int dirX = layout.highwayDirection().getX();
-        int dirZ = layout.highwayDirection().getZ();
+        int dirX = layout().highwayDirection().getX();
+        int dirZ = layout().highwayDirection().getZ();
         int floorY = feet.y - 1;
 
         int lookahead = Math.max(1, Math.min(CREEP_FLOOR_LOOKAHEAD, settings.highwayEndDistance.value));
-        if (layout.pattern().isCustom()) {
-            int t = layout.sliceIndexNear(feet.x, feet.z);
-            Vec3i s1 = layout.pattern().worldStep(t);
-            Vec3i s2 = layout.pattern().worldStep(t + 1);
+        if (layout().pattern().isCustom()) {
+            int t = layout().sliceIndexNear(feet.x, feet.z);
+            Vec3i s1 = layout().pattern().worldStep(t);
+            Vec3i s2 = layout().pattern().worldStep(t + 1);
             if (!MovementHelper.canWalkOn(baritone.bsi, feet.x + s1.getX(), floorY, feet.z + s1.getZ())) {
                 return false;
             }
@@ -123,7 +123,7 @@ public class HighwayWalk extends ContextComponent {
             // lookahead's blocks of travel. A diagonal step is sqrt(2) blocks, so counting steps
             // asked for floor 4.2 blocks ahead, past what the printer places from where the walk
             // stops, and the creep could only wait for the builder's stationary fallback.
-            int steps = Math.max(1, (int) (lookahead / layout.stepLength()));
+            int steps = Math.max(1, (int) (lookahead / layout().stepLength()));
             for (int d = 1; d <= steps; d++) {
                 if (!MovementHelper.canWalkOn(baritone.bsi, feet.x + d * dirX, floorY, feet.z + d * dirZ)) {
                     return false;
@@ -157,13 +157,13 @@ public class HighwayWalk extends ContextComponent {
         BetterBlockPos feet = playerContext.playerFeet();
         int stepX;
         int stepZ;
-        if (layout.pattern().isCustom()) {
-            Vec3i s1 = layout.pattern().worldStep(layout.sliceIndexNear(feet.x, feet.z));
+        if (layout().pattern().isCustom()) {
+            Vec3i s1 = layout().pattern().worldStep(layout().sliceIndexNear(feet.x, feet.z));
             stepX = s1.getX();
             stepZ = s1.getZ();
         } else {
-            stepX = layout.highwayDirection().getX();
-            stepZ = layout.highwayDirection().getZ();
+            stepX = layout().highwayDirection().getX();
+            stepZ = layout().highwayDirection().getZ();
         }
         if (!bodyPassable(feet.x + stepX, feet.x + stepX, feet.z + stepZ, feet.z + stepZ, feet.y)) {
             return false;
@@ -288,25 +288,25 @@ public class HighwayWalk extends ContextComponent {
     /** Walk-creep guard: no lit portal blocks in the cells we're about to walk into. */
     public boolean noPortalAhead() {
         BetterBlockPos feet = playerContext.playerFeet();
-        if (layout.pattern().isCustom()) {
-            int t = layout.sliceIndexNear(feet.x, feet.z);
+        if (layout().pattern().isCustom()) {
+            int t = layout().sliceIndexNear(feet.x, feet.z);
             for (int step = 1; step <= 2; step++) {
-                Vec3i d = layout.sliceDelta(t, step);
+                Vec3i d = layout().sliceDelta(t, step);
                 if (isPortalCell(feet.x + d.getX(), feet.y, feet.z + d.getZ())) {
                     return false;
                 }
             }
             // the average-heading walk can clip the cell beside the first step at a jog
-            Vec3i s1 = layout.sliceDelta(t, 1);
-            Vec3i s2 = layout.sliceDelta(t, 2);
+            Vec3i s1 = layout().sliceDelta(t, 1);
+            Vec3i s2 = layout().sliceDelta(t, 2);
             if ((s2.getX() != 2 * s1.getX() || s2.getZ() != 2 * s1.getZ())
                     && isPortalCell(feet.x + s2.getX() - s1.getX(), feet.y, feet.z + s2.getZ() - s1.getZ())) {
                 return false;
             }
             return true;
         }
-        int dirX = layout.highwayDirection().getX();
-        int dirZ = layout.highwayDirection().getZ();
+        int dirX = layout().highwayDirection().getX();
+        int dirZ = layout().highwayDirection().getZ();
         for (int step = 1; step <= 2; step++) {
             if (isPortalCell(feet.x + dirX * step, feet.y, feet.z + dirZ * step)) {
                 return false;
@@ -327,7 +327,7 @@ public class HighwayWalk extends ContextComponent {
     }
 
     public void faceHighwayDirection() {
-        Vec3 heading = layout.highwayHeading();
+        Vec3 heading = layout().highwayHeading();
         if (heading.lengthSqr() == 0) {
             return;
         }
@@ -338,13 +338,13 @@ public class HighwayWalk extends ContextComponent {
         // Both schematic layouts put the walk lane at cross-axis offsets [1, highwayWidth] from
         // the slice origin, so the lane center sits at origin + 1 + width/2 on the cross axis
         Vec3 playerPos = playerContext.player().position();
-        BetterBlockPos sliceOrigin = layout.getClosestPoint(new Vec3(layout.originVector().x, layout.originVector().y, layout.originVector().z),
-                new Vec3(layout.highwayDirection().getX(), layout.highwayDirection().getY(), layout.highwayDirection().getZ()), playerPos, LocationType.HighwayBuild);
+        BetterBlockPos sliceOrigin = layout().getClosestPoint(new Vec3(layout().originVector().x, layout().originVector().y, layout().originVector().z),
+                new Vec3(layout().highwayDirection().getX(), layout().highwayDirection().getY(), layout().highwayDirection().getZ()), playerPos, LocationType.HighwayBuild);
         double laneCenterOffset = 1 + settings.highwayWidth.value / 2.0;
-        boolean crossAxisZ = layout.pattern().isCustom() ? layout.pattern().majorIsX()
-                : ((layout.highwayDirection().getZ() == 0 && Math.abs(layout.highwayDirection().getX()) == 1)
-                || (layout.highwayDirection().getX() == 1 && layout.highwayDirection().getZ() == 1)
-                || (layout.highwayDirection().getX() == -1 && layout.highwayDirection().getZ() == -1));
+        boolean crossAxisZ = layout().pattern().isCustom() ? layout().pattern().majorIsX()
+                : ((layout().highwayDirection().getZ() == 0 && Math.abs(layout().highwayDirection().getX()) == 1)
+                || (layout().highwayDirection().getX() == 1 && layout().highwayDirection().getZ() == 1)
+                || (layout().highwayDirection().getX() == -1 && layout().highwayDirection().getZ() == -1));
         double centerX = crossAxisZ ? sliceOrigin.x + 0.5 : sliceOrigin.x + laneCenterOffset;
         double centerZ = crossAxisZ ? sliceOrigin.z + laneCenterOffset : sliceOrigin.z + 0.5;
 
@@ -352,10 +352,10 @@ public class HighwayWalk extends ContextComponent {
         double lateral = (playerPos.x - centerX) * -dirZ + (playerPos.z - centerZ) * dirX;
 
         double halfLane = settings.highwayWidth.value / 2.0;
-        if (layout.pattern().isCustom()) {
+        if (layout().pattern().isCustom()) {
             // corridor half-width measured perpendicular to the average travel direction
-            halfLane *= layout.pattern().periodMajorBlocks() / Math.hypot(layout.pattern().periodMajorBlocks(), layout.pattern().periodMinorBlocks());
-        } else if (layout.highwayDirection().getX() != 0 && layout.highwayDirection().getZ() != 0) {
+            halfLane *= layout().pattern().periodMajorBlocks() / Math.hypot(layout().pattern().periodMajorBlocks(), layout().pattern().periodMinorBlocks());
+        } else if (layout().highwayDirection().getX() != 0 && layout().highwayDirection().getZ() != 0) {
             halfLane /= Math.sqrt(2); // diagonal corridors are measured perpendicular to travel
         }
 

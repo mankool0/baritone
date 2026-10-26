@@ -46,20 +46,32 @@ public class Resupply extends ContextComponent {
         super(ctx);
     }
 
+    @Override
+    void onBuildStart() {
+        if (!layout().paving()) {
+            // Only digging so any pickaxe works
+            picksToUse = ShulkerType.AnyPickaxe;
+            picksToHave = settings.highwayPicksToHaveDigging.value;
+        } else {
+            // If paving then we mine echests and need non-silk picks
+            picksToUse = ShulkerType.NonSilkPickaxe;
+            picksToHave = settings.highwayPicksToHavePaving.value;
+        }
+        enderChestHasPickShulks = true;
+        enderChestHasEnderShulks = true;
+        refillingEnderChests = false;
+        resetSupplies();
+        stashingShulker = false;
+        enderChestAccessLoc = null;
+        startShulkerCount = ctx.inventory().getShulkerCountInventory(ShulkerType.Any);
+    }
+
     public ShulkerType picksToUse() {
         return picksToUse;
     }
 
-    public void setPicksToUse(ShulkerType picksToUse) {
-        this.picksToUse = picksToUse;
-    }
-
     public int picksToHave() {
         return picksToHave;
-    }
-
-    public void setPicksToHave(int picksToHave) {
-        this.picksToHave = picksToHave;
     }
 
     public int totemsToHave() {
@@ -128,7 +140,7 @@ public class Resupply extends ContextComponent {
     }
 
     /** For a new build: nothing being refilled, and storage assumed to hold every supply again. */
-    public void resetSupplies() {
+    private void resetSupplies() {
         refillingSupplies.clear();
         storageOutOfSupplies.clear();
     }
