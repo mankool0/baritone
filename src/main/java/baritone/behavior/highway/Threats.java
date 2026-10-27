@@ -42,7 +42,15 @@ import java.util.Optional;
  * with a shulker box.
  */
 public class Threats extends ContextComponent {
+    private static final double GHAST_FIRE_RANGE_SQ = 64.0 * 64.0; // GhastShootFireballGoal only shoots at a target closer than this
+    // A ghast fires at most every 60 ticks (20 charging in sight, then a 40-tick cooldown), so a ghast that
+    // saw us this recently still counts. The chase, or the ghast drifting behind a pillar, breaks sight
+    // for a moment, and dropping it then would walk us back and forth between its shots.
+    private static final int GHAST_SIGHT_GRACE_TICKS = 60;
+    private static final int WALK_RECHECK_TICKS = 10; // how long a walk check's answer stands before it's run again
     private Entity currentMobTarget = null;
+    private final Map<java.util.UUID, Long> ghastSightings = new HashMap<>(); // game time each ghast last had us in sight
+    private final Map<java.util.UUID, WalkVerdict> walkVerdicts = new HashMap<>(); // last walk check answer per mob, see canAttackUs
     private final Map<java.util.UUID, Long> ignoredMobs = new HashMap<>(); // mobs a stalled chase gave up on, to the game time they stay ignored until
     private final Map<java.util.UUID, Long> ignoredCrystals = new HashMap<>(); // end crystals CrystalRemoval gave up on, likewise
     // MobCombat's chase-stall clock, kept here because every engagement starts a new MobCombat, see chaseStalled
@@ -89,6 +97,8 @@ public class Threats extends ContextComponent {
     private void clearIgnoredMobs() {
         ignoredMobs.clear();
         ignoredCrystals.clear();
+        ghastSightings.clear();
+        walkVerdicts.clear();
     }
 
     /** Leaves an end crystal out of {@link HighwayScanner#isHighwayCorrect} for a while, so a crystal we can't break doesn't send us straight back. */
@@ -265,6 +275,90 @@ public class Threats extends ContextComponent {
         return !shooter || !living.hasLineOfSight(playerContext.player());
     }
 
+    private record WalkVerdict(long gameTime, boolean reachable) {}
+
+    /**
+     * Whether the mob can hurt us from where it is: it can shoot us from there, or it has a way to walk up
+     * to us. One behind a wall or across a gap would only have us walk off the highway, or dig through the
+     * wall, after a mob that was never coming. Being close isn't enough: one a block away behind a wall
+     * would hold us standing there, waiting for a killaura that can't hit it.
+     */
+    private boolean canAttackUs(Entity mob) {
+        net.minecraft.world.entity.player.Player player = playerContext.player();
+        net.minecraft.world.entity.LivingEntity living = (net.minecraft.world.entity.LivingEntity) mob;
+        if (mob instanceof net.minecraft.world.entity.monster.Ghast) {
+            return ghastSeesUs(living);
+        }
+        // a blaze that can't see us neither shoots nor comes after us
+        boolean blaze = mob instanceof net.minecraft.world.entity.monster.Blaze;
+        if ((blaze || living.isHolding(stack -> stack.getItem() instanceof ProjectileWeaponItem)) && living.hasLineOfSight(player)) {
+            return true;
+        }
+        if (blaze) {
+            return false;
+        }
+        if (!(mob instanceof net.minecraft.world.entity.Mob walker)) {
+            return true;
+        }
+        // skeletons and crossbow piglins out of sight walk up until they see us, so they get the walk check too
+        long now = playerContext.world().getGameTime();
+        WalkVerdict verdict = walkVerdicts.get(mob.getUUID());
+        if (verdict != null && now >= verdict.gameTime() && now - verdict.gameTime() < WALK_RECHECK_TICKS) {
+            return verdict.reachable();
+        }
+        Boolean reachable;
+        if (walker instanceof net.minecraft.world.entity.monster.Slime slime) {
+            reachable = SlimeHopLine.canReach(playerContext.world(), slime, player);
+        } else {
+            reachable = walksUpToUs(walker);
+        }
+        if (reachable == null) {
+            // no telling while it's in the air: keep the last answer until it lands
+            return verdict != null && verdict.reachable();
+        }
+        walkVerdicts.values().removeIf(old -> now < old.gameTime() || now - old.gameTime() >= WALK_RECHECK_TICKS);
+        walkVerdicts.put(mob.getUUID(), new WalkVerdict(now, reachable));
+        return reachable;
+    }
+
+    /**
+     * Whether the mob has a walk to us, asking vanilla's own pathfinding on our copy of it: the search the
+     * mob runs on the server, with its size, its follow range and node budget, and the blocks it avoids.
+     * Our copy never runs its AI, so planning a path changes nothing. Null while it's in the air, when
+     * vanilla won't plan one.
+     * <p>
+     * A route that drops more than a step on the way doesn't count. A mob that has to jump down to us
+     * comes once it does, and there's no point going after it before then. Vanilla here only lets it
+     * take the 3-block drop of a mob with no target anyway, as the client doesn't know its target.
+     */
+    private Boolean walksUpToUs(net.minecraft.world.entity.Mob mob) {
+        net.minecraft.world.level.pathfinder.Path path = mob.getNavigation().createPath(playerContext.player(), 1);
+        if (path == null) {
+            return null;
+        }
+        if (!path.canReach()) {
+            return false;
+        }
+        for (int i = 1; i < path.getNodeCount(); i++) {
+            if (path.getNode(i - 1).y - path.getNode(i).y > 1) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // a ghast only shoots while it has us in sight
+    private boolean ghastSeesUs(net.minecraft.world.entity.LivingEntity ghast) {
+        long now = playerContext.world().getGameTime();
+        if (ghast.hasLineOfSight(playerContext.player())) {
+            ghastSightings.values().removeIf(seen -> now < seen || now - seen > GHAST_SIGHT_GRACE_TICKS);
+            ghastSightings.put(ghast.getUUID(), now);
+            return true;
+        }
+        Long seen = ghastSightings.get(ghast.getUUID());
+        return seen != null && now >= seen && now - seen <= GHAST_SIGHT_GRACE_TICKS;
+    }
+
     public java.util.Optional<Entity> findMobTargetingPlayer() {
         net.minecraft.world.entity.player.Player player = playerContext.player();
         boolean wearingGold = isPlayerWearingGoldArmor(player);
@@ -275,12 +369,17 @@ public class Threats extends ContextComponent {
                 .filter(e -> e.distanceToSqr(player) <= 8.0 * 8.0)
                 .map(e -> ((net.minecraft.world.entity.projectile.hurtingprojectile.LargeFireball) e).getOwner())
                 .filter(owner -> owner instanceof net.minecraft.world.entity.monster.Ghast)
+                .filter(owner -> owner.distanceToSqr(player) < GHAST_FIRE_RANGE_SQ)
                 .collect(java.util.stream.Collectors.toSet());
 
-        // Sticky ghast: if we're already tracking a ghast, keep it as a threat while it's alive and within 40 blocks
+        // Sticky ghast: once its fireball has engaged it, keep fighting the ghast while it's alive and
+        // close enough to shoot at us again. The fireball is gone as soon as it explodes, so a shorter
+        // range than the one it fires from would drop a farther ghast between its shots. The same range
+        // gates engaging it at all, so a ghast that drifted out of it doesn't flicker in and out either.
+        // Either way canAttackUs still wants it to have had us in sight lately.
         if (currentMobTarget instanceof net.minecraft.world.entity.monster.Ghast
                 && currentMobTarget.isAlive()
-                && currentMobTarget.distanceToSqr(player) <= 40.0 * 40.0) {
+                && currentMobTarget.distanceToSqr(player) < GHAST_FIRE_RANGE_SQ) {
             ghastsThreatening.add(currentMobTarget);
         }
 
@@ -325,6 +424,8 @@ public class Threats extends ContextComponent {
                 .filter(e -> !stuckBelowUs(e, ourStandingY))
                 // a mob a stalled chase gave up on stays ignored unless it gets within reach after all
                 .filter(e -> !isMobIgnored(e) || mobReachDistance(e) <= settings.highwayMobCombatApproachDistance.value)
+                // whatever just hit us plainly can; last, since it may plan a path for the mob
+                .filter(e -> e == lastAttacker || canAttackUs(e))
                 .min(java.util.Comparator.comparingDouble(e -> e.distanceToSqr(player)));
     }
 

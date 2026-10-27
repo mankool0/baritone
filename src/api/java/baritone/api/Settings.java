@@ -2056,7 +2056,9 @@ public final class Settings {
     public final Setting<Boolean> highwayEmergencyEatDuringCombat = new Setting<>(true);
 
     /**
-     * Radius within which angered (isAggressive) or naturally hostile mobs are engaged during highway building
+     * Radius within which angered (isAggressive) or naturally hostile mobs are engaged during highway building.
+     * Only mobs that can get to us or shoot us count: one behind a wall or across a gap, or one that would
+     * have to jump down to us, is left alone until that changes.
      */
     public final Setting<Double> highwayMobAggroRange = new Setting<>(16.0);
 

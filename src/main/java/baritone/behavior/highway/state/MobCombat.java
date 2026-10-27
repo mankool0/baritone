@@ -84,7 +84,7 @@ public class MobCombat extends State {
 
         // A mob we can't get closer to (no path, across lava or a gap, up on a ledge) would hold us
         // here, or keep pulling us back to it, for as long as it stays angry. Ghasts are left out:
-        // findMobTargetingPlayer keeps a ghast engaged on purpose while it's within 40 blocks, and
+        // findMobTargetingPlayer keeps a ghast engaged on purpose while it can shoot us, and
         // this shouldn't undercut that.
         if (!(target instanceof Ghast) && context.threats().chaseStalled(target, reach, STALL_TIMEOUT_TICKS)) {
             Helper.HELPER.logDirect("Can't get to the " + target.getName().getString() + ", ignoring it for a while.");
