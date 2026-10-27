@@ -37,6 +37,7 @@ public class EmergencyGapplePrep extends State {
         int gappleSlot = context.inventory().putItemHotbar(Item.getId(Items.ENCHANTED_GOLDEN_APPLE));
         if (gappleSlot == -1) {
             Helper.HELPER.logDirect("Error getting gapple slot for emergency eat");
+            context.eating().dropAsk();
             context.transitionTo(context.eating().emergencyEatReturnState());
             return;
         }
@@ -46,6 +47,7 @@ public class EmergencyGapplePrep extends State {
                 return;
             }
             Helper.HELPER.logDirect("Couldn't move gapples onto the hotbar for emergency eat (allowInventory off or moves blocked?)");
+            context.eating().dropAsk();
             context.transitionTo(context.eating().emergencyEatReturnState());
             return;
         }

@@ -90,7 +90,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
     /**
      * States {@link #stopWhenSafe} stops in: nothing of the builder's is set down. Stopped mid-farm
-     * or with a shulker or ender chest out, it leaves them there. Hive's SAFE_STOP_STATES.
+     * or with a shulker or ender chest out, it leaves them there.
      */
     static final Set<HighwayState> SAFE_STOP_STATES = EnumSet.of(
             HighwayState.Nothing, HighwayState.BuildingHighway, HighwayState.InQueue,
@@ -98,7 +98,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             HighwayState.LiquidRemovalPrep, HighwayState.LiquidRemovalPrepWait,
             HighwayState.BoatRemoval, HighwayState.MobCombat, HighwayState.MobCombatReturn,
             HighwayState.PortalEscape);
-    /** A safe stop still waiting after this long stops anyway: hive's SAFE_STOP_MAX_SECONDS. */
+    /** A safe stop still waiting after this long stops anyway. */
     static final int SAFE_STOP_MAX_TICKS = 20 * 900;
     private boolean stopWhenSafe = false;
     private int stopWhenSafeTicks;
@@ -586,6 +586,15 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         stopWhenSafe = true;
     }
 
+    @Override
+    public void eatGapple() {
+        if (highwayContext.paused() || highwayContext.layout().schematic() == null) {
+            Helper.HELPER.logDirect("Not building - no gapple eaten");
+            return;
+        }
+        highwayContext.eating().askForGapple();
+    }
+
     private boolean safeToStop() {
         return highwayContext.paused() || highwayContext.layout().schematic() == null
                 || SAFE_STOP_STATES.contains(highwayContext.currentState().getState());
@@ -631,7 +640,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         if (highwayContext.layout().endPos() != null) {
             Helper.HELPER.logDirect("End: " + highwayContext.layout().endPos().toString());
         }
-        Helper.HELPER.logDirect("Paused: " + highwayContext.paused()); // true/false alone: hive.py reads this line
+        Helper.HELPER.logDirect("Paused: " + highwayContext.paused()); // true/false alone: external tooling parses this line
         if (highwayContext.pauseReason() != null) {
             Helper.HELPER.logDirect("Pause reason: " + highwayContext.pauseReason());
         }

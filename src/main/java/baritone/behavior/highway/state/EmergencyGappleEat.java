@@ -41,8 +41,9 @@ public class EmergencyGappleEat extends State {
         // Hunger is the golden carrots' job where they'd feed us: the emergency check starts a carrot
         // eat for it as soon as we're back
         boolean foodOk = foodThreshold <= 0 || food > foodThreshold || context.eating().goldenCarrotsFeed(context.eating().emergencyEatReturnState());
+        boolean asked = context.eating().askedEatPending();
 
-        if (healthOk && foodOk) {
+        if (healthOk && foodOk && !asked) {
             NetherHighwayBuilderBehavior.suppressHitResult = false;
             context.playerContext().minecraft().options.keyUse.setDown(false);
             context.baritone().getInputOverrideHandler().clearAllKeys();

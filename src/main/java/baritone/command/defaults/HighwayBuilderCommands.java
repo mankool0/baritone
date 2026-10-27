@@ -36,6 +36,7 @@ public class HighwayBuilderCommands {
     Command netherBuildCommand;
     Command netherStopCommand;
     Command netherStatusCommand;
+    Command netherEatCommand;
 
     public HighwayBuilderCommands(IBaritone baritone) {
 
@@ -205,6 +206,35 @@ public class HighwayBuilderCommands {
                         "",
                         "Usage:",
                         "> nhwstatus - Print out the status"
+                );
+            }
+        };
+
+        netherEatCommand = new Command(baritone, "nhweat") {
+            @Override
+            public void execute(String label, IArgConsumer args) throws CommandException {
+                args.requireMax(0);
+                baritone.getNetherHighwayBuilderBehavior().eatGapple();
+            }
+
+            @Override
+            public Stream<String> tabComplete(String label, IArgConsumer args) {
+                return Stream.empty();
+            }
+
+            @Override
+            public String getShortDesc() {
+                return "Eats a gapple now, then builds on";
+            }
+
+            @Override
+            public List<String> getLongDesc() {
+                return Arrays.asList(
+                        "Force one gapple to be eaten through the emergency eat, whatever health and hunger say,",
+                        "then go back to what the builder was doing.",
+                        "",
+                        "Usage:",
+                        "> nhweat - Eat a gapple"
                 );
             }
         };

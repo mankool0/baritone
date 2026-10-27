@@ -17,13 +17,17 @@
 
 package baritone.behavior.highway.state;
 
+import baritone.api.utils.Helper;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
+import baritone.behavior.highway.Supply;
 import baritone.behavior.highway.enums.HighwayState;
 import baritone.behavior.highway.enums.LocationType;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Blocks;
+
+import java.util.EnumSet;
 
 public class LootEnderChestPlaceLocPrep extends State {
     public LootEnderChestPlaceLocPrep(HighwayState state) {
@@ -45,11 +49,47 @@ public class LootEnderChestPlaceLocPrep extends State {
         BlockPos safeLoc = context.shulkerPlacement().findSafeSideStorageSpot(7, 25);
         if (safeLoc == null) {
             context.baritone().getPathingBehavior().cancelEverything();
+            if (goWithout(context)) {
+                return;
+            }
             context.pause("Couldn't find a usable ender chest spot.");
             return;
         }
 
         context.setPlaceLoc(safeLoc, LocationType.SideStorage);
         context.transitionTo(HighwayState.GoingToLootEnderChestPlaceLoc);
+    }
+
+    /**
+     * A trip only for supplies the build can do without goes without them until the next
+     * startBuild, as an empty storage does: nowhere to set the chest down is no reason to stop
+     * the build. Anything it still needs starts its own trip from BuildingHighway, which pauses
+     * here as before.
+     */
+    private static boolean goWithout(HighwayContext context) {
+        if (context.resupply().refillingEnderChests()) {
+            return false;
+        }
+        EnumSet<Supply> without = EnumSet.noneOf(Supply.class);
+        for (Supply supply : Supply.values()) {
+            if (!context.resupply().refilling(supply)) {
+                continue;
+            }
+            if (supply.pausesWhenStorageEmpty(context.settings())) {
+                return false;
+            }
+            without.add(supply);
+        }
+        if (without.isEmpty()) {
+            return false; // a pick or ender chest trip
+        }
+        for (Supply supply : without) {
+            context.resupply().setRefilling(supply, false);
+            context.resupply().setEnderChestHasShulks(supply, false);
+            // Not "No more ... shulkers": external tooling reads that line as the ender chest being out of them
+            Helper.HELPER.logDirect("No ender chest spot for " + supply.plural() + " here. Rolling with what we have.");
+        }
+        context.transitionTo(HighwayState.Nothing);
+        return true;
     }
 }

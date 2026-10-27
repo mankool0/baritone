@@ -106,5 +106,11 @@ public interface INetherHighwayBuilderBehavior extends IBehavior {
      */
     void stopWhenSafe();
 
+    /**
+     * One gapple through the emergency eat on the builder's next tick, whatever health and hunger
+     * say, then back to what it was doing. Nothing while it is not building.
+     */
+    void eatGapple();
+
     void printStatus();
 }

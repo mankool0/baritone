@@ -429,6 +429,10 @@ public class HighwayContext {
             }
         }
         boolean inLiquidEat = currentStateEnum == HighwayState.LiquidRemovalGapplePrep || currentStateEnum == HighwayState.LiquidRemovalGappleEat;
+        boolean asked = eating.gappleAsked();
+        if (asked && (inEmergencyEat || inLiquidEat)) {
+            eating.forgetAsk();
+        }
         if (!inEmergencyEat && !inLiquidEat && !inRecovery && !inPortalEscape && (!inCombat || settings.highwayEmergencyEatDuringCombat.value)) {
             if (currentStateEnum != HighwayState.Nothing) {
                 float healthThreshold = eating.gappleEatHealthThreshold();
@@ -436,8 +440,11 @@ public class HighwayContext {
                 boolean healthTrigger = healthThreshold > 0 && playerContext.player().getHealth() < healthThreshold;
                 boolean foodTrigger = foodThreshold > 0 && playerContext.player().getFoodData().getFoodLevel() <= foodThreshold;
                 // Hunger alone is golden carrot work while we have any; low health still wants a gapple
-                if (healthTrigger || foodTrigger && !eating.goldenCarrotsFeed(currentStateEnum)) {
-                    Helper.HELPER.logDirect("Emergency gapple eat triggered (health=" + playerContext.player().getHealth() + ", food=" + playerContext.player().getFoodData().getFoodLevel() + ").");
+                if (healthTrigger || asked || foodTrigger && !eating.goldenCarrotsFeed(currentStateEnum)) {
+                    Helper.HELPER.logDirect((asked ? "Gapple eat asked for" : "Emergency gapple eat triggered") + " (health=" + playerContext.player().getHealth() + ", food=" + playerContext.player().getFoodData().getFoodLevel() + ").");
+                    if (asked) {
+                        eating.beginAskedEat();
+                    }
                     // Out of a carrot eat, back to where that one was going: the gapple leaves its own slot selected
                     eating.setEmergencyEatReturnState(inCarrotEat ? eating.goldenCarrotEatReturnState() : currentStateEnum);
                     baritone.getInputOverrideHandler().clearAllKeys();

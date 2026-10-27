@@ -22,6 +22,8 @@ import baritone.behavior.highway.enums.HighwayState;
 import baritone.utils.accessor.ILivingEntity;
 import baritone.utils.accessor.IMinecraft;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
 
 /**
  * Gapple and golden carrot eating: the thresholds that start an eat, and holding use until the
@@ -33,9 +35,78 @@ public class Eating extends ContextComponent {
 
     // Ticks a predicted eat may go without the server confirming it before we press use again
     private static final int EAT_CONFIRM_TICKS = 20;
+    // An eat nhweat asked for that no gapple went down in is given up after this long
+    private static final int ASKED_EAT_MAX_TICKS = 200;
+
+    // nhweat: asked until the emergency check takes it, then the gapples on us as that eat began,
+    // held until one of them is gone
+    private boolean gappleAsked;
+    private int askedFrom = -1;
+    private int askedTicks;
 
     Eating(HighwayContext ctx) {
         super(ctx);
+    }
+
+    @Override
+    void onBuildStart() {
+        dropAsk();
+    }
+
+    @Override
+    void onTeardown() {
+        dropAsk();
+    }
+
+    /** One gapple at the next emergency check, whatever health and hunger say. */
+    public void askForGapple() {
+        gappleAsked = true;
+    }
+
+    public boolean gappleAsked() {
+        return gappleAsked;
+    }
+
+    /** The ask is met by a gapple already going down. */
+    public void forgetAsk() {
+        gappleAsked = false;
+    }
+
+    /** The emergency eat takes the ask: it holds until a gapple on us now is gone. */
+    public void beginAskedEat() {
+        gappleAsked = false;
+        askedFrom = gappleCount();
+        askedTicks = 0;
+    }
+
+    /**
+     * Whether the asked-for eat still waits on its gapple. Once a tick, from the eat: at full health
+     * and hunger nothing else keeps it going.
+     */
+    public boolean askedEatPending() {
+        if (askedFrom < 0) {
+            return false;
+        }
+        if (gappleCount() < askedFrom) {
+            askedFrom = -1;
+            return false;
+        }
+        if (++askedTicks > ASKED_EAT_MAX_TICKS) {
+            Helper.HELPER.logDirect("No gapple went down in " + ASKED_EAT_MAX_TICKS / 20 + "s - giving up the eat nhweat asked for");
+            askedFrom = -1;
+            return false;
+        }
+        return true;
+    }
+
+    /** No gapple to eat: the ask and its eat are dropped, or the next check starts it again. */
+    public void dropAsk() {
+        gappleAsked = false;
+        askedFrom = -1;
+    }
+
+    private int gappleCount() {
+        return ctx.inventory().getItemCountInventory(Item.getId(Items.ENCHANTED_GOLDEN_APPLE));
     }
 
     /**

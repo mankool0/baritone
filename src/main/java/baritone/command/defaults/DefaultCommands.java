@@ -80,6 +80,7 @@ public final class DefaultCommands {
         commands.add(hbc.netherBuildCommand);
         commands.add(hbc.netherStatusCommand);
         commands.add(hbc.netherStopCommand);
+        commands.add(hbc.netherEatCommand);
 
         return Collections.unmodifiableList(commands);
     }

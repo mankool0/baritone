@@ -156,7 +156,7 @@ public enum Supply {
         return shulkerType.item();
     }
 
-    /** "gapple": hive's restock reads "Looted 1 gapple shulker" and the like off the log. */
+    /** "gapple", as in "Looted 1 gapple shulker": external tooling parses these lines, keep them stable. */
     public String noun() {
         return noun;
     }
