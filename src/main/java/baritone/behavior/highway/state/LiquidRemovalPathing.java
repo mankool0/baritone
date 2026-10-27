@@ -122,6 +122,21 @@ public class LiquidRemovalPathing extends State {
             return;
         }
 
+        if (throughWalls && context.inventory().onlyObsidianToPlace() && context.eating().hasGapple()) {
+            // The sealing blocks ran out partway: finish the way Prep routes an obsidian-only
+            // inventory from the start, rather than sealing the rest of the approach in obsidian
+            Helper.HELPER.logDirect("Out of blocks to seal lava with. Eating a gapple and filling just the lava sources with obsidian.");
+            context.liquidRemoval().suppressThroughWalls();
+            context.baritone().getInputOverrideHandler().clearAllKeys();
+            context.transitionTo(HighwayState.LiquidRemovalPrep);
+            context.resetTimer();
+            return;
+        }
+        // With only obsidian aboard, the line-of-sight route places it into the sources and the
+        // holes it has to cross, never over lava: the fire resistance we came in on carries us
+        // through that instead
+        boolean fillSourcesOnly = !throughWalls && context.inventory().onlyObsidianToPlace();
+
         if (context.placeLoc() != null && context.playerContext().player().onGround()
                 && context.playerContext().playerFeet().getY() < context.placeLoc().getY()
                 && context.liquidRemoval().getIssueType(context.playerContext().playerFeet()) != HighwayBlockState.Liquids) {
@@ -303,8 +318,9 @@ public class LiquidRemovalPathing extends State {
             for (int x = -2; x <= 2; x++) {
                 for (int z = -2; z <= 2; z++) {
                     BlockPos tempLoc = new BlockPos(context.playerContext().playerFeet().x + x, context.playerContext().playerFeet().y - 1, context.playerContext().playerFeet().z + z);
-                    if (context.liquidRemoval().getIssueType(tempLoc) != HighwayBlockState.Blocks) {
-                        //placeAt = tempLoc;
+                    HighwayBlockState floorState = context.liquidRemoval().getIssueType(tempLoc);
+                    // Holes get floored on every route; lava only where we are not wading it
+                    if (floorState != HighwayBlockState.Blocks && !(fillSourcesOnly && floorState == HighwayBlockState.Liquids)) {
                         placeAtList.add(tempLoc);
                     }
                 }
@@ -466,8 +482,11 @@ public class LiquidRemovalPathing extends State {
                 }
             }
             
-            // Check if we need to bridge (no block directly in front below feet)
-            if (context.liquidRemoval().getIssueType(bridgePos) != HighwayBlockState.Blocks) {
+            // Check if we need to bridge (no block directly in front below feet). Lava there is
+            // waded through on the sources-only route, which floors holes but never lava: sneaking
+            // up to its edge would only hold us there, and the fire resistance is what we came in on.
+            HighwayBlockState bridgeState = context.liquidRemoval().getIssueType(bridgePos);
+            if (bridgeState != HighwayBlockState.Blocks && !(fillSourcesOnly && bridgeState == HighwayBlockState.Liquids)) {
                 double edgeDistance = Math.max(
                     Math.abs(context.playerContext().player().getX() - (feetPos.getX() + 0.5)),
                     Math.abs(context.playerContext().player().getZ() - (feetPos.getZ() + 0.5))
@@ -500,7 +519,7 @@ public class LiquidRemovalPathing extends State {
     }
 
     private static int selectFillBlock(HighwayContext context) {
-        int slot = context.inventory().putAcceptableThrowawayHotbar();
+        int slot = context.inventory().putFillBlockHotbar();
         if (slot == -1) {
             return FILL_NONE;
         }

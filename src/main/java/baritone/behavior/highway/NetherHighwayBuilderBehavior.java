@@ -439,7 +439,11 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
 
         ISchematic obsidSchemBot;
         WhiteBlackSchematic topAir;
+        // The dig profile's placed rows fall back to obsidian like the diagonal rail supports do: a
+        // digger clearing a road that was filled in with obsidian carries nothing else, and parking
+        // it on missing netherrack leaves the floor it walks on and the cover over lava unbuilt.
         WhiteBlackSchematic noLavaBotSides = new WhiteBlackSchematic(1, 1, 1, Collections.singletonList(Blocks.LAVA.defaultBlockState()), Blocks.NETHERRACK.defaultBlockState(), false, true, true);
+        noLavaBotSides.setThrowawayFallback(Blocks.OBSIDIAN.defaultBlockState());
         WhiteBlackSchematic supportNetherRack;
         WhiteBlackSchematic sideRailSupport;
         ISchematic sideRail;
@@ -483,6 +487,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             } else {
                 obsidSchemBot = new WhiteBlackSchematic(1, 1, highwayWidth, floorKeeps, Blocks.AIR.defaultBlockState(), true, false, false); // Allow only air, and obsidian unless excavating
                 supportNetherRack = new WhiteBlackSchematic(1, 1, supportWidth, HighwayContext.blackListBlocks, Blocks.NETHERRACK.defaultBlockState(), false, true, true); // Allow everything other than air and lava
+                supportNetherRack.setThrowawayFallback(Blocks.OBSIDIAN.defaultBlockState());
                 if (supportWidth + 2 <= highwayWidth) {
                     fullSchem.put(noLavaBotSides, 0, 0, 1);
                     fullSchem.put(noLavaBotSides, 0, 0, highwayWidth);
@@ -528,6 +533,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             } else {
                 obsidSchemBot = new WhiteBlackSchematic(highwayWidth, 1, 1, floorKeeps, Blocks.AIR.defaultBlockState(), true, false, false); // Allow only air, and obsidian unless excavating
                 supportNetherRack = new WhiteBlackSchematic(supportWidth, 1, 1, HighwayContext.blackListBlocks, Blocks.NETHERRACK.defaultBlockState(), false, true, true); // Allow everything other than air and lava
+                supportNetherRack.setThrowawayFallback(Blocks.OBSIDIAN.defaultBlockState());
                 if (supportWidth + 2 <= highwayWidth) {
                     fullSchem.put(noLavaBotSides, 1, 0, 0);
                     fullSchem.put(noLavaBotSides, highwayWidth, 0, 0);

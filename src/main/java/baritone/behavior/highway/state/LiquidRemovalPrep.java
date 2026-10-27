@@ -92,6 +92,14 @@ public class LiquidRemovalPrep extends State {
         // Get the closest point
         if (!context.liquidRemoval().sourceBlocks().isEmpty()) {
             context.baritone().getPathingBehavior().cancelEverything();
+            if (context.liquidRemoval().liquidThroughWalls() && context.inventory().onlyObsidianToPlace() && context.eating().hasGapple()) {
+                // Filling through cover seals every lava cell the approach digs past and floors the
+                // cells it steps into, and here all of that would be obsidian: the paving material,
+                // and the better part of two seconds each to dig back out of the profile. Going in
+                // on a gapple spends obsidian on the sources alone.
+                Helper.HELPER.logDirect("Only obsidian to place with; eating a gapple and filling just the lava sources.");
+                context.liquidRemoval().suppressThroughWalls();
+            }
             if (context.liquidRemoval().liquidThroughWalls()) {
                 // Fill it from here through the cover, no retreat and no gapple. This used to be
                 // limited to pools that were still sealed; the approach now places into the lava

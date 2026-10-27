@@ -109,6 +109,10 @@ public class Eating extends ContextComponent {
         return ctx.inventory().getItemCountInventory(Item.getId(Items.ENCHANTED_GOLDEN_APPLE));
     }
 
+    public boolean hasGapple() {
+        return gappleCount() > 0;
+    }
+
     /**
      * Eats the selected food for this tick. Call it with no container open; a screen is fine.
      * Vanilla presses a held use key only from handleKeybinds(), which never runs while a screen is

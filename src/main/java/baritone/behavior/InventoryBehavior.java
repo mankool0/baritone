@@ -554,10 +554,33 @@ public final class InventoryBehavior extends Behavior implements Helper {
         }
     }
 
+    /**
+     * What a movement may place as scaffolding, in preference order: acceptableThrowawayItems, then
+     * obsidian as a last resort where it isn't listed. Obsidian stays off the list where it is the
+     * paving material, and this never lets it beat a listed block that is still aboard - but a path
+     * that needs a bridge or a pillar with nothing else in the inventory used to have no option at all.
+     */
+    private static List<Item> throwawayCandidates() {
+        List<Item> listed = Baritone.settings().acceptableThrowawayItems.value;
+        if (listed.contains(Blocks.OBSIDIAN.asItem())) {
+            return listed;
+        }
+        List<Item> candidates = new ArrayList<>(listed);
+        candidates.add(Blocks.OBSIDIAN.asItem());
+        return candidates;
+    }
+
     private int firstValidThrowaway() { // TODO offhand idk
         NonNullList<ItemStack> invy = ctx.player().getInventory().getNonEquipmentItems();
         for (int i = 0; i < invy.size(); i++) {
             if (Baritone.settings().acceptableThrowawayItems.value.contains(invy.get(i).getItem())) {
+                return i;
+            }
+        }
+        // nothing listed aboard: the last resort gets staged the same way
+        List<Item> candidates = throwawayCandidates();
+        for (int i = 0; i < invy.size(); i++) {
+            if (candidates.contains(invy.get(i).getItem())) {
                 return i;
             }
         }
@@ -588,7 +611,7 @@ public final class InventoryBehavior extends Behavior implements Helper {
     }
 
     public boolean hasGenericThrowaway() {
-        for (Item item : Baritone.settings().acceptableThrowawayItems.value) {
+        for (Item item : throwawayCandidates()) {
             if (throwaway(false, stack -> item.equals(stack.getItem()))) {
                 return true;
             }
@@ -604,7 +627,7 @@ public final class InventoryBehavior extends Behavior implements Helper {
         if (maybe != null && throwaway(select, stack -> stack.getItem() instanceof BlockItem && ((BlockItem) stack.getItem()).getBlock().equals(maybe.getBlock()))) {
             return true;
         }
-        for (Item item : Baritone.settings().acceptableThrowawayItems.value) {
+        for (Item item : throwawayCandidates()) {
             if (throwaway(select, stack -> item.equals(stack.getItem()))) {
                 return true;
             }

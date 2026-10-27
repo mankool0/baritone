@@ -194,11 +194,11 @@ public final class PortalReturn {
     }
 
     private void directFillFloor(BlockPos floorPos) {
-        int slot = context.inventory().putAcceptableThrowawayHotbar();
+        int slot = context.inventory().putFillBlockHotbar();
         if (slot == -1) {
             baritone.getInputOverrideHandler().clearAllKeys();
             if (context.timer() % 1200 == 0) {
-                Helper.HELPER.logDirect("Exit portal has no footing and no acceptableThrowawayItems block in inventory; place one for us or stop the builder.");
+                Helper.HELPER.logDirect("Exit portal has no footing and no block to build it from (throwaway, netherrack or obsidian); place one for us or stop the builder.");
             }
             return;
         }
