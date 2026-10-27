@@ -20,7 +20,6 @@ package baritone.behavior.highway.state;
 import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
-import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 
@@ -41,12 +40,11 @@ public class InventoryCleaningSupplyShulker extends State {
             return;
         }
 
-        int throwawaySlot = context.inventory().roomSlotToToss();
+        int throwawaySlot = context.inventory().roomSlotForPickup();
         if (throwawaySlot == -1 || !context.inventory().aimToThrow(ticksInState())) {
             return;
         }
-        context.playerContext().playerController().windowClick(context.playerContext().player().inventoryMenu.containerId, throwawaySlot < 9 ? throwawaySlot + 36 : throwawaySlot, 0, ClickType.PICKUP, context.playerContext().player());
-        context.playerContext().playerController().windowClick(context.playerContext().player().inventoryMenu.containerId, -999, 0, ClickType.PICKUP, context.playerContext().player());
+        context.inventory().tossForRoom(throwawaySlot);
         context.sync().noteContainerClick();
         context.transitionTo(HighwayState.CollectingSupplyShulker);
     }

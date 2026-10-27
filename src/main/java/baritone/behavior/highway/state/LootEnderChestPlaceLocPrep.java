@@ -49,6 +49,14 @@ public class LootEnderChestPlaceLocPrep extends State {
         BlockPos safeLoc = context.shulkerPlacement().findSafeSideStorageSpot(7, 25);
         if (safeLoc == null) {
             context.baritone().getPathingBehavior().cancelEverything();
+            if (context.resupply().stashingShulker()) {
+                // A stash leg that had to move off its chest: the shulker can wait for a later
+                // trip, it's no reason to stop the build or to mark storage as out of it
+                Helper.HELPER.logDirect("Couldn't find a spot to stash the shulker, keeping it for now.");
+                context.resupply().abandonStash();
+                context.transitionTo(HighwayState.Nothing);
+                return;
+            }
             if (goWithout(context)) {
                 return;
             }

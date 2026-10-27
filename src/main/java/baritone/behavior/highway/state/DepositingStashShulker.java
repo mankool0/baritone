@@ -31,6 +31,8 @@ import net.minecraft.world.inventory.ChestMenu;
  * refill cycle of a {@link Supply}, whichever is active.
  */
 public class DepositingStashShulker extends State {
+    private int deposited = 0;
+
     public DepositingStashShulker(HighwayState state) {
         super(state);
     }
@@ -56,14 +58,36 @@ public class DepositingStashShulker extends State {
             return;
         }
 
+        String noun = supply != null ? supply.noun() : "ender chest";
         if (stashType != null && context.looting().depositShulkerChestSlot(stashType) > 0) {
             context.sync().noteContainerClick();
-            Helper.HELPER.logDirect("Stashed " + (supply != null ? supply.noun() : "ender chest") + " shulker back into storage.");
+            deposited++;
+            Helper.HELPER.logDirect("Stashed " + noun + " shulker back into storage.");
             return;
         }
 
-        // Nothing left to deposit (done), or storage was full (keep the shulker and move on)
+        // Nothing left to deposit (done), storage was full (keep the shulker and move on), or the
+        // shulker never made it into the inventory
         context.playerContext().player().closeContainer();
+        boolean kept = stashType != null && context.inventory().getShulkerCountInventory(stashType) > 0;
+        if (supply != null && deposited == 0 && !kept && context.inventory().isShulkerOnGround()) {
+            // The collecting state counted the box in our inventory, yet it's lying on the ground
+            // and the opened storage shows us without it. Ending the leg here would leave it to
+            // the stray shulker pickup, which brings it back as an ordinary carried box. Fetch it
+            // ourselves instead: the refill flag stays latched, so BuildingHighway's safety net
+            // stashes it with this same chest.
+            Helper.HELPER.logDirect("The " + noun + " shulker to stash isn't in the inventory, picking it back up.");
+            context.resupply().setStashingShulker(false);
+            context.transitionTo(HighwayState.ShulkerCollection);
+            context.resetTimer();
+            return;
+        }
+        if (kept) {
+            Helper.HELPER.logDirect("No room in the ender chest for the " + noun + " shulker, keeping it.");
+            context.resupply().noteStashStorageFull();
+        } else if (supply != null && deposited > 0) {
+            context.resupply().setEnderChestHasShulks(supply, true); // it holds the one we just put back
+        }
         int shulkerCount = context.inventory().getShulkerCountInventory(ShulkerType.Any);
         if (shulkerCount < context.resupply().startShulkerCount()) {
             // The stashed shulker was counted, either carried at startup or counted when its top-up

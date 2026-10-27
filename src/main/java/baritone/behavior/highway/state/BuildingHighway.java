@@ -238,11 +238,22 @@ public class BuildingHighway extends State {
                 }
             }
 
+            boolean stashCarried = supply.stash(context.settings()) && context.inventory().getShulkerCountInventory(supply.shulkerType()) > 0;
+            if (stashCarried && !context.resupply().refilling(supply) && supply.enabled(context.settings())
+                    && context.resupply().canStashCarriedShulker()
+                    && context.inventory().getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) > 0) {
+                // Stash mode keeps its shulkers in storage, yet we carry one with nothing to top up: a
+                // stash leg went without it (deposited nothing, found nowhere to set the chest down)
+                // or a restart dropped the refill flag mid-cycle. Put it back now, or it rides along
+                // until it's empty. No chest is remembered with no leg latched, so this sets one down.
+                Helper.HELPER.logDirect("Carrying a " + supply.noun() + " shulker that belongs in storage, putting it back.");
+                context.resupply().setRefilling(supply, true); // names the shulker DepositingStashShulker puts away
+            }
             if (context.resupply().refilling(supply)) {
                 // A refill cycle got interrupted after the threshold cleared (e.g. the place/loot
                 // flow bailed because we already had enough): stash the fetched shulker back, or just
                 // drop the flag when there is nothing left to stash.
-                if (supply.stash(context.settings()) && context.inventory().getShulkerCountInventory(supply.shulkerType()) > 0) {
+                if (stashCarried) {
                     context.transitionTo(HighwayState.EnderChestStashPlaceLocPrep);
                     context.baritone().getPathingBehavior().cancelEverything();
                     context.resetTimer();

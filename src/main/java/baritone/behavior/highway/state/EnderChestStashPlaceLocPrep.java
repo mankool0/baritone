@@ -60,9 +60,7 @@ public class EnderChestStashPlaceLocPrep extends State {
         BlockPos safeLoc = context.shulkerPlacement().findSafeSideStorageSpot(7, 25);
         if (safeLoc == null) {
             Helper.HELPER.logDirect("Couldn't find a spot to stash the shulker, keeping it for now.");
-            context.resupply().setStashingShulker(false);
-            context.resupply().setRefillingEnderChests(false);
-            context.resupply().stopRefillingSupplies();
+            context.resupply().abandonStash();
             context.transitionTo(HighwayState.Nothing);
             return;
         }

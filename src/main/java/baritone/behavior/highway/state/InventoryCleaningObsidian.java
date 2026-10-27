@@ -24,7 +24,6 @@ import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
-import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -46,19 +45,19 @@ public class InventoryCleaningObsidian extends State {
         // Only free as many slots as the nearby drops actually need, so we keep throwaway
         // items we might still want (support blocks etc.) instead of dumping them all
         int stacksToThrow = slotsNeededForDrops(context) - context.inventory().getItemCountInventory(Item.getId(Items.AIR));
-        if (stacksToThrow > 0 && context.inventory().getThrowawaySlotToToss() != -1 && !context.inventory().aimToThrow(ticksInState())) {
+        if (stacksToThrow > 0 && context.inventory().throwawaySlotForPickup() != -1 && !context.inventory().aimToThrow(ticksInState())) {
             return;
         }
         for (int i = 0; i < stacksToThrow; i++) {
-            int throwawaySlot = context.inventory().getThrowawaySlotToToss();
+            int throwawaySlot = context.inventory().throwawaySlotForPickup();
             if (throwawaySlot == -1) {
-                if (context.farm().obsidianStuckLogDue()) {
+                // Nothing left at all, or only slots we just threw out, which come back once they settle
+                if (context.inventory().getThrowawaySlotToToss() == -1 && context.farm().obsidianStuckLogDue()) {
                     Helper.HELPER.logDirect("Obsidian on the ground doesn't fit and nothing is left to throw out: need " + stacksToThrow + " more slot(s) [" + context.farm().obsidianRoomBreakdown() + "]");
                 }
                 break;
             }
-            context.playerContext().playerController().windowClick(context.playerContext().player().inventoryMenu.containerId, throwawaySlot < 9 ? throwawaySlot + 36 : throwawaySlot, 0, ClickType.PICKUP, context.playerContext().player());
-            context.playerContext().playerController().windowClick(context.playerContext().player().inventoryMenu.containerId, -999, 0, ClickType.PICKUP, context.playerContext().player());
+            context.inventory().tossForRoom(throwawaySlot);
         }
         context.sync().noteContainerClick();
         context.transitionTo(HighwayState.CollectingObsidian);

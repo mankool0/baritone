@@ -94,8 +94,15 @@ public class HighwayInventory extends ContextComponent {
     /** Ticks a throw waits for the server to take {@link #aimToThrow}'s aim before going out anyway. */
     private static final int THROW_AIM_TIMEOUT_TICKS = 20;
 
+    /** Ticks a slot thrown out by {@link #tossForRoom} stays off the pickup pickers: a round trip with room to spare. */
+    private static final int TOSS_SETTLE_TICKS = 20;
+
+    // Context tick each slot was last thrown out at by tossForRoom
+    private final long[] tossedAt = new long[36];
+
     HighwayInventory(HighwayContext ctx) {
         super(ctx);
+        Arrays.fill(tossedAt, Long.MIN_VALUE);
     }
 
     public int getObsidianCountInventory() {
@@ -773,14 +780,25 @@ public class HighwayInventory extends ContextComponent {
                 settings.acceptableThrowawayItems.value, layout().paving());
     }
 
-    /**
-     * Junk first, then acceptableThrowawayItems blocks in the setting's order; never slot 8.
-     * Netherrack goes after the junk because lava removal, support blocks and pillaring still use it.
-     */
+    /** {@link #getThrowawaySlotToToss()} for a state making room to pick drops up, skipping {@link #tossSettling} slots. */
+    public int throwawaySlotForPickup() {
+        return throwawaySlotToToss(playerContext.player().getInventory().getNonEquipmentItems(), junkSlots(),
+                settings.acceptableThrowawayItems.value, layout().paving(), this::tossSettling);
+    }
+
     static int throwawaySlotToToss(List<ItemStack> inventory, IntPredicate junkSlot, List<Item> throwaway, boolean paving) {
+        return throwawaySlotToToss(inventory, junkSlot, throwaway, paving, slot -> false);
+    }
+
+    /**
+     * Junk first, then acceptableThrowawayItems blocks in the setting's order; never slot 8 or a
+     * {@code skip} slot. Netherrack goes after the junk because lava removal, support blocks and
+     * pillaring still use it.
+     */
+    static int throwawaySlotToToss(List<ItemStack> inventory, IntPredicate junkSlot, List<Item> throwaway, boolean paving, IntPredicate skip) {
         // in slot order, so the hotbar goes first: that's where pickups land
         for (int i = 0; i < 36; i++) {
-            if (junkSlot.test(i)) {
+            if (!skip.test(i) && junkSlot.test(i)) {
                 return i;
             }
         }
@@ -791,7 +809,7 @@ public class HighwayInventory extends ContextComponent {
                 continue;
             }
             for (int i = 0; i < 36; i++) {
-                if (i != 8 && inventory.get(i).is(throwawayItem)) {
+                if (i != 8 && !skip.test(i) && inventory.get(i).is(throwawayItem)) {
                     return i;
                 }
             }
@@ -809,8 +827,18 @@ public class HighwayInventory extends ContextComponent {
                 settings.acceptableThrowawayItems.value, layout().paving());
     }
 
+    /** {@link #roomSlotToToss()} for a state making room to pick a shulker up, skipping {@link #tossSettling} slots. */
+    public int roomSlotForPickup() {
+        return roomSlotToToss(playerContext.player().getInventory().getNonEquipmentItems(), junkSlots(),
+                settings.acceptableThrowawayItems.value, layout().paving(), this::tossSettling);
+    }
+
     static int roomSlotToToss(List<ItemStack> inventory, IntPredicate junkSlot, List<Item> throwaway, boolean paving) {
-        int slot = throwawaySlotToToss(inventory, junkSlot, throwaway, paving);
+        return roomSlotToToss(inventory, junkSlot, throwaway, paving, slot -> false);
+    }
+
+    static int roomSlotToToss(List<ItemStack> inventory, IntPredicate junkSlot, List<Item> throwaway, boolean paving, IntPredicate skip) {
+        int slot = throwawaySlotToToss(inventory, junkSlot, throwaway, paving, skip);
         if (slot != -1) {
             return slot;
         }
@@ -818,7 +846,7 @@ public class HighwayInventory extends ContextComponent {
             int smallest = Integer.MAX_VALUE;
             for (int i = 0; i < 36; i++) {
                 ItemStack stack = inventory.get(i);
-                if (i != 8 && stack.is(item) && stack.getCount() < smallest) {
+                if (i != 8 && !skip.test(i) && stack.is(item) && stack.getCount() < smallest) {
                     smallest = stack.getCount();
                     slot = i;
                 }
@@ -828,6 +856,27 @@ public class HighwayInventory extends ContextComponent {
             }
         }
         return -1;
+    }
+
+    /**
+     * Throw a player inventory slot out to make room for a pickup, once {@link #aimToThrow} says
+     * so. The slot is then off the pickup pickers until it settles.
+     */
+    public void tossForRoom(int slot) {
+        int containerId = playerContext.player().inventoryMenu.containerId;
+        playerContext.playerController().windowClick(containerId, slot < 9 ? slot + 36 : slot, 0, ClickType.PICKUP, playerContext.player());
+        playerContext.playerController().windowClick(containerId, -999, 0, ClickType.PICKUP, playerContext.player());
+        tossedAt[slot] = ctx.contextTick();
+    }
+
+    /**
+     * Whether {@link #tossForRoom} emptied this slot too recently to trust what we see in it. The
+     * server puts whatever we touch next into the slot we emptied, and a slot update it sent before
+     * our throw can arrive after it and show the old stack again. Throwing the slot a second time
+     * then throws what the server put there, the shulker box we came to pick up included.
+     */
+    private boolean tossSettling(int slot) {
+        return tossedAt[slot] > ctx.contextTick() - TOSS_SETTLE_TICKS;
     }
 
     /**

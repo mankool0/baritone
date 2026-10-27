@@ -166,6 +166,23 @@ public class HighwayJunkTest {
     }
 
     @Test
+    public void settlingSlotsAreSkippedInEveryTier() {
+        List<ItemStack> inventory = inventory();
+        inventory.set(3, new ItemStack(Items.ROTTEN_FLESH));
+        inventory.set(9, new ItemStack(Items.NETHERRACK, 64));
+        inventory.set(10, new ItemStack(Items.NETHERRACK, 64));
+        inventory.set(20, new ItemStack(Items.OBSIDIAN, 5));
+        inventory.set(21, new ItemStack(Items.OBSIDIAN, 40));
+        IntPredicate junk = junkSlots(inventory);
+        assertEquals(9, HighwayInventory.throwawaySlotToToss(inventory, junk, throwaway, true, slot -> slot == 3));
+        assertEquals(10, HighwayInventory.throwawaySlotToToss(inventory, junk, throwaway, true, slot -> slot == 3 || slot == 9));
+        IntPredicate settling = slot -> slot == 3 || slot == 9 || slot == 10 || slot == 20;
+        assertEquals(-1, HighwayInventory.throwawaySlotToToss(inventory, junk, throwaway, true, settling));
+        // the smallest obsidian stack is settling, so a shulker gets the next smallest
+        assertEquals(21, HighwayInventory.roomSlotToToss(inventory, junk, throwaway, true, settling));
+    }
+
+    @Test
     public void withoutJunkTheOldOrderHolds() {
         List<ItemStack> inventory = inventory();
         inventory.set(1, new ItemStack(Items.OBSIDIAN, 64));

@@ -27,6 +27,9 @@ import java.util.EnumSet;
  * ender chest a trip goes through.
  */
 public class Resupply extends ContextComponent {
+    // How long a carried supply shulker waits for another stash trip after one found nowhere to set the chest down
+    private static final int STASH_RETRY_TICKS = 1200;
+
     private int picksToHave = 5;
     private boolean enderChestHasPickShulks = true;
     private boolean enderChestHasEnderShulks = true;
@@ -37,6 +40,9 @@ public class Resupply extends ContextComponent {
     // The supply the Supply states are topping up
     private Supply activeSupply = Supply.GAPPLES;
     private boolean stashingShulker = false;
+    // The ender chest had no free slot for a stash (until the next startBuild)
+    private boolean stashStorageFull = false;
+    private long stashRetryTick = 0;
     private BlockPos enderChestAccessLoc = null;
     private ShulkerType picksToUse;
 
@@ -62,6 +68,8 @@ public class Resupply extends ContextComponent {
         refillingEnderChests = false;
         resetSupplies();
         stashingShulker = false;
+        stashStorageFull = false;
+        stashRetryTick = 0;
         enderChestAccessLoc = null;
         startShulkerCount = ctx.inventory().getShulkerCountInventory(ShulkerType.Any);
     }
@@ -135,10 +143,6 @@ public class Resupply extends ContextComponent {
         return refillingSupplies.isEmpty() ? null : refillingSupplies.iterator().next();
     }
 
-    public void stopRefillingSupplies() {
-        refillingSupplies.clear();
-    }
-
     /** For a new build: nothing being refilled, and storage assumed to hold every supply again. */
     private void resetSupplies() {
         refillingSupplies.clear();
@@ -159,6 +163,28 @@ public class Resupply extends ContextComponent {
 
     public void setStashingShulker(boolean stashingShulker) {
         this.stashingShulker = stashingShulker;
+    }
+
+    /**
+     * Whether a supply shulker we carry may go back into storage on a trip of its own: not once the
+     * ender chest had no free slot for one (only a restock between builds makes room), and not for
+     * a while after a stash found nowhere to set the chest down.
+     */
+    public boolean canStashCarriedShulker() {
+        return !stashStorageFull && ctx.contextTick() >= stashRetryTick;
+    }
+
+    public void noteStashStorageFull() {
+        stashStorageFull = true;
+    }
+
+    /** Give up on the stash leg in progress: the shulker rides along until a later stash trip. */
+    public void abandonStash() {
+        stashingShulker = false;
+        refillingEnderChests = false;
+        refillingSupplies.clear();
+        releaseEnderChestAccessLoc();
+        stashRetryTick = ctx.contextTick() + STASH_RETRY_TICKS;
     }
 
     public BlockPos enderChestAccessLoc() {
