@@ -114,7 +114,7 @@ public class Eating extends ContextComponent {
     }
 
     /**
-     * Eats the selected food for this tick. Call it with no container open; a screen is fine.
+     * Eats {@code food} for this tick. Call it with no container open; a screen is fine.
      * Vanilla presses a held use key only from handleKeybinds(), which never runs while a screen is
      * open (an unfocused window opens the pause menu), so we press it ourselves. That sets
      * rightClickDelay, so handleKeybinds() won't start a second use this tick. The held key keeps
@@ -123,20 +123,40 @@ public class Eating extends ContextComponent {
      * ends it again. A use the server dropped stays predicted, and nothing sends another. Once a use
      * goes unconfirmed for EAT_CONFIRM_TICKS, release it and leave the key up this tick, so the
      * next tick starts a fresh one.
+     * Another mod's auto-switch (a kill aura's) can take the food out of hand between presses, and
+     * the press would use whatever it put there instead. The food goes back in hand right before
+     * each press, so the slot change goes out with the use.
+     *
+     * @return whether this tick's press had to put the food back in hand
      */
-    public void holdUseToEat() {
+    public boolean holdUseToEat(Item food) {
         LocalPlayer player = playerContext.player();
+        boolean putBack = false;
         if (player.isUsingItem()) {
             if (player.getTicksUsingItem() > EAT_CONFIRM_TICKS && !((ILivingEntity) player).isServerUsingItem()) {
                 Helper.HELPER.logDiagnostic("Server never confirmed the eat after " + player.getTicksUsingItem() + " ticks, pressing use again.");
                 releaseUseToEat();
-                return;
+                return false;
             }
-        } else if (player.connection.hasClientLoaded() && ((IMinecraft) playerContext.minecraft()).getRightClickDelay() == 0) {
+        } else if (clientLoaded() && ((IMinecraft) playerContext.minecraft()).getRightClickDelay() == 0) {
             // The server drops uses until the client has loaded, and the loading screen no longer stops us pressing
+            if (!player.getMainHandItem().is(food)) {
+                int slot = ctx.inventory().getItemSlotHotbar(Item.getId(food));
+                if (slot != -1) {
+                    Helper.HELPER.logDiagnostic("Something switched the hotbar off the " + food.getName().getString() + " (slot " + player.getInventory().getSelectedSlot() + " instead of " + slot + "), selecting it again before pressing use.");
+                    player.getInventory().setSelectedSlot(slot);
+                    putBack = true;
+                }
+            }
             ((IMinecraft) playerContext.minecraft()).callStartUseItem();
         }
         playerContext.minecraft().options.keyUse.setDown(true);
+        return putBack;
+    }
+
+    /** The server drops uses until the client has loaded, so an eat can't start before then. */
+    public boolean clientLoaded() {
+        return playerContext.player().connection.hasClientLoaded();
     }
 
     /** Lets go of an eat. Releasing the key alone does that only through handleKeybinds(), which a screen stops. */

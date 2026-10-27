@@ -22,9 +22,12 @@ import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.NetherHighwayBuilderBehavior;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
+import net.minecraft.world.item.Items;
 
 public class EmergencyGappleEat extends State {
     private int heldWithoutEatingTicks;
+    // Presses that found the gapple out of hand: something else switched the hotbar
+    private int foodPutBack;
 
     public EmergencyGappleEat(HighwayState state) {
         super(state);
@@ -53,7 +56,10 @@ public class EmergencyGappleEat extends State {
         }
 
         boolean containerOpen = context.playerContext().player().hasContainerOpen();
-        if (!containerOpen) {
+        if (!context.eating().clientLoaded()) {
+            // The server drops uses until the client has loaded, so a rejoin starts the count over
+            heldWithoutEatingTicks = 0;
+        } else if (!containerOpen) {
             // Only count while we can eat; an open container is closed first, so no progress then is expected.
             // isUsingItem() is the client's prediction, so this only catches an eat the client won't
             // start; holdUseToEat() retries the ones the server dropped.
@@ -70,11 +76,13 @@ public class EmergencyGappleEat extends State {
             NetherHighwayBuilderBehavior.suppressHitResult = true;
             if (containerOpen) {
                 context.playerContext().player().closeContainer();
-            } else {
-                context.eating().holdUseToEat();
+            } else if (context.eating().holdUseToEat(Items.ENCHANTED_GOLDEN_APPLE)) {
+                foodPutBack++;
             }
         } else {
-            Helper.HELPER.logDirect("Gapple eat isn't starting, re-selecting the gapple slot.");
+            Helper.HELPER.logDirect("Gapple eat isn't starting" + (foodPutBack > 0
+                    ? " (something switched the hotbar off the gapple " + foodPutBack + " time(s), a kill aura's auto-switch?)"
+                    : "") + ", re-selecting the gapple slot.");
             NetherHighwayBuilderBehavior.suppressHitResult = false;
             context.playerContext().minecraft().options.keyUse.setDown(false);
             context.baritone().getInputOverrideHandler().clearAllKeys();

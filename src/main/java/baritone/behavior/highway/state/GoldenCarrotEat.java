@@ -22,9 +22,12 @@ import baritone.behavior.highway.HighwayContext;
 import baritone.behavior.highway.NetherHighwayBuilderBehavior;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
+import net.minecraft.world.item.Items;
 
 public class GoldenCarrotEat extends State {
     private int heldWithoutEatingTicks;
+    // Presses that found the golden carrot out of hand: something else switched the hotbar
+    private int foodPutBack;
 
     public GoldenCarrotEat(HighwayState state) {
         super(state);
@@ -45,7 +48,10 @@ public class GoldenCarrotEat extends State {
         }
 
         boolean containerOpen = context.playerContext().player().hasContainerOpen();
-        if (!containerOpen) {
+        if (!context.eating().clientLoaded()) {
+            // The server drops uses until the client has loaded, so a rejoin starts the count over
+            heldWithoutEatingTicks = 0;
+        } else if (!containerOpen) {
             // Only count while we can eat; an open container is closed first, so no progress then is expected.
             // isUsingItem() is the client's prediction, so this only catches an eat the client won't
             // start; holdUseToEat() retries the ones the server dropped.
@@ -60,11 +66,13 @@ public class GoldenCarrotEat extends State {
             NetherHighwayBuilderBehavior.suppressHitResult = true;
             if (containerOpen) {
                 context.playerContext().player().closeContainer();
-            } else {
-                context.eating().holdUseToEat();
+            } else if (context.eating().holdUseToEat(Items.GOLDEN_CARROT)) {
+                foodPutBack++;
             }
         } else {
-            Helper.HELPER.logDirect("Golden carrot eat isn't starting, re-selecting the golden carrot slot.");
+            Helper.HELPER.logDirect("Golden carrot eat isn't starting" + (foodPutBack > 0
+                    ? " (something switched the hotbar off the golden carrot " + foodPutBack + " time(s), a kill aura's auto-switch?)"
+                    : "") + ", re-selecting the golden carrot slot.");
             NetherHighwayBuilderBehavior.suppressHitResult = false;
             context.playerContext().minecraft().options.keyUse.setDown(false);
             context.baritone().getInputOverrideHandler().clearAllKeys();

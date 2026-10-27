@@ -122,7 +122,7 @@ public class FallRecovery extends State {
         if (context.playerContext().player().hasContainerOpen()) {
             context.playerContext().player().closeContainer();
         } else {
-            context.eating().holdUseToEat();
+            context.eating().holdUseToEat(Items.ENCHANTED_GOLDEN_APPLE);
         }
         return true;
     }
