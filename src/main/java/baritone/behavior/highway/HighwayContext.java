@@ -421,7 +421,6 @@ public class HighwayContext {
             if (mob.isPresent()) {
                 // A carrot eat resumes from its prep: combat leaves the sword selected
                 setPreviousState(inCarrotEat ? HighwayState.GoldenCarrotEatPrep : currentStateEnum);
-                threats.setCurrentMobTarget(mob.get());
                 // A preempted thief hunt resumes at the thief, not at where combat started
                 threats.setCombatReturnPos(currentStateEnum == HighwayState.ShulkerThiefHunt ? null : playerContext.playerFeet());
                 transitionTo(HighwayState.MobCombat);

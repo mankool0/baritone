@@ -53,13 +53,11 @@ public class MobCombat extends State {
         if (mob.isEmpty()) {
             // All threats gone, path back to where we were before resuming
             context.baritone().getPathingBehavior().cancelEverything();
-            context.threats().setCurrentMobTarget(null);
             context.transitionTo(HighwayState.MobCombatReturn);
             return;
         }
 
         Entity target = mob.get();
-        context.threats().setCurrentMobTarget(target);
         Player player = context.playerContext().player();
 
         // Only aim-and-swing in melee range; a forced look target further out would fight the
@@ -84,8 +82,8 @@ public class MobCombat extends State {
 
         // A mob we can't get closer to (no path, across lava or a gap, up on a ledge) would hold us
         // here, or keep pulling us back to it, for as long as it stays angry. Ghasts are left out:
-        // findMobTargetingPlayer keeps a ghast engaged on purpose while it can shoot us, and
-        // this shouldn't undercut that.
+        // findMobTargetingPlayer keeps a ghast engaged on purpose while it can shoot us, here or
+        // back where we'd build, and this shouldn't undercut that.
         if (!(target instanceof Ghast) && context.threats().chaseStalled(target, reach, STALL_TIMEOUT_TICKS)) {
             Helper.HELPER.logDirect("Can't get to the " + target.getName().getString() + ", ignoring it for a while.");
             context.threats().ignoreMob(target, IGNORE_TICKS);

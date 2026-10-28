@@ -29,13 +29,18 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ProjectileWeaponItem;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Mobs to fight, the mobs and end crystals we gave up on for a while, and piglins that walked off
@@ -44,11 +49,12 @@ import java.util.Optional;
 public class Threats extends ContextComponent {
     private static final double GHAST_FIRE_RANGE_SQ = 64.0 * 64.0; // GhastShootFireballGoal only shoots at a target closer than this
     // A ghast fires at most every 60 ticks (20 charging in sight, then a 40-tick cooldown), so a ghast that
-    // saw us this recently still counts. The chase, or the ghast drifting behind a pillar, breaks sight
-    // for a moment, and dropping it then would walk us back and forth between its shots.
+    // saw us this recently still counts. The ghast drifting behind a pillar breaks sight for a moment, and
+    // dropping it then would walk us back and forth between its shots. A chase that stays out of its
+    // sight for longer is covered by ghastSeesReturnSpot.
     private static final int GHAST_SIGHT_GRACE_TICKS = 60;
     private static final int WALK_RECHECK_TICKS = 10; // how long a walk check's answer stands before it's run again
-    private Entity currentMobTarget = null;
+    private final Set<Entity> engagedGhasts = new HashSet<>(); // ghasts being fought since a fireball came at us, see findMobTargetingPlayer
     private final Map<java.util.UUID, Long> ghastSightings = new HashMap<>(); // game time each ghast last had us in sight
     private final Map<java.util.UUID, WalkVerdict> walkVerdicts = new HashMap<>(); // last walk check answer per mob, see canAttackUs
     private final Map<java.util.UUID, Long> ignoredMobs = new HashMap<>(); // mobs a stalled chase gave up on, to the game time they stay ignored until
@@ -75,14 +81,6 @@ public class Threats extends ContextComponent {
         clearIgnoredMobs();
     }
 
-    public Entity currentMobTarget() {
-        return currentMobTarget;
-    }
-
-    public void setCurrentMobTarget(Entity entity) {
-        this.currentMobTarget = entity;
-    }
-
     public void ignoreMob(Entity mob, int ticks) {
         long now = playerContext.world().getGameTime();
         ignoredMobs.values().removeIf(until -> until <= now);
@@ -99,6 +97,7 @@ public class Threats extends ContextComponent {
         ignoredCrystals.clear();
         ghastSightings.clear();
         walkVerdicts.clear();
+        engagedGhasts.clear();
     }
 
     /** Leaves an end crystal out of {@link HighwayScanner#isHighwayCorrect} for a while, so a crystal we can't break doesn't send us straight back. */
@@ -356,7 +355,30 @@ public class Threats extends ContextComponent {
             return true;
         }
         Long seen = ghastSightings.get(ghast.getUUID());
-        return seen != null && now >= seen && now - seen <= GHAST_SIGHT_GRACE_TICKS;
+        if (seen != null && now >= seen && now - seen <= GHAST_SIGHT_GRACE_TICKS) {
+            return true;
+        }
+        return ghastSeesReturnSpot(ghast);
+    }
+
+    /**
+     * Whether the ghast can see the spot combat would walk us back to. The chase toward a ghast often
+     * leads out of its sight for longer than the grace, round a pillar or down into a dip, where it can't
+     * shoot us. Giving up on it there only walks us back to building in its view, where it starts
+     * shooting again.
+     */
+    private boolean ghastSeesReturnSpot(net.minecraft.world.entity.LivingEntity ghast) {
+        if (combatReturnPos == null) {
+            return false;
+        }
+        Vec3 feet = new Vec3(combatReturnPos.x + 0.5, combatReturnPos.y, combatReturnPos.z + 0.5);
+        if (ghast.position().distanceToSqr(feet) >= GHAST_FIRE_RANGE_SQ) {
+            return false;
+        }
+        // the same ray as LivingEntity.hasLineOfSight, to our eyes standing there
+        Vec3 eyes = feet.add(0, playerContext.player().getEyeHeight(), 0);
+        return playerContext.world().clip(new ClipContext(ghast.getEyePosition(), eyes,
+                ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, ghast)).getType() == HitResult.Type.MISS;
     }
 
     public java.util.Optional<Entity> findMobTargetingPlayer() {
@@ -372,16 +394,14 @@ public class Threats extends ContextComponent {
                 .filter(owner -> owner.distanceToSqr(player) < GHAST_FIRE_RANGE_SQ)
                 .collect(java.util.stream.Collectors.toSet());
 
-        // Sticky ghast: once its fireball has engaged it, keep fighting the ghast while it's alive and
+        // Sticky ghasts: once its fireball has engaged a ghast, keep fighting it while it's alive and
         // close enough to shoot at us again. The fireball is gone as soon as it explodes, so a shorter
         // range than the one it fires from would drop a farther ghast between its shots. The same range
         // gates engaging it at all, so a ghast that drifted out of it doesn't flicker in and out either.
         // Either way canAttackUs still wants it to have had us in sight lately.
-        if (currentMobTarget instanceof net.minecraft.world.entity.monster.Ghast
-                && currentMobTarget.isAlive()
-                && currentMobTarget.distanceToSqr(player) < GHAST_FIRE_RANGE_SQ) {
-            ghastsThreatening.add(currentMobTarget);
-        }
+        engagedGhasts.stream()
+                .filter(ghast -> ghast.isAlive() && ghast.distanceToSqr(player) < GHAST_FIRE_RANGE_SQ)
+                .forEach(ghastsThreatening::add);
 
         net.minecraft.world.damagesource.DamageSource lastDamage = player.getLastDamageSource();
         final Entity lastAttacker = lastDamage != null ? lastDamage.getEntity() : null;
@@ -391,7 +411,7 @@ public class Threats extends ContextComponent {
         double maxRangeSq = settings.highwayMobMaxAggroRange.value * settings.highwayMobMaxAggroRange.value;
         double ourStandingY = standingY(player);
 
-        return playerContext.entitiesStream()
+        List<Entity> targets = playerContext.entitiesStream()
                 .filter(e -> e instanceof net.minecraft.world.entity.LivingEntity && e.isAlive())
                 .filter(e -> !(e instanceof net.minecraft.world.entity.player.Player))
                 .filter(e -> e == lastAttacker
@@ -426,7 +446,14 @@ public class Threats extends ContextComponent {
                 .filter(e -> !isMobIgnored(e) || mobReachDistance(e) <= settings.highwayMobCombatApproachDistance.value)
                 // whatever just hit us plainly can; last, since it may plan a path for the mob
                 .filter(e -> e == lastAttacker || canAttackUs(e))
-                .min(java.util.Comparator.comparingDouble(e -> e.distanceToSqr(player)));
+                .toList();
+
+        // Every ghast still in this list stays engaged, not just the one we go for. Stickiness that only
+        // followed our target would let a closer mob taken on first drop the ghast, and once that mob
+        // was dead we'd go back to building in the ghast's view.
+        engagedGhasts.clear();
+        targets.stream().filter(e -> e instanceof net.minecraft.world.entity.monster.Ghast).forEach(engagedGhasts::add);
+        return targets.stream().min(java.util.Comparator.comparingDouble(e -> e.distanceToSqr(player)));
     }
 
     // Only an empty main hand can accept a shulker box (Mob.canReplaceCurrentItem; adults always
