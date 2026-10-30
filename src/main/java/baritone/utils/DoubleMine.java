@@ -71,6 +71,15 @@ public final class DoubleMine implements AbstractGameEventListener {
      */
     private static final int PARK_TIMEOUT_TICKS = 40;
 
+    /**
+     * Breaker ids the slots show their digs under in the level renderer, which vanilla only fills
+     * from its own left-click dig and from the server's packets about other players' digs. Without
+     * them the crack overlay, and mods reading the renderer's progress map, see nothing of a dig
+     * sent as bare packets. Negative so they can't collide with an entity id.
+     */
+    private static final int REGULAR_BREAKER_ID = Integer.MIN_VALUE;
+    private static final int PARKED_BREAKER_ID = Integer.MIN_VALUE + 1;
+
     private final IPlayerContext ctx;
     private final ServerDigSpeed digSpeed;
     /**
@@ -134,6 +143,8 @@ public final class DoubleMine implements AbstractGameEventListener {
         if (sentThisTick) {
             ctx.player().swing(InteractionHand.MAIN_HAND); // once a tick, like a held attack
         }
+        show(REGULAR_BREAKER_ID, regular, now, IPlayerController.SERVER_FINISH_DIG_PROGRESS, FINISH_MARGIN_TICKS);
+        show(PARKED_BREAKER_ID, parked, now, 1.0f, 0);
         Dig current = regular != null ? regular : parked;
         if (current == null) {
             return null;
@@ -164,6 +175,8 @@ public final class DoubleMine implements AbstractGameEventListener {
     public void reset() {
         regular = null;
         parked = null;
+        show(REGULAR_BREAKER_ID, null, 0, 0, 0);
+        show(PARKED_BREAKER_ID, null, 0, 0, 0);
     }
 
     @Override
@@ -239,6 +252,23 @@ public final class DoubleMine implements AbstractGameEventListener {
             sending = false;
         }
         sentThisTick = true;
+    }
+
+    /**
+     * Shows a slot's dig in the level renderer like a left-click dig shows itself, staged by how far
+     * it is to the tick the block breaks, or clears the slot's entry. Client-side only, nothing is sent.
+     *
+     * @param fraction    the progress the slot's dig breaks the block at
+     * @param marginTicks ticks past that before it does
+     */
+    private void show(int breakerId, Dig dig, long now, float fraction, int marginTicks) {
+        if (dig == null) {
+            ctx.minecraft().levelRenderer.destroyBlockProgress(breakerId, BlockPos.ZERO, -1);
+            return;
+        }
+        long ticks = (long) ServerDigTarget.ticksToReach(progress(dig), fraction) + marginTicks;
+        int stage = ticks <= 0 ? 9 : (int) Math.min(9, (now - dig.start) * 10 / ticks);
+        ctx.minecraft().levelRenderer.destroyBlockProgress(breakerId, dig.pos, stage);
     }
 
     private boolean gone(Dig dig) {
