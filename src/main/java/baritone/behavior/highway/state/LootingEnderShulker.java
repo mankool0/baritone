@@ -55,7 +55,7 @@ public class LootingEnderShulker extends State {
                 forRun = true;
             }
         } else {
-            target = Math.min(64, Math.max(context.settings().highwayEnderChestsToHave.value, Math.min(context.settings().highwayEnderChestsThreshold.value, 56)));
+            target = context.resupply().enderChestTopUpTarget();
         }
 
         if (context.inventory().getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) >= target) {

@@ -1989,6 +1989,14 @@ public final class Settings {
     public final Setting<Integer> highwayEnderChestsToHave = new Setting<>(64);
 
     /**
+     * While digging with no throwaway, netherrack or obsidian left to build supports from, break
+     * this many loose ender chests into obsidian (8 each), which the supports fall back to. The
+     * chests kept for storage trips (highwayEnderChestsToKeep, highwayEnderChestsThreshold) are
+     * never farmed; with none to spare, an ender chest shulker is fetched first. 0 turns it off.
+     */
+    public final Setting<Integer> highwayDiggingEnderChestsToFarm = new Setting<>(8);
+
+    /**
      * Break the placed ender chests instantly while farming obsidian, by reusing the server's
      * destroy target from one real break instead of mining each chest out. Turn this off to mine
      * every ender chest normally.

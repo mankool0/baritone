@@ -106,6 +106,8 @@ public class EnderChestFarm extends ContextComponent {
     private int runObsidianNeedHave = 0;
     private int farmRunChests = -1;
     private boolean farmLooseChests = false;
+    // Digging is out of support blocks and couldn't farm, and has said why; cleared once a block is back
+    private boolean supportFarmBlockedLogged = false;
 
     EnderChestFarm(HighwayContext ctx) {
         super(ctx);
@@ -622,7 +624,7 @@ public class EnderChestFarm extends ContextComponent {
 
     /** The farm being set up breaks loose chests only and never places the ender chest shulker */
     public boolean farmLooseChests() {
-        return farmLooseChests && layout().paving();
+        return farmLooseChests;
     }
 
     public void setFarmLooseChests(boolean farmLooseChests) {
@@ -633,6 +635,18 @@ public class EnderChestFarm extends ContextComponent {
         runObsidianNeedTick = -1;
         farmRunChests = -1;
         farmLooseChests = false;
+        supportFarmBlockedLogged = false;
+    }
+
+    /** True the first time a support farm is turned down since we last had a block to build with */
+    public boolean supportFarmBlockedLogDue() {
+        boolean due = !supportFarmBlockedLogged;
+        supportFarmBlockedLogged = true;
+        return due;
+    }
+
+    public void clearSupportFarmBlocked() {
+        supportFarmBlockedLogged = false;
     }
 
     public boolean looseChestsCoverRun(int runChests) {

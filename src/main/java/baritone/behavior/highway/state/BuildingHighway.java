@@ -181,15 +181,7 @@ public class BuildingHighway extends State {
         int enderChestThreshold = Math.min(context.settings().highwayEnderChestsThreshold.value, 56);
         if (!context.layout().paving() && context.inventory().getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem())) < enderChestThreshold) {
             if (context.inventory().getShulkerCountInventory(ShulkerType.EnderChest) > 0) {
-                // We already hold an ender chest shulker: open it and top up. No grab happened, so the stash places a fresh chest.
-                if (!context.resupply().refillingEnderChests()) {
-                    context.resupply().setRefillingEnderChests(true);
-                    context.resupply().setEnderChestAccessLoc(null);
-                }
-                context.sync().clearThresholdConfirm();
-                context.transitionTo(HighwayState.EchestMiningPlaceLocPrep);
-                context.baritone().getPathingBehavior().cancelEverything();
-                context.resetTimer();
+                topUpEnderChests(context);
                 return;
             }
             if (!context.sync().thresholdConfirmed("Ender chest count")) {
@@ -200,10 +192,12 @@ public class BuildingHighway extends State {
                 context.pause("Low on ender chests, and none in storage to fetch.");
                 return;
             }
-            // Fetch a shulker (also tops picks/gapples) from storage, then loop back here to top up
             Helper.HELPER.logDirect("Low on ender chests, fetching an ender chest shulker from storage.");
-            context.resupply().setRefillingEnderChests(true);
-            context.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);
+            fetchEnderChestShulker(context);
+            return;
+        }
+
+        if (farmForSupportBlocks(context)) {
             return;
         }
 
@@ -382,5 +376,82 @@ public class BuildingHighway extends State {
                 return;
             }
         }
+    }
+
+    /** We already hold an ender chest shulker: open it and top up. No grab happened, so the stash places a fresh chest. */
+    private static void topUpEnderChests(HighwayContext context) {
+        if (!context.resupply().refillingEnderChests()) {
+            context.resupply().setRefillingEnderChests(true);
+            context.resupply().setEnderChestAccessLoc(null);
+        }
+        context.farm().setFarmLooseChests(false); // a support farm cut short would turn this top-up into a farm
+        context.sync().clearThresholdConfirm();
+        context.transitionTo(HighwayState.EchestMiningPlaceLocPrep);
+        context.baritone().getPathingBehavior().cancelEverything();
+        context.resetTimer();
+    }
+
+    /** Fetch a shulker (also tops picks/gapples) from storage, then loop back here to top up */
+    private static void fetchEnderChestShulker(HighwayContext context) {
+        context.resupply().setRefillingEnderChests(true);
+        context.farm().setFarmLooseChests(false);
+        context.transitionTo(HighwayState.LootEnderChestPlaceLocPrep);
+    }
+
+    /**
+     * Digging with no throwaway, netherrack or obsidian left: the support rows have nothing to be
+     * built from, and the builder parks on missing materials. Break a few loose ender chests into
+     * the obsidian those rows fall back to, past the ones kept for storage trips. With none to
+     * spare, top them up from an ender chest shulker first. Returns whether this took the tick.
+     */
+    private static boolean farmForSupportBlocks(HighwayContext context) {
+        int toFarm = context.settings().highwayDiggingEnderChestsToFarm.value;
+        if (context.layout().paving() || toFarm <= 0 || context.inventory().canBuildSupportBlock()) {
+            context.sync().clearThresholdConfirm("Support block count");
+            context.farm().clearSupportFarmBlocked();
+            return false;
+        }
+        int chests = context.inventory().getItemCountInventory(Item.getId(Blocks.ENDER_CHEST.asItem()));
+        int kept = Math.max(context.settings().highwayEnderChestsToKeep.value, Math.min(context.settings().highwayEnderChestsThreshold.value, 56));
+        boolean holdShulker = context.inventory().getShulkerCountInventory(ShulkerType.EnderChest) > 0;
+        String blocked = null;
+        if (!context.inventory().hasNonSilkPick()) {
+            blocked = "no pickaxe without Silk Touch to break ender chests with";
+        } else if (context.farm().obsidianRoomInventory(0) < 8) {
+            blocked = "no inventory room for the obsidian [" + context.farm().obsidianRoomBreakdown() + "]";
+        } else if (chests <= kept && (context.resupply().enderChestTopUpTarget() <= kept
+                || !holdShulker && (chests == 0 || !context.resupply().enderChestHasEnderShulks()))) {
+            // A top-up that can't lift the count past the kept chests would fetch shulker after shulker
+            blocked = "all " + chests + " ender chests are kept for storage trips and there are none to top up from";
+        }
+        if (blocked != null) {
+            if (context.farm().supportFarmBlockedLogDue()) {
+                Helper.HELPER.logDirect("Out of blocks to build supports with and can't farm obsidian: " + blocked);
+            }
+            context.sync().clearThresholdConfirm("Support block count");
+            return false;
+        }
+        // A pickup or a stack swapped onto the hotbar can read as none for a tick or two
+        if (!context.sync().thresholdConfirmed("Support block count")) {
+            return true;
+        }
+        if (chests <= kept) {
+            if (holdShulker) {
+                Helper.HELPER.logDirect("Out of blocks to build supports with and no ender chests to spare, topping up from our ender chest shulker first.");
+                topUpEnderChests(context);
+            } else {
+                Helper.HELPER.logDirect("Out of blocks to build supports with and no ender chests to spare, fetching an ender chest shulker from storage.");
+                fetchEnderChestShulker(context);
+            }
+            return true;
+        }
+        toFarm = Math.min(toFarm, chests - kept);
+        Helper.HELPER.logDirect("Out of blocks to build supports with, farming " + toFarm + " ender chests into obsidian.");
+        context.farm().setFarmRunChests(toFarm);
+        context.farm().setFarmLooseChests(true);
+        context.transitionTo(HighwayState.EchestMiningPlaceLocPrep);
+        context.baritone().getPathingBehavior().cancelEverything();
+        context.resetTimer();
+        return true;
     }
 }

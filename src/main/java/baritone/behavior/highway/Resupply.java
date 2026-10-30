@@ -118,6 +118,14 @@ public class Resupply extends ContextComponent {
         }
     }
 
+    /**
+     * Loose ender chests a digging top-up loots up to: one slot at most, and never short of the
+     * refill threshold, so a refill always clears its own trigger.
+     */
+    public int enderChestTopUpTarget() {
+        return Math.min(64, Math.max(settings.highwayEnderChestsToHave.value, Math.min(settings.highwayEnderChestsThreshold.value, 56)));
+    }
+
     public boolean refillingEnderChests() {
         return refillingEnderChests;
     }

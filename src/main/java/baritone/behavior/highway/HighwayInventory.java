@@ -209,6 +209,11 @@ public class HighwayInventory extends ContextComponent {
         return itemSlot;
     }
 
+    /** Whether we carry a pickaxe that breaks an ender chest into obsidian rather than dropping the chest */
+    public boolean hasNonSilkPick() {
+        return getPickaxeSlot(true) != -1;
+    }
+
     private int getPickaxeSlot(boolean avoidSilkTouch) {
         for (int i = 0; i < 36; i++) {
             ItemStack stack = playerContext.player().getInventory().getNonEquipmentItems().get(i);

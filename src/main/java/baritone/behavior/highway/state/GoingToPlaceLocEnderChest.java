@@ -70,7 +70,7 @@ public class GoingToPlaceLocEnderChest extends State {
             int farmKeep = EnderChestFarm.farmKeepForRun(roomKeep, chests, context.farm().farmRunChests());
             context.farm().setFarmEnderChestsToKeep(farmKeep);
             Helper.HELPER.logDirect("Farming " + Math.max(0, chests - farmKeep) + " of " + chests + " ender chests, keeping " + farmKeep
-                    + (farmKeep > roomKeep ? " instead of " + roomKeep + " (the rest of the run needs no more)"
+                    + (farmKeep > roomKeep ? " instead of " + roomKeep + (context.layout().paving() ? " (the rest of the run needs no more)" : " (enough for the supports)")
                     : farmKeep > context.settings().highwayEnderChestsToKeep.value ? " instead of " + context.settings().highwayEnderChestsToKeep.value + " (obsidian room)" : "")
                     + " [" + context.farm().obsidianRoomBreakdown() + (boxSlots < 0 ? " boxInFlight" : "") + "]");
             context.farm().setInstantMineCalibrated(false);
