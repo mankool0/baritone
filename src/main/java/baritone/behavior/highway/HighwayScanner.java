@@ -615,7 +615,7 @@ public class HighwayScanner extends ContextComponent {
                                 if (!baritone.getBuilderProcess().checkNoEntityCollision(new AABB(new BlockPos(blockX, blockY, blockZ)), playerContext.player())) {
                                     List<Entity> entityList = playerContext.world().getEntities(null, new AABB(new BlockPos(blockX, blockY, blockZ)));
                                     for (Entity entity : entityList) {
-                                        if (entity instanceof AbstractBoat || entity.isVehicle()) {
+                                        if (entity.getRootVehicle() instanceof AbstractBoat || entity.isVehicle()) {
                                             // can't do boats lol
                                             boatLocation = new BlockPos(blockX, blockY, blockZ);
                                             renderLockBuilding.unlock();
