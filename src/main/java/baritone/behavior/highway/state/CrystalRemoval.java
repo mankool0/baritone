@@ -28,6 +28,7 @@ import baritone.behavior.highway.enums.HighwayState;
 import baritone.pathing.movement.MovementHelper;
 import baritone.utils.ExplosionExposure;
 import net.minecraft.core.BlockPos;
+import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
@@ -55,8 +56,9 @@ import java.util.Set;
  * way, and hitting it sets off a power 6 explosion: from the nearest a hit reaches, about 20 HP through Protection IV
  * netherite on Hard. Vanilla scales that by how much of us the blast can see ({@link ExplosionExposure}), and it goes
  * off at the crystal's base, so a block at our feet between us and it hides nearly all of us while we hit it over the
- * top. So: pick a spot in reach of it where a little cover brings that down far enough, walk there, put the cover
- * down, check it from where we actually stand, hit.
+ * top. One sitting under the road needs none: the edge of the floor we stand on hides us from it. So: pick a spot in
+ * reach of it where a little cover brings that down far enough, walk there, put the cover down, check it from where we
+ * actually stand, hit.
  */
 public class CrystalRemoval extends State {
 
@@ -68,11 +70,23 @@ public class CrystalRemoval extends State {
     private static final double ATTACK_REACH = 2.8;
     /** How far out from the crystal to look for somewhere to stand. */
     private static final int STAND_RADIUS = 5;
+    /**
+     * Feet heights to look at, from its base. Its box reaches two blocks up from where it sits, so a crystal on a
+     * pillar or the support row under the road gets in the way of the floor, and the road we stand on is two or
+     * three blocks above it.
+     */
+    private static final int STAND_DY_MIN = -1;
+    private static final int STAND_DY_MAX = 3;
     /** Cover goes this far out from where we stand, at our feet. */
     private static final int COVER_RANGE = 2;
     private static final int MAX_COVERS = 3;
     /** Heights above the crystal's base to aim a hit at, so it goes over cover at our feet. */
     private static final double[] AIM_HEIGHTS = {1.5, 1.85};
+    /**
+     * Failing those, the part of its box nearest us, this far in. Looking down on a crystal below the road, its
+     * middle is out of reach past the edge of the floor, but its top edge on our side isn't.
+     */
+    private static final double AIM_INSET = 0.2;
     private static final int PATH_TIMEOUT_TICKS = 400;
     private static final int CENTER_TIMEOUT_TICKS = 60;
     private static final int COVER_TIMEOUT_TICKS = 60;
@@ -250,7 +264,7 @@ public class CrystalRemoval extends State {
         double eyeHeight = player.getEyeHeight(Pose.STANDING);
         Plan best = null;
         double bestScore = Double.MAX_VALUE;
-        for (int dy = -1; dy <= 1; dy++) {
+        for (int dy = STAND_DY_MIN; dy <= STAND_DY_MAX; dy++) {
             for (int dx = -STAND_RADIUS; dx <= STAND_RADIUS; dx++) {
                 for (int dz = -STAND_RADIUS; dz <= STAND_RADIUS; dz++) {
                     BetterBlockPos stand = new BetterBlockPos(base.getX() + dx, base.getY() + dy, base.getZ() + dz);
@@ -326,7 +340,7 @@ public class CrystalRemoval extends State {
         return candidates;
     }
 
-    /** The first of {@link #AIM_HEIGHTS} a hit from {@code eye} reaches the crystal at, or null. */
+    /** The first of {@link #AIM_HEIGHTS}, then the nearest part of its box, that a hit from {@code eye} reaches the crystal at, or null. */
     private Vec3 aimFrom(BlockGetter world, Vec3 eye) {
         for (double height : AIM_HEIGHTS) {
             Vec3 aim = new Vec3(crystal.getX(), crystal.getBoundingBox().minY + height, crystal.getZ());
@@ -334,7 +348,9 @@ public class CrystalRemoval extends State {
                 return aim;
             }
         }
-        return null;
+        AABB inner = crystal.getBoundingBox().deflate(AIM_INSET);
+        Vec3 nearest = new Vec3(Mth.clamp(eye.x, inner.minX, inner.maxX), Mth.clamp(eye.y, inner.minY, inner.maxY), Mth.clamp(eye.z, inner.minZ, inner.maxZ));
+        return clearShot(world, eye, nearest) ? nearest : null;
     }
 
     /** Whether a hit from {@code eye} towards {@code aim} meets the crystal's box within reach, with no block before it. */
