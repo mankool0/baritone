@@ -23,6 +23,7 @@ import baritone.api.behavior.look.IAimProcessor;
 import baritone.api.behavior.look.ITickableAimProcessor;
 import baritone.api.event.events.*;
 import baritone.api.pathing.goals.GoalBlock;
+import baritone.api.process.IGlideControl;
 import baritone.api.utils.*;
 import baritone.api.utils.input.Input;
 import baritone.pathing.movement.MovementHelper;
@@ -40,7 +41,9 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.projectile.FireworkRocketEntity;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.ItemStack;
@@ -99,6 +102,17 @@ public final class ElytraBehavior implements Helper {
     public boolean landingMode;
 
     /**
+     * The step worked out this tick for an {@link IGlideControl} to move the glide by, {@code null} when there is none.
+     * {@link ElytraProcess} clears it at the end of every tick.
+     */
+    public Vec3 glideStep;
+
+    /**
+     * Whether a landing moved by steps has made its one rise before touching down
+     */
+    private boolean landingRose;
+
+    /**
      * The most recent minimum number of firework boost ticks, equivalent to {@code 10 * (1 + Flight)}
      * <p>
      * Updated every time a firework is automatically used
@@ -111,6 +125,21 @@ public final class ElytraBehavior implements Helper {
     private BlockStateInterface bsi;
     public final BetterBlockPos destination;
     private final boolean appendDestination;
+    /**
+     * Whether the appended destination is the block to stand in once landed, with its floor right under it, rather
+     * than a spot high above the floor
+     */
+    private final boolean landsOnDestination;
+
+    // short of touching what cut a step: the server moves the player again from its own position
+    private static final double GLIDE_STEP_MARGIN = 0.01;
+    // a landing moved by steps comes down the middle of its column, which can be a single block wide
+    private static final double LANDING_CENTERED = 0.1;
+    // the most a landing falls after its rise, short of the 3 blocks of fall that hurt
+    private static final double LANDING_FALL = 2.5;
+    private static final double LANDING_RISE = 0.05;
+    // a landing on the destination block comes in this far over its floor
+    private static final double LANDING_HOVER = 0.5;
 
     private final ExecutorService solverExecutor;
     private Future<Solution> solver;
@@ -123,7 +152,7 @@ public final class ElytraBehavior implements Helper {
     private int invTickCountdown = 0;
     private final Queue<Runnable> invTransactionQueue = new LinkedList<>();
 
-    public ElytraBehavior(Baritone baritone, ElytraProcess process, NetherPathfinderContext npf, BlockPos destination, boolean appendDestination) {
+    public ElytraBehavior(Baritone baritone, ElytraProcess process, NetherPathfinderContext npf, BlockPos destination, boolean appendDestination, boolean landsOnDestination) {
         this.baritone = baritone;
         this.ctx = baritone.getPlayerContext();
         this.clearLines = new CopyOnWriteArrayList<>();
@@ -132,12 +161,17 @@ public final class ElytraBehavior implements Helper {
         this.process = process;
         this.destination = new BetterBlockPos(destination);
         this.appendDestination = appendDestination;
+        this.landsOnDestination = landsOnDestination;
         this.solverExecutor = Executors.newSingleThreadExecutor();
         this.nextTickBoostCounter = new int[2];
 
         this.npfContext = npf;
 
-        if(ctx.world().dimension() == Level.NETHER) {
+        if (landsOnDestination) {
+            // the block to stand in can be in a tunnel only 2 blocks of air wider than the hitbox, and the last stretch
+            // there is short
+            this.pathFinder = (src, dst) -> npfContext.pathFindAsync(src, dst, false);
+        } else if(ctx.world().dimension() == Level.NETHER) {
             this.pathFinder = Baritone.settings().elytraAllowAboveRoof.value && Baritone.settings().elytraAllowAboveBuildLimit.value
                     ? new BuildLimitPathFinder(ctx, npfContext)
                     : npfContext;
@@ -290,7 +324,9 @@ public final class ElytraBehavior implements Helper {
             if (ElytraBehavior.this.appendDestination) {
                 BlockPos dest = destinationFixed();
                 BlockPos last = !path.isEmpty() ? path.get(path.size() - 1) : null;
-                if (last != null && ElytraBehavior.this.clearView(Vec3.atLowerCornerOf(dest), Vec3.atLowerCornerOf(last), false)) {
+                // a block to stand in is reached at its middle, its lower corner touches the blocks beside it
+                final Vec3 at = ElytraBehavior.this.landsOnDestination ? Vec3.atBottomCenterOf(dest).add(0, LANDING_HOVER, 0) : Vec3.atLowerCornerOf(dest);
+                if (last != null && ElytraBehavior.this.clearView(at, Vec3.atLowerCornerOf(last), false)) {
                     path.add(new BetterBlockPos(dest));
                 } else {
                     logDirect("unable to land at " + dest);
@@ -494,7 +530,8 @@ public final class ElytraBehavior implements Helper {
     }
 
     public void pathTo() {
-        if (!Baritone.settings().elytraAutoJump.value || ctx.player().isFallFlying()) {
+        // a glide moved by steps takes off where it stands, so it needs no spot to jump off from first
+        if (!Baritone.settings().elytraAutoJump.value || ctx.player().isFallFlying() || this.process.glidesBySteps()) {
             this.pathManager.pathToDestination();
         }
     }
@@ -600,6 +637,12 @@ public final class ElytraBehavior implements Helper {
             logVerbose("vbonk");
         }
 
+        final IGlideControl glideControl = this.process.activeGlideControl();
+        if (glideControl != null) {
+            this.tickGlideStep(glideControl);
+            return;
+        }
+
         final SolverContext solverContext = this.new SolverContext(false);
         this.solveNextTick = true;
 
@@ -641,6 +684,233 @@ public final class ElytraBehavior implements Helper {
                 solution.context.boost.isBoosted(),
                 solution.forceUseFirework || inLava
         );
+    }
+
+    /**
+     * Works out this tick's {@link #glideStep}: straight at the furthest point ahead on the path that the hitbox gets
+     * to in a straight line, as far as the control's limits let it go this tick, and short of anything that would cut
+     * it. The control moves the player by it whole, so there are no physics or fireworks to plan for.
+     */
+    private void tickGlideStep(final IGlideControl control) {
+        final AABB box = this.glideBox(control);
+        final Vec3 feet = ctx.player().position();
+        final double across = Math.max(0, control.maxHorizontalStep());
+        final double vertical = Math.max(0, control.maxVerticalStep());
+
+        final Vec3 target;
+        final Vec3 step;
+        if (this.landingMode) {
+            final Vec3 column = new Vec3(this.destination.x + 0.5, feet.y, this.destination.z + 0.5);
+            final Vec3 toColumn = column.subtract(feet);
+            if (toColumn.horizontalDistanceSqr() > LANDING_CENTERED * LANDING_CENTERED) {
+                // over the middle of the landing column before going down it
+                target = column;
+                step = this.uncutGlideStep(box, withinGlideLimits(toColumn, across, vertical));
+            } else {
+                final double probe = Math.max(vertical, LANDING_FALL) + 1;
+                final double drop = -this.collideGlideStep(box, new Vec3(0, -probe, 0)).y;
+                target = feet.subtract(0, drop, 0);
+                if (!this.landingRose && drop <= LANDING_FALL) {
+                    // the server counts every block of a descent as fall, and a rise starts the count again: a little
+                    // way up first, so only the last few blocks count
+                    this.landingRose = true;
+                    step = this.uncutGlideStep(box, new Vec3(toColumn.x, Math.min(LANDING_RISE, vertical), toColumn.z));
+                } else {
+                    // down to the floor, touching it this time
+                    step = this.collideGlideStep(box, new Vec3(toColumn.x, -Math.min(vertical, drop), toColumn.z));
+                }
+            }
+        } else {
+            final Vec3 ahead = this.glideTarget(box, feet);
+            // nothing in sight: the nearest point, and the step's own collision check keeps the box out of the blocks
+            target = ahead != null ? ahead : this.glideFeetAt(this.pathManager.getPath(), this.pathManager.getNear(), box);
+            step = this.uncutGlideStep(box, withinGlideLimits(target.subtract(feet), across, vertical));
+        }
+
+        this.glideStep = step;
+        this.aimPos = new BetterBlockPos(target.x, target.y, target.z);
+        this.simulationLine = Arrays.asList(Vec3.ZERO, target.subtract(feet));
+
+        // the step's heading, flat
+        final Vec3 facing = step.horizontalDistanceSqr() > 1.0E-6 ? step : target.subtract(feet);
+        final float yaw = facing.horizontalDistanceSqr() > 1.0E-6
+                ? RotationUtils.calcRotationFromVec3d(Vec3.ZERO, new Vec3(facing.x, 0, facing.z), ctx.playerRotations()).getYaw()
+                : ctx.playerRotations().getYaw();
+        baritone.getLookBehavior().updateTarget(new Rotation(yaw, 0), false);
+    }
+
+    /**
+     * The hitbox a glide moved by steps has to fit: a standing player's when the server has the player standing for
+     * part of the glide, else a gliding one's.
+     */
+    private AABB glideBox(final IGlideControl control) {
+        return this.glideBoxAt(control, ctx.player().position());
+    }
+
+    /**
+     * {@link #glideBox(IGlideControl)} with its feet at {@code feet}
+     */
+    public AABB glideBoxAt(final IGlideControl control, final Vec3 feet) {
+        final Pose pose = control.standsWhileGliding() ? Pose.STANDING : Pose.FALL_FLYING;
+        return ctx.player().getDimensions(pose).makeBoundingBox(feet);
+    }
+
+    /**
+     * Where the feet go for the box to be at path point {@code i}. Points are the middles of empty cubes, so the box's
+     * middle goes there: a standing box with its feet there would have its head in the block over a 2 high cube. The
+     * landing spot appended to a path is the block to stand in instead, and when that block is on its floor, the
+     * landing comes in a little over the floor, as much as the box has room for.
+     */
+    private Vec3 glideFeetAt(final NetherPath path, final int i, final AABB box) {
+        final BetterBlockPos pos = path.get(i);
+        if (this.appendDestination && i == path.size() - 1 && pos.equals(destinationFixed())) {
+            final Vec3 stand = Vec3.atBottomCenterOf(pos);
+            if (!this.landsOnDestination) {
+                return stand;
+            }
+            final AABB standing = box.move(stand.subtract(ctx.player().position()));
+            final double room = this.collideGlideStep(standing, new Vec3(0, LANDING_HOVER, 0)).y;
+            return stand.add(0, Math.max(0, room - GLIDE_STEP_MARGIN), 0);
+        }
+        return new Vec3(pos.x, pos.y - box.getYsize() / 2, pos.z);
+    }
+
+    /**
+     * @return The furthest of the next 20 path points (or a point between them) that the box gets to in a straight
+     * line, {@code null} if none
+     */
+    private Vec3 glideTarget(final AABB box, final Vec3 feet) {
+        final NetherPath path = this.pathManager.getPath();
+        final int near = this.pathManager.getNear();
+        final int furthest = Math.min(near + 20, path.size() - 1);
+
+        // with room to spare around the box first
+        final AABB roomy = box.inflate(Baritone.settings().elytraMinimumAvoidance.value);
+        for (int i = furthest; i >= near; i--) {
+            final Vec3 dest = this.glideFeetAt(path, i, box);
+            if (this.isGlideClear(roomy, dest.subtract(feet))) {
+                return dest;
+            }
+        }
+        // then without, at the points and every block between them
+        for (int i = furthest; i >= near; i--) {
+            final Vec3 dest = this.glideFeetAt(path, i, box);
+            if (this.isGlideClear(box, dest.subtract(feet))) {
+                return dest;
+            }
+            if (i > near) {
+                final Vec3 back = this.glideFeetAt(path, i - 1, box).subtract(dest);
+                final Vec3 unit = back.normalize();
+                final int blocks = fastFloor(back.length());
+                for (int b = 1; b < blocks; b++) {
+                    final Vec3 between = dest.add(unit.scale(b));
+                    if (this.isGlideClear(box, between.subtract(feet))) {
+                        return between;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Whether the box moved by {@code offset} in a straight line meets no block. The rays start from a grid over the
+     * box less than a block apart, so no block fits between them: a standing box is taller than a block, and a block at
+     * its waist would pass between its corners.
+     */
+    private boolean isGlideClear(final AABB box, final Vec3 offset) {
+        if (offset.lengthSqr() < 1.0E-12) {
+            return true;
+        }
+        final int nx = fastFloor(box.getXsize()) + 2;
+        final int ny = fastFloor(box.getYsize()) + 2;
+        final int nz = fastFloor(box.getZsize()) + 2;
+        final int count = nx * ny * nz;
+        final double[] src = new double[count * 3];
+        final double[] dst = new double[count * 3];
+        int k = 0;
+        for (int ix = 0; ix < nx; ix++) {
+            final double x = Mth.lerp(ix / (double) (nx - 1), box.minX, box.maxX);
+            for (int iy = 0; iy < ny; iy++) {
+                final double y = Mth.lerp(iy / (double) (ny - 1), box.minY, box.maxY);
+                for (int iz = 0; iz < nz; iz++) {
+                    final double z = Mth.lerp(iz / (double) (nz - 1), box.minZ, box.maxZ);
+                    src[k] = x;
+                    src[k + 1] = y;
+                    src[k + 2] = z;
+                    dst[k] = x + offset.x;
+                    dst[k + 1] = y + offset.y;
+                    dst[k + 2] = z + offset.z;
+                    k += 3;
+                }
+            }
+        }
+        return this.raytrace(count, src, dst, NetherPathfinderContext.Visibility.ALL);
+    }
+
+    /**
+     * {@code offset} shortened along its own line until it is within both limits
+     */
+    private static Vec3 withinGlideLimits(final Vec3 offset, final double across, final double vertical) {
+        final double flat = Math.sqrt(offset.horizontalDistanceSqr());
+        double scale = 1;
+        if (flat > across) {
+            scale = across / flat;
+        }
+        if (Math.abs(offset.y) * scale > vertical) {
+            scale = vertical / Math.abs(offset.y);
+        }
+        return offset.scale(scale);
+    }
+
+    /**
+     * {@code want}, or as much of it as nothing cuts, stopped {@link #GLIDE_STEP_MARGIN} short of what would
+     */
+    private Vec3 uncutGlideStep(final AABB box, final Vec3 want) {
+        if (!this.cutsGlideStep(box, want)) {
+            return want;
+        }
+        double lo = 0;
+        double hi = 1;
+        for (int i = 0; i < 12; i++) {
+            final double mid = (lo + hi) / 2;
+            if (this.cutsGlideStep(box, want.scale(mid))) {
+                hi = mid;
+            } else {
+                lo = mid;
+            }
+        }
+        final double length = want.length();
+        final double clear = length * lo - GLIDE_STEP_MARGIN;
+        return clear > 0 ? want.scale(clear / length) : Vec3.ZERO;
+    }
+
+    private boolean cutsGlideStep(final AABB box, final Vec3 want) {
+        final Vec3 got = this.collideGlideStep(box, want);
+        return Math.abs(got.x - want.x) > 1.0E-7 || Math.abs(got.y - want.y) > 1.0E-7 || Math.abs(got.z - want.z) > 1.0E-7;
+    }
+
+    /**
+     * {@code want} as the game's collisions leave it, for the box rather than the player's own
+     */
+    private Vec3 collideGlideStep(final AABB box, final Vec3 want) {
+        final Entity player = ctx.player();
+        return Entity.collideBoundingBox(player, want, box, ctx.world(), ctx.world().getEntityCollisions(player, box.expandTowards(want)));
+    }
+
+    /**
+     * @return Whether the player is at the last point of the path
+     */
+    public boolean isAtPathEnd() {
+        final NetherPath path = this.pathManager.getPath();
+        if (path.isEmpty()) {
+            return false;
+        }
+        final IGlideControl control = this.process.activeGlideControl();
+        final Vec3 end = control != null
+                ? this.glideFeetAt(path, path.size() - 1, this.glideBox(control))
+                : path.getLast().getCenter();
+        return ctx.player().position().distanceToSqr(end) < 1;
     }
 
     public void onPostTick(TickEvent event) {

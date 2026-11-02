@@ -1690,6 +1690,14 @@ public final class Settings {
     public final Setting<Boolean> elytraAllowLandOnNetherFortress = new Setting<>(false);
 
     /**
+     * Land on the goal block itself, instead of on a safe spot near it with 15 blocks of air above it. Applies to a
+     * block goal while a client mod moves the glide by steps ({@link baritone.api.process.IGlideControl}). When the
+     * goal block can't be stood in, the flight lands on the nearest block at its height within 4 blocks that can,
+     * and when there is none it holds still where it is.
+     */
+    public final Setting<Boolean> elytraLandAtGoal = new Setting<>(false);
+
+    /**
      * Has the user read and understood the elytra terms and conditions
      */
     public final Setting<Boolean> elytraTermsAccepted = new Setting<>(false);

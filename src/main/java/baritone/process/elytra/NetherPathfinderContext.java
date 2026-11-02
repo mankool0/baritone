@@ -147,6 +147,13 @@ public final class NetherPathfinderContext implements IElytraPathFinder {
     }
 
     public CompletableFuture<UnpackedSegment> pathFindAsync(final BlockPos src, final BlockPos dst) {
+        return this.pathFindAsync(src, dst, !Baritone.settings().elytraAllowTightSpaces.value);
+    }
+
+    /**
+     * @param atLeastX4 Whether the path only goes through 4 block cubes of air, rather than 2 block ones
+     */
+    public CompletableFuture<UnpackedSegment> pathFindAsync(final BlockPos src, final BlockPos dst, final boolean atLeastX4) {
         final BlockPos adjustedSrc = src.below(minY);
         final BlockPos adjustedDst = dst.below(minY);
         boolean generate = Baritone.settings().elytraPredictTerrain.value && this.dimension == Level.NETHER;
@@ -158,7 +165,7 @@ public final class NetherPathfinderContext implements IElytraPathFinder {
                 final PathSegment segment = this.context.pathFind(
                         adjustedSrc.getX(), adjustedSrc.getY(), adjustedSrc.getZ(),
                         adjustedDst.getX(), adjustedDst.getY(), adjustedDst.getZ(),
-                        !Baritone.settings().elytraAllowTightSpaces.value, // atleastX4
+                        atLeastX4,
                         false, // refine
                         10000, // timeoutMs
                         !generate, // useAirIfChunkNotLoaded

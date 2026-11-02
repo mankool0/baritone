@@ -20,6 +20,7 @@ package baritone.api.process;
 import baritone.api.pathing.goals.Goal;
 import baritone.api.utils.BetterBlockPos;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.List;
 
@@ -50,6 +51,20 @@ public interface IElytraProcess extends IBaritoneProcess {
      * @return {@code true} if the native library loaded and elytra is actually usable
      */
     boolean isLoaded();
+
+    /**
+     * Hands the glide to a client mod that moves it by a step each tick. While the control is active, elytra flight
+     * flies by those steps, within the control's limits, and uses no fireworks.
+     *
+     * @param control The mod's control, or {@code null} to steer the glide's physics again
+     */
+    void setGlideControl(IGlideControl control);
+
+    /**
+     * @return The step for the glide to take this tick: zero while elytra flight holds the player in place, and
+     * {@code null} when it isn't flying by an active {@link IGlideControl}
+     */
+    Vec3 getGlideStep();
 
     /*
      * FOR INTERNAL USE ONLY. MAY BE REMOVED AT ANY TIME.

@@ -30,6 +30,7 @@ import baritone.api.pathing.movement.IMovement;
 import baritone.api.pathing.path.IPathExecutor;
 import baritone.api.process.IBaritoneProcess;
 import baritone.api.process.IElytraProcess;
+import baritone.api.process.IGlideControl;
 import baritone.api.process.PathingCommand;
 import baritone.api.process.PathingCommandType;
 import baritone.api.utils.BetterBlockPos;
@@ -45,9 +46,13 @@ import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.NonNullList;
 import net.minecraft.network.chat.Component;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
@@ -59,6 +64,7 @@ import net.minecraft.world.level.chunk.ChunkSource;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.*;
@@ -80,6 +86,15 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
     private boolean allowAboveBuildLimit;
     private boolean allowAboveRoof;
     private final Semaphore npfSema = new Semaphore(1);
+    private IGlideControl glideControl;
+    // the take-off's jump is held every other tick: the elytra opens on a fresh press in the air
+    private boolean takeOffJumpHeld;
+    // the block a flight to a block goal is to stand in at the end, for elytraLandAtGoal; null for a goal without one
+    private BetterBlockPos goalBlock;
+    // a landing at the goal has said it is looking, and that there's nowhere to stand: each only once
+    private boolean goalLandingSearchSaid;
+    private boolean goalLandingRefused;
+    private static final int GOAL_LANDING_RADIUS = 4;
 
     private static final int SHORT_LANDING_COLUMN_HEIGHT = 15;
     private static final int LONG_LANDING_COLUMN_HEIGHT = 39;
@@ -100,6 +115,9 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
         this.landingSearchState = null;
         this.reachedGoal = false;
         this.goal = null;
+        this.takeOffJumpHeld = false;
+        this.goalLandingSearchSaid = false;
+        this.goalLandingRefused = false;
         destroyBehaviorAsync();
         if (destroyNpf) {
             destroyNpfContextAsync();
@@ -123,9 +141,11 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
     @Override
     public void resetState() {
         BlockPos destination = this.currentDestination();
+        // the same flight: a landing spot it was on its way to keeps the goal it was found for
+        BetterBlockPos goalBlock = this.goalBlock;
         this.onLostControl();
         if (destination != null) {
-            this.pathTo(destination);
+            this.pathTo(destination, goalBlock);
             this.repackChunks();
         }
     }
@@ -185,14 +205,25 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
         if (ctx.player().isFallFlying() && this.state != State.LANDING && (this.behavior.pathManager.isComplete() || safetyLanding)) {
             final BetterBlockPos last = this.behavior.pathManager.path.getLast();
             if (last != null && (ctx.player().position().distanceToSqr(last.getCenter()) < (48 * 48) || safetyLanding) && (!goingToLandingSpot || (safetyLanding && this.landingSpot == null))) {
-                if (this.landingSearchState == null) {
-                    logDirect("Path complete, searching for safe landing spot...");
+                // an emergency comes down wherever is safe nearby
+                final boolean atGoal = !safetyLanding && landsAtGoal();
+                final BetterBlockPos landingSpot;
+                if (atGoal) {
+                    if (!this.goalLandingSearchSaid) {
+                        logDirect("Path complete, searching for safe landing spot...");
+                        this.goalLandingSearchSaid = true;
+                    }
+                    landingSpot = findGoalLandingSpot();
+                } else {
+                    if (this.landingSearchState == null) {
+                        logDirect("Path complete, searching for safe landing spot...");
+                    }
+                    landingSpot = findSafeLandingSpot(ctx.playerFeet());
                 }
-                BetterBlockPos landingSpot = findSafeLandingSpot(ctx.playerFeet());
                 // if this fails we will just keep orbiting the last node until we run out of rockets or the user intervenes
                 if (landingSpot != null) {
                     logDirect("Found potential landing spot.");
-                    this.pathTo0(landingSpot, true);
+                    this.pathTo0(landingSpot, true, atGoal);
                     this.landingSpot = landingSpot;
                     this.goingToLandingSpot = true;
                 } else {
@@ -200,7 +231,7 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
                 }
             }
 
-            if (last != null && ctx.player().position().distanceToSqr(last.getCenter()) < 1) {
+            if (last != null && this.behavior.isAtPathEnd()) {
                 if (Baritone.settings().notificationOnPathComplete.value && !reachedGoal) {
                     logNotification("Pathing complete", false);
                 }
@@ -262,7 +293,8 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
         }
 
         if (this.state == State.FLYING || this.state == State.START_FLYING) {
-            this.state = ctx.player().onGround() && Baritone.settings().elytraAutoJump.value
+            // a glide moved by steps takes off from flat ground, it needs no ledge to jump off
+            this.state = ctx.player().onGround() && Baritone.settings().elytraAutoJump.value && !glidesBySteps()
                     ? State.LOCATE_JUMP
                     : State.START_FLYING;
         }
@@ -331,8 +363,20 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
                 baritone.getPathingBehavior().secretInternalSegmentCancel();
             }
             baritone.getInputOverrideHandler().clearAllKeys();
-            // TODO 1.21.5: replace `ctx.player().getDeltaMovement().y < -0.377` with `ctx.player().fallDistance > 1.0f`
-            if (ctx.player().getDeltaMovement().y < -0.377) {
+            if (glidesBySteps()) {
+                if (shouldLandForSafety()) {
+                    logDirect("Not taking off, because the elytra is missing or its durability is so low that I would immediately emergency land anyway.");
+                    onLostControl();
+                    return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
+                }
+                // nowhere to fly until the path is in
+                if (!this.behavior.pathManager.getPath().isEmpty()) {
+                    // a jump, then a fresh press in the air opens the elytra
+                    this.takeOffJumpHeld = !this.takeOffJumpHeld;
+                    baritone.getInputOverrideHandler().setInputForceState(Input.JUMP, this.takeOffJumpHeld);
+                }
+            } else if (ctx.player().getDeltaMovement().y < -0.377) {
+                // TODO 1.21.5: replace `ctx.player().getDeltaMovement().y < -0.377` with `ctx.player().fallDistance > 1.0f`
                 baritone.getInputOverrideHandler().setInputForceState(Input.JUMP, true);
             }
         }
@@ -405,6 +449,14 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
 
     @Override
     public void pathTo(BlockPos destination) {
+        this.pathTo(destination, new BetterBlockPos(destination));
+    }
+
+    /**
+     * @param goalBlock The block to stand in at the end for {@link baritone.api.Settings#elytraLandAtGoal}, or
+     *                  {@code null} when the destination isn't one
+     */
+    private void pathTo(BlockPos destination, BetterBlockPos goalBlock) {
         if (!isSupportedPos(destination)) {
             throw new IllegalArgumentException("The goal must be within bounds to use elytra flight.");
         }
@@ -413,10 +465,13 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
             throw new IllegalArgumentException("The player must be within bounds to use elytra flight.");
         }
 
-        this.pathTo0(destination, false);
+        this.pathTo0(destination, false, false);
+        this.goalBlock = goalBlock;
+        // the spots a past flight couldn't land on may do now, and a goal landing comes back to the same blocks
+        this.badLandingSpots.clear();
     }
 
-    private void pathTo0(BlockPos destination, boolean appendDestination) {
+    private void pathTo0(BlockPos destination, boolean appendDestination, boolean landsOnDestination) {
         if (ctx.player() == null) {
             return;
         }
@@ -425,7 +480,7 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
         this.allowTight = Baritone.settings().elytraAllowTightSpaces.value;
         this.allowAboveBuildLimit = Baritone.settings().elytraAllowAboveBuildLimit.value;
         this.allowAboveRoof = Baritone.settings().elytraAllowAboveRoof.value;
-        this.behavior = new ElytraBehavior(this.baritone, this, getNpfContext(), destination, appendDestination);
+        this.behavior = new ElytraBehavior(this.baritone, this, getNpfContext(), destination, appendDestination, landsOnDestination);
 
         if (ctx.world() != null) {
             this.repackChunks();
@@ -438,22 +493,26 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
         final int x;
         final int y;
         final int z;
+        final boolean standsInGoal;
         if (iGoal instanceof GoalXZ) {
             GoalXZ goal = (GoalXZ) iGoal;
             x = goal.getX();
             // ElytraBehavior will automatically change the destination height depending on if we're above or below the roof
             y = 64;
             z = goal.getZ();
+            standsInGoal = false;
         } else if (iGoal instanceof GoalBlock) {
             GoalBlock goal = (GoalBlock) iGoal;
             x = goal.x;
             y = goal.y;
             z = goal.z;
+            standsInGoal = true;
         } else {
             throw new IllegalArgumentException("The goal must be a GoalXZ or GoalBlock");
         }
 
-        this.pathTo((new BlockPos(x, y, z)));
+        final BlockPos destination = new BlockPos(x, y, z);
+        this.pathTo(destination, standsInGoal ? new BetterBlockPos(destination) : null);
     }
 
     private boolean isSupportedPos(BlockPos pos) {
@@ -473,11 +532,82 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
         return !enforceMaxY || pos.getY() < maxY;
     }
 
+    private boolean landsAtGoal() {
+        return Baritone.settings().elytraLandAtGoal.value && this.goalBlock != null && glidesBySteps();
+    }
+
+    /**
+     * For {@link baritone.api.Settings#elytraLandAtGoal}: the goal block when it can be stood in, else the nearest
+     * block at its height within {@link #GOAL_LANDING_RADIUS} that can, else {@code null}, and the flight holds still
+     * at the end of its path. The 15 high column search isn't the fallback: under a roof it finds a floor far below,
+     * down whatever hole is nearest.
+     */
+    private BetterBlockPos findGoalLandingSpot() {
+        final BetterBlockPos goal = this.goalBlock;
+        if (!isChunkLoaded(goal)) {
+            return null; // no telling yet
+        }
+        final IGlideControl control = activeGlideControl();
+        BetterBlockPos best = null;
+        int bestDistSq = Integer.MAX_VALUE;
+        for (int dx = -GOAL_LANDING_RADIUS; dx <= GOAL_LANDING_RADIUS; dx++) {
+            for (int dz = -GOAL_LANDING_RADIUS; dz <= GOAL_LANDING_RADIUS; dz++) {
+                final int distSq = dx * dx + dz * dz;
+                if (distSq >= bestDistSq || distSq > GOAL_LANDING_RADIUS * GOAL_LANDING_RADIUS) {
+                    continue;
+                }
+                final BetterBlockPos pos = new BetterBlockPos(goal.x + dx, goal.y, goal.z + dz);
+                if (!this.badLandingSpots.contains(pos) && isChunkLoaded(pos) && canStandIn(pos, control)) {
+                    best = pos;
+                    bestDistSq = distSq;
+                }
+            }
+        }
+        if (best == null) {
+            if (!this.goalLandingRefused) {
+                logDirect("No block at the goal or within " + GOAL_LANDING_RADIUS + " blocks of it at its height can be stood in, holding still");
+                this.goalLandingRefused = true;
+            }
+            return null;
+        }
+        // the spot stands on its floor: a landing that drops below the floor block has missed it
+        this.landingColumnHeight = 1;
+        return best;
+    }
+
+    /**
+     * Whether a landing can stand in {@code pos}: a full top to stand on under it, and room for the landing's hitbox
+     * with no fluid or fire in it
+     */
+    private boolean canStandIn(BlockPos pos, IGlideControl control) {
+        final Level world = ctx.world();
+        final BlockPos floor = pos.below();
+        final BlockState floorState = world.getBlockState(floor);
+        if (!floorState.isFaceSturdy(world, floor, Direction.UP) || floorState.is(Blocks.MAGMA_BLOCK)) {
+            return false;
+        }
+        final AABB box = this.behavior.glideBoxAt(control, Vec3.atBottomCenterOf(pos));
+        if (!world.noCollision(ctx.player(), box)) {
+            return false;
+        }
+        for (BlockPos cell : BlockPos.betweenClosed(Mth.floor(box.minX), Mth.floor(box.minY), Mth.floor(box.minZ), Mth.floor(box.maxX), Mth.floor(box.maxY), Mth.floor(box.maxZ))) {
+            final BlockState state = world.getBlockState(cell);
+            if (!state.getFluidState().isEmpty() || state.is(BlockTags.FIRE)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private boolean shouldLandForSafety() {
         ItemStack chest = ctx.player().getItemBySlot(EquipmentSlot.CHEST);
         if (chest.getItem() != Items.ELYTRA || chest.getMaxDamage() - chest.getDamageValue() < Baritone.settings().elytraMinimumDurability.value) {
             // elytrabehavior replaces when durability <= minimumDurability, so if durability < minimumDurability then we can reasonably assume that the elytra will soon be broken without replacement
             return true;
+        }
+        if (glidesBySteps()) {
+            // a glide moved by steps uses no fireworks
+            return !LivingEntity.canGlideUsing(chest, EquipmentSlot.CHEST);
         }
 
         NonNullList<ItemStack> inv = ctx.player().getInventory().getNonEquipmentItems();
@@ -496,6 +626,32 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
     @Override
     public boolean isLoaded() {
         return true;
+    }
+
+    @Override
+    public void setGlideControl(IGlideControl control) {
+        this.glideControl = control;
+    }
+
+    @Override
+    public Vec3 getGlideStep() {
+        if (this.behavior == null || !glidesBySteps()) {
+            return null;
+        }
+        // nothing worked out this tick (no path yet, paused, or the lock was taken): hold still
+        return this.behavior.glideStep != null ? this.behavior.glideStep : Vec3.ZERO;
+    }
+
+    /**
+     * @return The control that moves the glide by steps right now, or {@code null} when the glide's physics move it
+     */
+    public IGlideControl activeGlideControl() {
+        final IGlideControl control = this.glideControl;
+        return control != null && control.isActive() ? control : null;
+    }
+
+    public boolean glidesBySteps() {
+        return activeGlideControl() != null;
     }
 
     @Override
@@ -548,6 +704,10 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
 
     @Override
     public void onPostTick(TickEvent event) {
+        if (this.behavior != null) {
+            // a step is for the tick it was worked out in: the player has moved by it now
+            this.behavior.glideStep = null;
+        }
         IBaritoneProcess procThisTick = baritone.getPathingControlManager().mostRecentInControl().orElse(null);
         if (this.behavior != null && procThisTick == this) this.behavior.onPostTick(event);
     }
