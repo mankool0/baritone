@@ -35,7 +35,7 @@ public class WhiteBlackSchematic extends AbstractSchematic {
     private final boolean WhiteList;
     private final boolean ValidIfUnder; // If true and current in desired state is under blocks then it's a valid state
     private final boolean UseThrowaway;
-    private BlockState ThrowawayFallback; // Only used when UseThrowaway is set and the inventory has no throwaway blocks at all
+    private BlockState[] ThrowawayFallbacks = new BlockState[0]; // Only used when UseThrowaway is set and the inventory has no throwaway blocks at all
 
     public WhiteBlackSchematic(int x, int y, int z, List<BlockState> bomList, BlockState defaultState, boolean whiteList, boolean validIfUnder, boolean useThrowaway) {
         super(x, y, z);
@@ -88,8 +88,12 @@ public class WhiteBlackSchematic extends AbstractSchematic {
         throw new IllegalStateException("Whitelist schematic with no server requirement mapping: " + BomList);
     }
 
-    public void setThrowawayFallback(BlockState state) {
-        ThrowawayFallback = state;
+    /**
+     * What to place once the inventory has no throwaway blocks at all: the first of these we carry,
+     * in the order given, else the last one, which is then what we're missing.
+     */
+    public void setThrowawayFallback(BlockState... states) {
+        ThrowawayFallbacks = states.clone();
     }
 
     public boolean coversLiquid(BlockState current) {
@@ -124,8 +128,8 @@ public class WhiteBlackSchematic extends AbstractSchematic {
             }
             // The fallback only kicks in once the whole inventory is out of throwaway blocks, and
             // stops being used as soon as we pick some up again
-            if (ThrowawayFallback != null) {
-                return ThrowawayFallback;
+            if (ThrowawayFallbacks.length > 0) {
+                return pickFallback(inventory, ThrowawayFallbacks);
             }
         }
         return DefaultBom.getAnyBlockState();
@@ -145,6 +149,16 @@ public class WhiteBlackSchematic extends AbstractSchematic {
             }
         }
         return null;
+    }
+
+    /** {@link #setThrowawayFallback}'s choice: the first of {@code fallbacks} we carry, else the last one. */
+    static BlockState pickFallback(List<ItemStack> inventory, BlockState[] fallbacks) {
+        for (BlockState fallback : fallbacks) {
+            if (inventoryContains(inventory, fallback.getBlock().asItem())) {
+                return fallback;
+            }
+        }
+        return fallbacks[fallbacks.length - 1];
     }
 
     private static boolean inventoryContains(List<ItemStack> inventory, Item item) {
@@ -175,10 +189,14 @@ public class WhiteBlackSchematic extends AbstractSchematic {
             return current;
         }
 
-        if (current.getBlock() != Blocks.AIR) {
+        // cave and void air get filled like air: asking for the default there instead had a bot
+        // that carries only another listed block park on missing materials under a cave
+        if (!current.isAir()) {
             return getDefaultOrThrowaway();
         }
 
+        // An empty cell takes the first listed block we carry, so the list order is the placement
+        // preference. With none of them aboard, ask for the declared default.
         for (BlockOptionalMeta bom : BomList) {
             for (BlockState placeable: approxPlaceable) {
                 if (bom.matches(placeable)) {
@@ -187,7 +205,7 @@ public class WhiteBlackSchematic extends AbstractSchematic {
             }
         }
 
-        return BomList.get(0).getAnyBlockState();
+        return DefaultBom.getAnyBlockState();
 
     }
 }

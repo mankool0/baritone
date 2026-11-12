@@ -237,11 +237,11 @@ public class FarmingEnderChest extends State {
     }
 
     /**
-     * The support is usually a cell of the road surface, so obsidian, and netherrack only when
-     * there's none. Null when we carry neither.
+     * The support is usually a cell of the road surface, so crying obsidian or obsidian, and
+     * netherrack only when there's neither. Null when we carry none of them.
      */
     private static Block supportBlock(HighwayContext context) {
-        for (Block block : new Block[]{Blocks.OBSIDIAN, Blocks.NETHERRACK}) {
+        for (Block block : new Block[]{Blocks.CRYING_OBSIDIAN, Blocks.OBSIDIAN, Blocks.NETHERRACK}) {
             if (context.inventory().getItemCountInventory(Item.getId(block.asItem())) > 0) {
                 return block;
             }

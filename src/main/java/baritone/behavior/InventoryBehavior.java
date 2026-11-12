@@ -556,18 +556,23 @@ public final class InventoryBehavior extends Behavior implements Helper {
 
     /**
      * What a movement may place as scaffolding, in preference order: acceptableThrowawayItems, then
-     * obsidian as a last resort where it isn't listed. Obsidian stays off the list where it is the
-     * paving material, and this never lets it beat a listed block that is still aboard - but a path
-     * that needs a bridge or a pillar with nothing else in the inventory used to have no option at all.
+     * crying obsidian and obsidian as a last resort where they aren't listed. They stay off the list
+     * where they are the paving material, and this never lets them beat a listed block that is
+     * still aboard - but a path that needs a bridge or a pillar with nothing else in the inventory
+     * used to have no option at all.
      */
     private static List<Item> throwawayCandidates() {
         List<Item> listed = Baritone.settings().acceptableThrowawayItems.value;
-        if (listed.contains(Blocks.OBSIDIAN.asItem())) {
-            return listed;
+        List<Item> candidates = null;
+        for (Item lastResort : List.of(Blocks.CRYING_OBSIDIAN.asItem(), Blocks.OBSIDIAN.asItem())) {
+            if (!listed.contains(lastResort)) {
+                if (candidates == null) {
+                    candidates = new ArrayList<>(listed);
+                }
+                candidates.add(lastResort);
+            }
         }
-        List<Item> candidates = new ArrayList<>(listed);
-        candidates.add(Blocks.OBSIDIAN.asItem());
-        return candidates;
+        return candidates == null ? listed : candidates;
     }
 
     private int firstValidThrowaway() { // TODO offhand idk

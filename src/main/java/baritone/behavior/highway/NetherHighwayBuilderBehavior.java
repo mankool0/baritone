@@ -436,19 +436,25 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         java.util.List<BlockState> floorKeeps = excavate
                 ? Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState())
                 : Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.OBSIDIAN.defaultBlockState(), Blocks.CRYING_OBSIDIAN.defaultBlockState());
+        // What a paved cell may hold, in the order an empty one is filled from what we carry. Crying
+        // obsidian goes first: nothing farms or restocks it, so a stack picked up along the way gets
+        // spent instead of riding in a slot for the rest of the run.
+        java.util.List<BlockState> pavedKeeps = Arrays.asList(Blocks.CRYING_OBSIDIAN.defaultBlockState(), Blocks.OBSIDIAN.defaultBlockState());
 
         ISchematic obsidSchemBot;
         WhiteBlackSchematic topAir;
         // The dig profile's placed rows fall back to obsidian like the diagonal rail supports do: a
         // digger clearing a road that was filled in with obsidian carries nothing else, and parking
         // it on missing netherrack leaves the floor it walks on and the cover over lava unbuilt.
+        // Crying obsidian goes first, as on the paved rows; obsidian is what a bot with neither lacks.
+        BlockState[] obsidianFallback = {Blocks.CRYING_OBSIDIAN.defaultBlockState(), Blocks.OBSIDIAN.defaultBlockState()};
         WhiteBlackSchematic noLavaBotSides = new WhiteBlackSchematic(1, 1, 1, Collections.singletonList(Blocks.LAVA.defaultBlockState()), Blocks.NETHERRACK.defaultBlockState(), false, true, true);
-        noLavaBotSides.setThrowawayFallback(Blocks.OBSIDIAN.defaultBlockState());
+        noLavaBotSides.setThrowawayFallback(obsidianFallback);
         WhiteBlackSchematic supportNetherRack;
         WhiteBlackSchematic sideRailSupport;
         ISchematic sideRail;
         if (pave)
-            sideRail = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.OBSIDIAN.defaultBlockState(), Blocks.CRYING_OBSIDIAN.defaultBlockState()), Blocks.OBSIDIAN.defaultBlockState(), true, false, false);
+            sideRail = new WhiteBlackSchematic(1, 1, 1, pavedKeeps, Blocks.OBSIDIAN.defaultBlockState(), true, false, false);
         else
             sideRail = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.OBSIDIAN.defaultBlockState(), Blocks.CRYING_OBSIDIAN.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
 
@@ -472,11 +478,11 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         if (groupA) {
             topAir = new WhiteBlackSchematic(1, highwayHeight - 1, highwayWidth, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
             if (paveFloor) {
-                obsidSchemBot = new WhiteBlackSchematic(1, 1, highwayWidth, Arrays.asList(Blocks.OBSIDIAN.defaultBlockState(), Blocks.CRYING_OBSIDIAN.defaultBlockState()), Blocks.OBSIDIAN.defaultBlockState(), true, false, false);
+                obsidSchemBot = new WhiteBlackSchematic(1, 1, highwayWidth, pavedKeeps, Blocks.OBSIDIAN.defaultBlockState(), true, false, false);
 
                 if (diag && (railLow || railHigh)) {
                     sideRailSupport = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.LAVA.defaultBlockState(), Blocks.FIRE.defaultBlockState()), Blocks.NETHERRACK.defaultBlockState(), false, true, true);
-                    sideRailSupport.setThrowawayFallback(Blocks.OBSIDIAN.defaultBlockState());
+                    sideRailSupport.setThrowawayFallback(obsidianFallback);
                     if (railLow && lowRailHere) {
                         fullSchem.put(sideRailSupport, 0, 1, 0);
                     }
@@ -487,7 +493,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             } else {
                 obsidSchemBot = new WhiteBlackSchematic(1, 1, highwayWidth, floorKeeps, Blocks.AIR.defaultBlockState(), true, false, false); // Allow only air, and obsidian unless excavating
                 supportNetherRack = new WhiteBlackSchematic(1, 1, supportWidth, HighwayContext.blackListBlocks, Blocks.NETHERRACK.defaultBlockState(), false, true, true); // Allow everything other than air and lava
-                supportNetherRack.setThrowawayFallback(Blocks.OBSIDIAN.defaultBlockState());
+                supportNetherRack.setThrowawayFallback(obsidianFallback);
                 if (supportWidth + 2 <= highwayWidth) {
                     fullSchem.put(noLavaBotSides, 0, 0, 1);
                     fullSchem.put(noLavaBotSides, 0, 0, highwayWidth);
@@ -518,11 +524,11 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
         else if (groupB) {
             topAir = new WhiteBlackSchematic(highwayWidth, highwayHeight - 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
             if (paveFloor) {
-                obsidSchemBot = new WhiteBlackSchematic(highwayWidth, 1, 1, Arrays.asList(Blocks.OBSIDIAN.defaultBlockState(), Blocks.CRYING_OBSIDIAN.defaultBlockState()), Blocks.OBSIDIAN.defaultBlockState(), true, false, false);
+                obsidSchemBot = new WhiteBlackSchematic(highwayWidth, 1, 1, pavedKeeps, Blocks.OBSIDIAN.defaultBlockState(), true, false, false);
 
                 if (diag && (railLow || railHigh)) {
                     sideRailSupport = new WhiteBlackSchematic(1, 1, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState(), Blocks.LAVA.defaultBlockState(), Blocks.FIRE.defaultBlockState()), Blocks.NETHERRACK.defaultBlockState(), false, true, true);
-                    sideRailSupport.setThrowawayFallback(Blocks.OBSIDIAN.defaultBlockState());
+                    sideRailSupport.setThrowawayFallback(obsidianFallback);
                     if (railLow && lowRailHere) {
                         fullSchem.put(sideRailSupport, 0, 1, 0);
                     }
@@ -533,7 +539,7 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
             } else {
                 obsidSchemBot = new WhiteBlackSchematic(highwayWidth, 1, 1, floorKeeps, Blocks.AIR.defaultBlockState(), true, false, false); // Allow only air, and obsidian unless excavating
                 supportNetherRack = new WhiteBlackSchematic(supportWidth, 1, 1, HighwayContext.blackListBlocks, Blocks.NETHERRACK.defaultBlockState(), false, true, true); // Allow everything other than air and lava
-                supportNetherRack.setThrowawayFallback(Blocks.OBSIDIAN.defaultBlockState());
+                supportNetherRack.setThrowawayFallback(obsidianFallback);
                 if (supportWidth + 2 <= highwayWidth) {
                     fullSchem.put(noLavaBotSides, 1, 0, 0);
                     fullSchem.put(noLavaBotSides, highwayWidth, 0, 0);

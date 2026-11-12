@@ -451,10 +451,10 @@ public class ShulkerPlacement extends ContextComponent {
         return ctx.inventory().canBuildSupportBlock() && !isLavaAt(floor) && hasSturdyNeighbor(floor);
     }
 
-    /** Builds a support block at {@code pos}: netherrack, or obsidian when we carry none. */
+    /** Builds a support block at {@code pos}: netherrack, or crying obsidian or obsidian when we carry none. */
     public void buildSupportBlock(BlockPos pos) {
         WhiteBlackSchematic supportSchem = new WhiteBlackSchematic(1, 1, 1, ctx.blackListBlocks(), Blocks.NETHERRACK.defaultBlockState(), false, false, true);
-        supportSchem.setThrowawayFallback(Blocks.OBSIDIAN.defaultBlockState());
+        supportSchem.setThrowawayFallback(Blocks.CRYING_OBSIDIAN.defaultBlockState(), Blocks.OBSIDIAN.defaultBlockState());
         baritone.getBuilderProcess().build("supportBlock", supportSchem, pos);
     }
 

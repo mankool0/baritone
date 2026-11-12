@@ -154,7 +154,7 @@ public final class PortalReturn {
             Helper.HELPER.logDirect("Exit portal is blocked; clearing a step-out spot at " + target.toShortString() + ".");
             context.settings().buildRepeat.value = new Vec3i(0, 0, 0);
             WhiteBlackSchematic floor = new WhiteBlackSchematic(1, 1, 1, context.blackListBlocks(), Blocks.NETHERRACK.defaultBlockState(), false, true, true);
-            floor.setThrowawayFallback(Blocks.OBSIDIAN.defaultBlockState());
+            floor.setThrowawayFallback(Blocks.CRYING_OBSIDIAN.defaultBlockState(), Blocks.OBSIDIAN.defaultBlockState());
             WhiteBlackSchematic clear = new WhiteBlackSchematic(1, 2, 1, Arrays.asList(Blocks.VOID_AIR.defaultBlockState(), Blocks.CAVE_AIR.defaultBlockState(), Blocks.AIR.defaultBlockState()), Blocks.AIR.defaultBlockState(), true, false, false);
             CompositeSchematic schem = new CompositeSchematic(0, 0, 0);
             schem.put(floor, 0, 0, 0);

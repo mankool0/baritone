@@ -129,13 +129,14 @@ public class HighwayInventory extends ContextComponent {
     /**
      * True while we still carry something the support block under a placing spot could be built out
      * of: any acceptableThrowawayItems block, the netherrack that schematic asks for by default, or
-     * the obsidian it falls back to. Out of all three, a spot with nothing under it can never be
-     * made placeable, and sending the builder at it only parks it on missing materials.
+     * the crying obsidian or obsidian it falls back to. Out of all of them, a spot with nothing
+     * under it can never be made placeable, and sending the builder at it only parks it on missing
+     * materials.
      */
     public boolean canBuildSupportBlock() {
         return getAcceptableThrowawaySlot() != -1
                 || getItemCountInventory(Item.getId(Blocks.NETHERRACK.asItem())) > 0
-                || getItemCountInventory(Item.getId(Blocks.OBSIDIAN.asItem())) > 0;
+                || getObsidianCountInventory() > 0;
     }
 
     public int getLargestItemSlot(int itemId) {
@@ -941,15 +942,16 @@ public class HighwayInventory extends ContextComponent {
 
     /**
      * Puts a block to fill lava or build a support with onto the hotbar: the first
-     * acceptableThrowawayItems block we carry, else netherrack, else obsidian - the same three
-     * {@link #canBuildSupportBlock} counts. Returns its slot, or -1 when we carry none of them.
+     * acceptableThrowawayItems block we carry, else netherrack, else crying obsidian, else obsidian -
+     * the same ones {@link #canBuildSupportBlock} counts, in the schematics' fallback order. Returns
+     * its slot, or -1 when we carry none of them.
      */
     public int putFillBlockHotbar() {
         int slot = putAcceptableThrowawayHotbar();
         if (slot != -1) {
             return slot;
         }
-        for (Item item : List.of(Blocks.NETHERRACK.asItem(), Blocks.OBSIDIAN.asItem())) {
+        for (Item item : List.of(Blocks.NETHERRACK.asItem(), Blocks.CRYING_OBSIDIAN.asItem(), Blocks.OBSIDIAN.asItem())) {
             if (getItemCountInventory(Item.getId(item)) > 0) {
                 return putItemHotbar(Item.getId(item));
             }
@@ -959,12 +961,12 @@ public class HighwayInventory extends ContextComponent {
 
     /**
      * True when obsidian is the only block we could place: no acceptableThrowawayItems block and no
-     * netherrack aboard, but obsidian. It is the paving material and slow to dig back out, so
-     * whatever has a choice takes the route that places the least of it.
+     * netherrack aboard, but obsidian or crying obsidian. Both are paving material and slow to dig
+     * back out, so whatever has a choice takes the route that places the least of it.
      */
     public boolean onlyObsidianToPlace() {
         return getAcceptableThrowawaySlot() == -1
                 && getItemCountInventory(Item.getId(Blocks.NETHERRACK.asItem())) == 0
-                && getItemCountInventory(Item.getId(Blocks.OBSIDIAN.asItem())) > 0;
+                && getObsidianCountInventory() > 0;
     }
 }
