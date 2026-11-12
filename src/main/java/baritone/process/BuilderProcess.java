@@ -119,6 +119,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static baritone.api.pathing.movement.ActionCosts.COST_INF;
+import static baritone.api.pathing.movement.ActionCosts.WALK_ONE_BLOCK_COST;
 
 public final class BuilderProcess extends BaritoneProcessHelper implements IBuilderProcess {
 
@@ -2920,13 +2921,30 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         }
         boolean allowSameLevel = !(ctx.world().getBlockState(pos.above()).getBlock() instanceof AirBlock);
         BlockState current = ctx.world().getBlockState(pos);
+        BlockState desired = bcc.getSchematic(pos.getX(), pos.getY(), pos.getZ(), current);
         for (Direction facing : Movement.HORIZONTALS_BUT_ALSO_DOWN_____SO_EVERY_DIRECTION_EXCEPT_UP) {
+            if (!MovementHelper.canPlaceAgainst(ctx, pos.relative(facing))) {
+                continue;
+            }
+            // the same answer for every face, so asked once
             //noinspection ConstantConditions
-            if (MovementHelper.canPlaceAgainst(ctx, pos.relative(facing)) && placementPlausible(pos, bcc.getSchematic(pos.getX(), pos.getY(), pos.getZ(), current))) {
+            if (placementPlausible(pos, desired)) {
                 return new GoalAdjacent(pos, pos.relative(facing), allowSameLevel);
             }
+            if (placementPlausibleButForUs(pos, desired)) {
+                // We're standing in it. The GoalPlace below is on top of it, inside whatever is over
+                // our head, so no path ever moved us and we stood there for good.
+                return new GoalStepOut(pos);
+            }
+            break;
         }
         return new GoalPlace(pos);
+    }
+
+    /** {@link #placementPlausible} with our own player left out. */
+    private boolean placementPlausibleButForUs(BlockPos pos, BlockState state) {
+        VoxelShape voxelshape = state.getCollisionShape(ctx.world(), pos);
+        return voxelshape.isEmpty() || ctx.world().isUnobstructed(ctx.player(), voxelshape.move(pos.getX(), pos.getY(), pos.getZ()));
     }
 
     private Goal breakGoal(BlockPos pos, BuilderCalculationContext bcc) {
@@ -2985,6 +3003,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             if (!allowSameLevel && y == this.y - 1) {
                 return false;
             }
+            if (x == this.x && y == this.y - 1 && z == this.z) {
+                return false; // our head in it
+            }
             if (y < this.y - 1) {
                 return false;
             }
@@ -3021,6 +3042,41 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         public String toString() {
             return String.format(
                     "GoalAdjacent{x=%s,y=%s,z=%s}",
+                    SettingsUtil.maybeCensor(x),
+                    SettingsUtil.maybeCensor(y),
+                    SettingsUtil.maybeCensor(z)
+            );
+        }
+    }
+
+    /**
+     * Anywhere our body can't reach into {@code pos}: at its level or the one under it, two cells
+     * off sideways. One isn't enough, as a path ends when our feet cross into the next cell, with our
+     * box still 0.3 into the one we left. Only those two levels, since digging two down out of the
+     * way can cost less than walking two across.
+     */
+    public record GoalStepOut(int x, int y, int z) implements Goal {
+
+        public GoalStepOut(BlockPos pos) {
+            this(pos.getX(), pos.getY(), pos.getZ());
+        }
+
+        @Override
+        public boolean isInGoal(int x, int y, int z) {
+            return (y == this.y || y == this.y - 1) && Math.max(Math.abs(x - this.x), Math.abs(z - this.z)) >= 2;
+        }
+
+        @Override
+        public double heuristic(int x, int y, int z) {
+            int off = Math.max(Math.abs(x - this.x), Math.abs(z - this.z));
+            int levels = y > this.y ? y - this.y : Math.max(0, this.y - 1 - y);
+            return (Math.max(0, 2 - off) + levels) * WALK_ONE_BLOCK_COST;
+        }
+
+        @Override
+        public String toString() {
+            return String.format(
+                    "GoalStepOut{x=%s,y=%s,z=%s}",
                     SettingsUtil.maybeCensor(x),
                     SettingsUtil.maybeCensor(y),
                     SettingsUtil.maybeCensor(z)
