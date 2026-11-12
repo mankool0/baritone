@@ -25,13 +25,17 @@ import net.minecraft.core.Direction;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.block.BaseFireBlock;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -222,6 +226,78 @@ public final class RotationUtils {
             }
         }
         return Optional.empty();
+    }
+
+    /** Points across each face of an outline {@link #reachableOutline} tries, per side. */
+    public static final int OUTLINE_FACE_GRID = 5;
+
+    /**
+     * {@link #reachable}'s fallback for a block that isn't a full cube: a ray at any of a grid of
+     * points across each face of its outline that faces us, rather than only at the middles.
+     * <p>
+     * A small outline can hide behind an edge from every one of those seven points while a strip of
+     * it still shows. A wall sign hung on the side of the block we stand on is the case that
+     * mattered: its plate is an eighth of a block thick and sits just under that block's top edge,
+     * so the edge covers the middle of its top face and every other aim, and only the far rim of the
+     * top face shows past it. Without this the builder never finds it in reach and stands on top of
+     * it indefinitely.
+     * Full cubes are left out, so the extra rays are only ever spent on the rare small block.
+     *
+     * @return a rotation whose ray hits {@code pos} first, within reach, or empty
+     */
+    public static Optional<Rotation> reachableOutline(IPlayerContext ctx, BlockPos pos, double blockReachDistance, boolean wouldSneak) {
+        if (pos instanceof BetterBlockPos) {
+            pos = new BlockPos(pos.getX(), pos.getY(), pos.getZ());
+        }
+        VoxelShape shape = ctx.world().getBlockState(pos).getShape(ctx.world(), pos);
+        if (shape.isEmpty() || Block.isShapeFullBlock(shape)) {
+            return Optional.empty();
+        }
+        Vec3 eyes = wouldSneak ? RayTraceUtils.inferSneakingEyePosition(ctx.player()) : ctx.player().getEyePosition(1.0F);
+        AABB outline = shape.bounds().move(pos.getX(), pos.getY(), pos.getZ());
+        for (Vec3 point : outlineFacePoints(outline, eyes, OUTLINE_FACE_GRID)) {
+            if (eyes.distanceToSqr(point) > blockReachDistance * blockReachDistance) {
+                continue;
+            }
+            Optional<Rotation> rotation = reachableOffset(ctx, pos, point, blockReachDistance, wouldSneak);
+            if (rotation.isPresent()) {
+                return rotation;
+            }
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * A {@code grid} by {@code grid} spread of points across each face of {@code box} that faces
+     * {@code eye}, set in from the edges by half a step so none sits on an edge a ray could graze
+     * past. A face {@code eye} is behind, or level with, can't be hit by a ray from it, so it gets
+     * none.
+     */
+    public static List<Vec3> outlineFacePoints(AABB box, Vec3 eye, int grid) {
+        List<Vec3> points = new ArrayList<>();
+        for (Direction face : Direction.values()) {
+            Direction.Axis axis = face.getAxis();
+            double plane = face.getAxisDirection() == Direction.AxisDirection.POSITIVE ? box.max(axis) : box.min(axis);
+            double ahead = (eye.get(axis) - plane) * face.getAxisDirection().getStep();
+            if (ahead <= 0) {
+                continue;
+            }
+            // the two axes the face spans
+            Direction.Axis u = axis == Direction.Axis.X ? Direction.Axis.Y : Direction.Axis.X;
+            Direction.Axis v = axis == Direction.Axis.Z ? Direction.Axis.Y : Direction.Axis.Z;
+            for (int i = 0; i < grid; i++) {
+                double fu = (i + 0.5) / grid;
+                for (int j = 0; j < grid; j++) {
+                    double fv = (j + 0.5) / grid;
+                    double[] at = new double[3];
+                    at[axis.ordinal()] = plane;
+                    at[u.ordinal()] = box.min(u) + fu * (box.max(u) - box.min(u));
+                    at[v.ordinal()] = box.min(v) + fv * (box.max(v) - box.min(v));
+                    points.add(new Vec3(at[0], at[1], at[2]));
+                }
+            }
+        }
+        return points;
     }
 
     /**

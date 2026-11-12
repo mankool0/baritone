@@ -608,6 +608,10 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                     BlockState curr = bcc.bsi.get0(x, y, z);
                     if (!(curr.getBlock() instanceof AirBlock) && !(curr.getBlock() == Blocks.WATER || curr.getBlock() == Blocks.LAVA) && !valid(curr, desired, false)) {
                         Optional<Rotation> rot = RotationUtils.reachable(ctx, new BlockPos(x, y, z), ctx.playerController().getBlockReachDistance());
+                        if (rot.isEmpty()) {
+                            // a sign or slab can show only a strip that no middle of a face is on
+                            rot = RotationUtils.reachableOutline(ctx, new BlockPos(x, y, z), ctx.playerController().getBlockReachDistance(), false);
+                        }
                         if (rot.isPresent()) {
                             toReturn.add(Optional.of(new Tuple<>(new BetterBlockPos(x, y, z), rot.get())));
                         } else {
