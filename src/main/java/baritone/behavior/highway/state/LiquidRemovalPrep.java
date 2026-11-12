@@ -43,6 +43,16 @@ public class LiquidRemovalPrep extends State {
         HighwayScanner.ScanFront front = context.scanner().liquidScanFront();
 
         BlockPos liquidPos = context.scanner().findFirstLiquidGround(startCheckPos, HighwayScanner.LIQUID_SCAN_BACK_SLICES + front.slicesAhead(), front, false);
+        if (liquidPos == null) {
+            // The detection can see liquid this scan can't: in the paving floor row, which this
+            // scan starts one above, or further back than it reaches. Go after the cell the
+            // detection flagged while it's still a liquid, or this goes back to Nothing and the
+            // detection sends us straight back here.
+            liquidPos = context.scanner().lastLiquidIfStillThere();
+            if (liquidPos != null) {
+                Helper.HELPER.logDebug("Re-scan missed the liquid at " + liquidPos.toShortString() + ", going after it anyway");
+            }
+        }
 
         if (liquidPos == null) {
             Helper.HELPER.logDebug("findFirstLiquidGround Failed. Going back to state Nothing");

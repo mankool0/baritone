@@ -181,10 +181,7 @@ public class EndTracker extends ContextComponent {
             Helper.HELPER.logDirect("The builder has had nothing to do for " + stalled / 20 + " s short of the end at "
                     + layout().endPos().toShortString() + ", where the end check finds " + why);
             if (found == HighwayBlockState.Liquids) {
-                Helper.HELPER.logDirect("Removing liquids.");
-                ctx.transitionTo(HighwayState.LiquidRemovalPrep);
-                ctx.liquidRemoval().setLiquidPathingCanMine(true);
-                ctx.resetTimer();
+                ctx.liquidRemoval().startRemoval(); // or a pause, once removals keep coming back to it
                 return EndStall.HANDLED;
             }
             if (found == HighwayBlockState.Boat) {

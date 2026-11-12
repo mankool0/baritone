@@ -63,7 +63,7 @@ public class HighwayScanner extends ContextComponent {
     private final HashMap<BlockPos, Color> renderBlocksBuilding = new HashMap<>();
 
     private final ArrayList<String> lastMismatches = new ArrayList<>();
-    // where the last isHighwayCorrect that found a liquid found it
+    // where the last isHighwayCorrect found a liquid, null if it found none
     private BlockPos lastLiquid = null;
 
     private BlockPos boatLocation = null;
@@ -121,9 +121,24 @@ public class HighwayScanner extends ContextComponent {
         return renderBlocksBuilding;
     }
 
-    /** Where the last {@link #isHighwayCorrect} that found a liquid found it. */
+    /** Where the last {@link #isHighwayCorrect} found a liquid, or null if it found none. */
     public BlockPos lastLiquid() {
         return lastLiquid;
+    }
+
+    /**
+     * {@link #lastLiquid} if that cell is loaded and still holds a liquid, else null. This is for
+     * the removal: its own re-scan only starts one above the floor and only reaches
+     * {@link #LIQUID_SCAN_BACK_SLICES} back, while the detection checks the paving floor row too
+     * and looks a whole check-back distance behind us. Without this, lava in the floor row reads
+     * as nothing to remove, the builder restarts, and ten ticks later the same lava sends us back,
+     * twice a second indefinitely.
+     */
+    public BlockPos lastLiquidIfStillThere() {
+        if (lastLiquid == null || !baritone.bsi.worldContainsLoadedChunk(lastLiquid.getX(), lastLiquid.getZ())) {
+            return null;
+        }
+        return playerContext.world().getBlockState(lastLiquid).getBlock() instanceof LiquidBlock ? lastLiquid : null;
     }
 
     public List<String> lastMismatches() {
@@ -562,6 +577,8 @@ public class HighwayScanner extends ContextComponent {
             // Terrain past the end stays unbuilt; scanning it would trigger endless fixes
             distanceToCheck = Math.min(distanceToCheck, layout().stepsAlongHighway(startPos, layout().endPos()) + 1);
         }
+        // only ever this scan's find, so the removal can't go after one an earlier scan saw
+        lastLiquid = null;
         renderLockBuilding.lock();
         renderBlocksBuilding.clear();
         lastMismatches.clear();

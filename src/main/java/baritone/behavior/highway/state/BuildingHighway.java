@@ -297,10 +297,7 @@ public class BuildingHighway extends State {
             HighwayScanner.ScanFront front = context.scanner().scanAheadFront(context.baritone().getBuilderProcess().isPaused());
             HighwayBlockState curState = context.scanner().isHighwayCorrect(startCheckPos, startCheckPosLiq, tempCheckBackDist + front.slicesAhead(), front, context.settings().highwayRenderLiquidScanArea.value);
             if (curState == HighwayBlockState.Liquids) {
-                Helper.HELPER.logDirect("Removing liquids.");
-                context.transitionTo(HighwayState.LiquidRemovalPrep);
-                context.liquidRemoval().setLiquidPathingCanMine(true);
-                context.resetTimer();
+                context.liquidRemoval().startRemoval(); // or a pause, once removals keep coming back to it
                 return;
             }
 
