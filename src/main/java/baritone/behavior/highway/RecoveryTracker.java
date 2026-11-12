@@ -48,6 +48,7 @@ public class RecoveryTracker extends ContextComponent {
     private BetterBlockPos descentLastFeet = null;
     private int descentStillTicks = 0;
     private boolean recoveryHoldingJump = false; // here, not on FallRecovery: transitionTo throws the state object away, and a latched jump key would outlive it
+    private boolean recoveryHoldingUse = false; // whether the use key held is our eat's: an operator's eat, or another module's, is not ours to let go of
     private Boolean recoverySwimThroughLavaSaved = null; // non-null while we've overridden allowSwimThroughLava for recovery
 
     /**
@@ -117,6 +118,22 @@ public class RecoveryTracker extends ContextComponent {
         NetherHighwayBuilderBehavior.suppressHitResult = false;
         if (playerContext.minecraft() != null) {
             playerContext.minecraft().options.keyJump.setDown(false);
+        }
+        releaseRecoveryEat();
+    }
+
+    /** Fall recovery pressed use to eat this tick, so the eat is ours to end. */
+    public void markRecoveryEating() {
+        recoveryHoldingUse = true;
+    }
+
+    /** Ends fall recovery's own eat, if one is going; an eat someone else started is left alone. */
+    public void releaseRecoveryEat() {
+        if (!recoveryHoldingUse) {
+            return;
+        }
+        recoveryHoldingUse = false;
+        if (playerContext.minecraft() != null) {
             ctx.eating().releaseUseToEat();
         }
     }

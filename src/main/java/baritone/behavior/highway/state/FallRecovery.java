@@ -33,6 +33,8 @@ import net.minecraft.world.item.Items;
 
 public class FallRecovery extends State {
 
+    private boolean eatSaid; // the current eat has been logged
+
     public FallRecovery(HighwayState state) {
         super(state);
     }
@@ -54,23 +56,53 @@ public class FallRecovery extends State {
         MobEffectInstance fireRes = player.getEffect(MobEffects.FIRE_RESISTANCE);
         int fireResDur = fireRes == null ? 0 : fireRes.getDuration();
         boolean needFireRes = (inLava || onFire) && fireResDur < context.eating().fireRestMinDuration();
+        // The emergency eat leaves fall recovery alone, so low health and an asked-for eat are ours
+        // too: a fall can end beside a wither, with the driver's own auto-eat off for the builder
+        float healthThreshold = context.eating().gappleEatHealthThreshold();
+        boolean lowHealth = healthThreshold > 0 && player.getHealth() < healthThreshold;
+        if (context.eating().gappleAsked()) {
+            context.eating().beginAskedEat();
+        }
+        boolean askedPending = context.eating().askedEatPending();
+        boolean needGapple = needFireRes || (lowHealth || askedPending) && context.eating().hasGapple();
 
+        // Being flown out, by an operator or #elytra: a path or a held jump of ours fights the
+        // glide, and a goal set while the elytra process runs retargets its flight
+        boolean flownOut = player.isFallFlying() || context.baritone().getElytraProcess().isActive();
         boolean pathing = context.baritone().getPathingBehavior().isPathing();
+        // Grim drops an inventory click while the last input held jump, so a gapple fetched from
+        // the main inventory needs the jump let go of first
+        boolean fetchingGapple = needGapple && context.eating().hasGapple()
+                && context.inventory().getItemSlotHotbar(Item.getId(Items.ENCHANTED_GOLDEN_APPLE)) == -1;
 
         // Float at the lava surface while we eat and while baritone is still planning
-        context.recovery().setRecoveryHoldingJump(inLava && !pathing);
+        context.recovery().setRecoveryHoldingJump(inLava && !pathing && !flownOut && !fetchingGapple);
 
         if (inLava) {
             // Treat lava as a swimmable fluid so baritone can swim us up and out of it.
             context.recovery().enableLavaSwimmingForRecovery();
         }
 
-        if (needFireRes && eatGapple(context)) {
+        if (needGapple && eatGapple(context)) {
+            if (!eatSaid && !needFireRes) {
+                Helper.HELPER.logDirect("Fall recovery: eating a gapple (health=" + player.getHealth() + (askedPending ? ", asked for" : "") + ").");
+            }
+            eatSaid = true;
             return;
         }
+        eatSaid = false;
         // Done eating
         NetherHighwayBuilderBehavior.suppressHitResult = false;
-        context.eating().releaseUseToEat();
+        context.recovery().releaseRecoveryEat();
+
+        if (flownOut) {
+            // Whoever flies us picks where we come down; the spot to walk back to is worked out from there
+            if (context.baritone().getCustomGoalProcess().isActive()) {
+                context.baritone().getCustomGoalProcess().onLostControl();
+            }
+            context.recovery().setRecoveryTarget(null);
+            return;
+        }
 
         if (context.recovery().recoveryTarget() == null) {
             BetterBlockPos target = context.recovery().computeRecoveryTarget();
@@ -123,6 +155,7 @@ public class FallRecovery extends State {
             context.playerContext().player().closeContainer();
         } else {
             context.eating().holdUseToEat(Items.ENCHANTED_GOLDEN_APPLE);
+            context.recovery().markRecoveryEating();
         }
         return true;
     }
