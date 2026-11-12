@@ -22,6 +22,7 @@ import baritone.behavior.highway.enums.HighwayState;
 import baritone.utils.accessor.ILivingEntity;
 import baritone.utils.accessor.IMinecraft;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 
@@ -92,7 +93,7 @@ public class Eating extends ContextComponent {
             return false;
         }
         if (++askedTicks > ASKED_EAT_MAX_TICKS) {
-            Helper.HELPER.logDirect("No gapple went down in " + ASKED_EAT_MAX_TICKS / 20 + "s - giving up the eat nhweat asked for");
+            Helper.HELPER.logDirect("No gapple went down in " + ASKED_EAT_MAX_TICKS / 20 + "s - giving up the eat nhweat or a fight asked for");
             askedFrom = -1;
             return false;
         }
@@ -170,6 +171,38 @@ public class Eating extends ContextComponent {
 
     public float gappleEatHealthThreshold() {
         return Math.min(settings.highwayGappleEatHealthThreshold.value, 20f);
+    }
+
+    public float combatGappleHealthThreshold() {
+        return Math.min(settings.highwayCombatGappleHealthThreshold.value, 20f);
+    }
+
+    /** Whether a fight wants a gapple now: hurt under the combat threshold with no absorption left. */
+    public boolean combatGappleDue() {
+        LocalPlayer player = playerContext.player();
+        return combatGappleDue(combatGappleHealthThreshold(), player.getHealth(),
+                absorptionLeft(player.getAbsorptionAmount(), player.hasEffect(MobEffects.ABSORPTION)), hasGapple());
+    }
+
+    /**
+     * A gapple's absorption takes the hits a pack lands while the bot fights, but only once it is
+     * eaten, and the eat takes 32 ticks. At the emergency threshold the hits during the eat take a
+     * bot under an auto-log's health first, so a fight eats on the first hit that finds no
+     * absorption left.
+     */
+    static boolean combatGappleDue(float threshold, float health, boolean absorptionLeft, boolean hasGapple) {
+        return threshold > 0 && health < threshold && !absorptionLeft && hasGapple;
+    }
+
+    /**
+     * The amount alone lags a gapple that just went down. The server sends the use-finished event,
+     * which takes the gapple out of our inventory, and the absorption effect straight after it, but
+     * the amount is synced entity data that a later tracker update carries. The eat ends on the
+     * gapple leaving, so the fight's next check found 0 and ate another. The server drops the effect
+     * within a tick of its amount running out, so the effect holds off a due eat no longer than that.
+     */
+    static boolean absorptionLeft(float amount, boolean absorptionEffect) {
+        return amount > 0 || absorptionEffect;
     }
 
     public int gappleEatFoodThreshold() {

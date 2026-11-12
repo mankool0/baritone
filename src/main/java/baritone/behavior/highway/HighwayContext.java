@@ -438,10 +438,15 @@ public class HighwayContext {
                 int foodThreshold = eating.gappleEatFoodThreshold();
                 boolean healthTrigger = healthThreshold > 0 && playerContext.player().getHealth() < healthThreshold;
                 boolean foodTrigger = foodThreshold > 0 && playerContext.player().getFoodData().getFoodLevel() <= foodThreshold;
+                // Over the emergency threshold the eat would stop at once; begun as an asked eat, it lasts a gapple
+                boolean combatTrigger = inCombat && eating.combatGappleDue();
                 // Hunger alone is golden carrot work while we have any; low health still wants a gapple
-                if (healthTrigger || asked || foodTrigger && !eating.goldenCarrotsFeed(currentStateEnum)) {
-                    Helper.HELPER.logDirect((asked ? "Gapple eat asked for" : "Emergency gapple eat triggered") + " (health=" + playerContext.player().getHealth() + ", food=" + playerContext.player().getFoodData().getFoodLevel() + ").");
-                    if (asked) {
+                if (healthTrigger || asked || combatTrigger || foodTrigger && !eating.goldenCarrotsFeed(currentStateEnum)) {
+                    String why = asked ? "Gapple eat asked for"
+                            : combatTrigger && !healthTrigger ? "Gapple eat in a fight, no absorption left"
+                            : "Emergency gapple eat triggered";
+                    Helper.HELPER.logDirect(why + " (health=" + playerContext.player().getHealth() + ", food=" + playerContext.player().getFoodData().getFoodLevel() + ").");
+                    if (asked || combatTrigger) {
                         eating.beginAskedEat();
                     }
                     // Out of a carrot eat, back to where that one was going: the gapple leaves its own slot selected

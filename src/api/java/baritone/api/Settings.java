@@ -2072,6 +2072,14 @@ public final class Settings {
     public final Setting<Boolean> highwayEmergencyEatDuringCombat = new Setting<>(true);
 
     /**
+     * In a mob fight, eat a gapple once health drops below this and no absorption is left, so its
+     * absorption is up before a pack takes much health. 20 eats on the first hit. The eat holds until
+     * a gapple has gone down. Set to 0 to leave fights to highwayGappleEatHealthThreshold alone; with
+     * highwayEmergencyEatDuringCombat off, fights eat nothing either way.
+     */
+    public final Setting<Float> highwayCombatGappleHealthThreshold = new Setting<>(0f);
+
+    /**
      * Radius within which angered (isAggressive) or naturally hostile mobs are engaged during highway building.
      * Only mobs that can get to us or shoot us count: one behind a wall or across a gap, or one that would
      * have to jump down to us, is left alone until that changes.
