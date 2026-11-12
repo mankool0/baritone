@@ -42,6 +42,7 @@ import baritone.pathing.path.PathExecutor;
 import baritone.utils.BaritoneProcessHelper;
 import baritone.utils.BlockBreakHelper;
 import baritone.utils.BlockStateInterface;
+import baritone.utils.BreakGoalStall;
 import baritone.utils.DoubleMine;
 import baritone.utils.EntityHole;
 import baritone.utils.PathingCommandContext;
@@ -255,6 +256,10 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     // a walk to a stand ended, so dig from here whatever it reaches rather than look for another
     private boolean doubleMineStandSettled;
     private final PlaceRateLimiter placeRateLimiter = new PlaceRateLimiter();
+    // spots struck off break goals after we stood in them unable to see the block
+    private final BreakGoalStall breakGoalStall = new BreakGoalStall();
+    // why we gave up on a block we can't get at, for the highway to pause on; null if we haven't
+    private String unreachableBreak;
     // why printerPlacesLeft allowed none this tick
     private String printerPlaceHold;
     // a place waited for room under printerPacketsPerTick, so the next tick's breaks leave it some
@@ -421,6 +426,19 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         clearEntityHoles();
         clearCompletedWatch();
         printerResetNoRotateDetection();
+        // a restart looks at every block afresh, from wherever we stand now
+        breakGoalStall.clear();
+        unreachableBreak = null;
+    }
+
+    /**
+     * Why the builder gave up on a block it can't get at to break, once, or null if it hasn't. The
+     * highway pauses on this, naming the block, where a plain build pauses the builder itself.
+     */
+    public String takeUnreachableBreak() {
+        String reason = unreachableBreak;
+        unreachableBreak = null;
+        return reason;
     }
 
     public void resume() {
@@ -1900,6 +1918,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         if (recursions == 0) {
             printerMovementForced = baritone.getLookBehavior().isMovementInputForced();
             builderTick++;
+            breakGoalStall.startTick();
         }
         baritone.getInputOverrideHandler().clearAllKeys();
         if (paused) {
@@ -2326,7 +2345,80 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             paused = true;
             return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
         }
+        // Standing in the goal is all it asks, so no path will ever move us from here: with nothing
+        // in reach to break and the printer idle, a block the scan wants broken that can't be seen
+        // from here pins us for good. So does a goal whose other spots we can't path to, once one
+        // has been struck off.
+        BetterBlockPos feet = ctx.playerFeet();
+        boolean inGoal = goal.isInGoal(feet.x, feet.y, feet.z);
+        breakGoalStall.forgetChanged(bcc.bsi::get0);
+        boolean pinned = toBreak.isEmpty() && !outOfReach.isEmpty() && !printerAction.acted() && ctx.player().onGround()
+                && !baritone.getPathingBehavior().isPathing() && (inGoal || !breakGoalStall.isEmpty());
+        if (breakGoalStall.pinned(pinned)) {
+            String giveUp = inGoal ? strikeStandingSpot(bcc, outOfReach, feet) : struckBlockWithNoWayIn(bcc);
+            if (giveUp != null) {
+                if (!highway.isBuildingHighwayState()) {
+                    logDirect(giveUp + ". Pausing. resume to resume, cancel to cancel");
+                    paused = true;
+                    return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+                }
+                unreachableBreak = giveUp; // the highway pauses on it, which is what ends the leg
+            }
+        }
         return new PathingCommandContext(goal, PathingCommandType.FORCE_REVALIDATE_GOAL_AND_PATH, bcc);
+    }
+
+    /**
+     * Strikes the spot we stand on off the goal of every block in {@code outOfReach} whose goal it
+     * is in, so the next path goes round to another side of them.
+     *
+     * @return why we give up, once a block has had {@link BreakGoalStall#SPOTS_PER_BLOCK} spots
+     * struck off; null otherwise
+     */
+    private String strikeStandingSpot(BuilderCalculationContext bcc, List<BetterBlockPos> outOfReach, BetterBlockPos feet) {
+        String giveUp = null;
+        for (BetterBlockPos block : outOfReach) {
+            if (!breakGoal(block, bcc).isInGoal(feet.x, feet.y, feet.z)) {
+                continue; // not one of the blocks that keep us here
+            }
+            BlockState state = bcc.bsi.get0(block);
+            int struck = breakGoalStall.strike(block, state, feet);
+            if (struck >= BreakGoalStall.SPOTS_PER_BLOCK) {
+                giveUp = unreachableBreakReason(bcc, block, state, "out of sight from all " + struck + " spots beside it we stood on");
+            } else {
+                logDirect("Can't see " + BlockUtils.blockToString(state.getBlock()) + " at " + block.x + "," + block.y + "," + block.z
+                        + " to break it from " + feet.x + "," + feet.y + "," + feet.z + ", going round to another side.");
+            }
+        }
+        return giveUp;
+    }
+
+    /**
+     * Struck off the spots we could see it from, or never could: a block that still has spots
+     * struck off while we stand outside every goal with no path is one we can't get round to.
+     *
+     * @return why we give up on the most struck of them, or null if none is left
+     */
+    private String struckBlockWithNoWayIn(BuilderCalculationContext bcc) {
+        BlockPos worst = null;
+        for (long packed : breakGoalStall.struckBlocks()) {
+            BlockPos block = BlockPos.of(packed);
+            if (worst == null || breakGoalStall.struckCount(block) > breakGoalStall.struckCount(worst)) {
+                worst = block;
+            }
+        }
+        if (worst == null) {
+            return null;
+        }
+        return unreachableBreakReason(bcc, worst, bcc.bsi.get0(worst),
+                "no path to a spot that sees it after " + breakGoalStall.struckCount(worst) + " that didn't");
+    }
+
+    private String unreachableBreakReason(BuilderCalculationContext bcc, BlockPos block, BlockState state, String why) {
+        BlockState desired = bcc.getSchematic(block.getX(), block.getY(), block.getZ(), state);
+        return BlockUtils.blockToString(state.getBlock()) + " at " + block.getX() + "," + block.getY() + "," + block.getZ()
+                + " can't be reached to break" + (desired != null ? " (wants " + BlockUtils.blockToString(desired.getBlock()) + ")" : "")
+                + ": " + why;
     }
 
     private boolean recalc(BuilderCalculationContext bcc) {
@@ -2838,8 +2930,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     }
 
     private Goal breakGoal(BlockPos pos, BuilderCalculationContext bcc) {
+        Goal goal = new GoalBreak(pos);
         if (Baritone.settings().goalBreakFromAbove.value && bcc.bsi.get0(pos.above()).getBlock() instanceof AirBlock && bcc.bsi.get0(pos.above(2)).getBlock() instanceof AirBlock) { // TODO maybe possible without the up(2) check?
-            return new JankyGoalComposite(new GoalBreak(pos), new GoalGetToBlock(pos.above()) {
+            goal = new JankyGoalComposite(goal, new GoalGetToBlock(pos.above()) {
                 @Override
                 public boolean isInGoal(int x, int y, int z) {
                     if (y > this.y || (x == this.x && y == this.y && z == this.z)) {
@@ -2849,7 +2942,25 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                 }
             });
         }
-        return new GoalBreak(pos);
+        Set<Long> struck = breakGoalStall.isEmpty() ? Set.of() : breakGoalStall.struckSpots(pos);
+        return struck.isEmpty() ? goal : new GoalBreakStruckOff(goal, struck);
+    }
+
+    /**
+     * A break goal less the spots {@link BreakGoalStall} has struck off it, where we stood and
+     * couldn't see the block. The set is a copy: path calculations read it off the main thread.
+     */
+    private record GoalBreakStruckOff(Goal goal, Set<Long> struck) implements Goal {
+
+        @Override
+        public boolean isInGoal(int x, int y, int z) {
+            return goal.isInGoal(x, y, z) && !struck.contains(BlockPos.asLong(x, y, z));
+        }
+
+        @Override
+        public double heuristic(int x, int y, int z) {
+            return goal.heuristic(x, y, z);
+        }
     }
 
     public static class GoalAdjacent extends GoalGetToBlock {

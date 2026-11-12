@@ -68,6 +68,16 @@ public class BuildingHighway extends State {
             context.endTracker().clearEndStall();
         }
 
+        // The builder struck off every spot beside a block it could not see from any of them. Left
+        // to itself it would stand there until the stuck check; the pause names the block instead,
+        // and is what ends the leg.
+        String unreachable = context.baritone().getBuilderProcess().takeUnreachableBreak();
+        if (unreachable != null) {
+            context.baritone().getPathingBehavior().cancelEverything();
+            context.pause(unreachable);
+            return;
+        }
+
         if (context.walkBackTimer() > 120 && context.baritone().getPathingControlManager().mostRecentCommand().isPresent()) {
             context.resetWalkBackTimer();
             if (context.getFarthestGoalDistance(context.baritone().getPathingControlManager().mostRecentCommand().get().goal) > context.settings().highwayMaxLostShulkerSearchDist.value) {
