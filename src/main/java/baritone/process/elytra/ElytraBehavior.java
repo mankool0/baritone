@@ -39,6 +39,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.NonNullList;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
+import net.minecraft.tags.FluidTags;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
@@ -56,6 +57,7 @@ import net.minecraft.world.level.block.AirBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkSource;
 import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
@@ -66,6 +68,8 @@ import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.LockSupport;
+import java.util.function.IntPredicate;
+import java.util.function.ToDoubleFunction;
 import java.util.function.UnaryOperator;
 
 import static baritone.utils.BaritoneMath.fastCeil;
@@ -113,6 +117,27 @@ public final class ElytraBehavior implements Helper {
     private boolean landingRose;
 
     /**
+     * Where a glide moved by steps has been over its last {@link #GLIDE_STALL_TICKS} ticks, oldest first, and the tick
+     * of the newest
+     */
+    private final ArrayDeque<Vec3> glideHistory = new ArrayDeque<>();
+    private int glideHistoryTick;
+
+    /**
+     * Where a glide moved by steps that got nowhere goes first, to see on along the path from there; {@code null} when
+     * it isn't going round anything
+     */
+    private Vec3 glideDetour;
+    private int nextGlideDetourSearch;
+
+    /**
+     * The first path point the fallback of a glide moved by steps last headed for, the ones before it found behind the
+     * box or under it; -1 for none. They stay behind: looked at afresh, a point the path turns back at can be behind
+     * the box at it and ahead of the box one step on from it, and the fallback went back and forth between the two
+     */
+    private int glideFallbackFrom = -1;
+
+    /**
      * The most recent minimum number of firework boost ticks, equivalent to {@code 10 * (1 + Flight)}
      * <p>
      * Updated every time a firework is automatically used
@@ -140,6 +165,22 @@ public final class ElytraBehavior implements Helper {
     private static final double LANDING_RISE = 0.05;
     // a landing on the destination block comes in this far over its floor
     private static final double LANDING_HOVER = 0.5;
+    // a glide moved by steps that has gone less than GLIDE_STALL_DISTANCE in GLIDE_STALL_TICKS looks for a detour
+    private static final int GLIDE_STALL_TICKS = 20;
+    private static final double GLIDE_STALL_DISTANCE = 0.5;
+    // with nothing ahead in a straight line, a glide moved by steps heads for one of this many points from the nearest
+    private static final int GLIDE_FALLBACK_POINTS = 3;
+    // a detour is a spot this close that the box gets to in one straight move, looked for on a grid this fine, nearest
+    // first, from which one of the next GLIDE_DETOUR_POINTS points is in a straight line
+    private static final double GLIDE_DETOUR_RANGE = 2.5;
+    private static final double GLIDE_DETOUR_GRID = 0.5;
+    private static final int GLIDE_DETOUR_POINTS = 5;
+    private static final double GLIDE_DETOUR_REACHED = 0.05;
+    // a glide moved by steps is at a spot less than this squared distance from it, and a step there is a step of nothing
+    private static final double GLIDE_AT_SQR = 1.0E-6;
+    private static final List<Vec3> GLIDE_DETOURS = glideDetours();
+    // a path from a player in lava starts at most this far straight up, out of it (lavaStartY)
+    static final int LAVA_START_RISE = 64;
 
     private final ExecutorService solverExecutor;
     private Future<Solution> solver;
@@ -222,7 +263,25 @@ public final class ElytraBehavior implements Helper {
         }
 
         public CompletableFuture<Void> pathToDestination() {
-            return this.pathToDestination(ctx.playerFeet());
+            return this.pathToDestination(this.pathStart());
+        }
+
+        /**
+         * Where a path from the player starts: its feet, or in lava the first block straight over them out of it
+         * ({@link #lavaStartY}). A glide moved by steps goes through lava from inside it, so that stretch is flown.
+         */
+        private BetterBlockPos pathStart() {
+            final BetterBlockPos feet = ctx.playerFeet();
+            if (!ctx.player().isInLava()) {
+                return feet;
+            }
+            final Level world = ctx.world();
+            final BlockPos.MutableBlockPos at = new BlockPos.MutableBlockPos();
+            final int y = lavaStartY(feet.y,
+                    h -> world.getFluidState(at.set(feet.x, h, feet.z)).is(FluidTags.LAVA),
+                    h -> world.getBlockState(at.set(feet.x, h, feet.z)).isAir(),
+                    LAVA_START_RISE);
+            return y == feet.y ? feet : new BetterBlockPos(feet.x, y, feet.z);
         }
 
         public CompletableFuture<Void> pathToDestination(final BlockPos from) {
@@ -258,7 +317,7 @@ public final class ElytraBehavior implements Helper {
             final List<BetterBlockPos> after = upToIncl.isPresent() ? this.path.subList(upToIncl.getAsInt() + 1, this.path.size()) : Collections.emptyList();
             final boolean complete = this.completePath;
 
-            return this.path0(ctx.playerFeet(), upToIncl.isPresent() ? fixDestination(this.path.get(upToIncl.getAsInt())) : destinationFixed(), segment -> segment.append(after.stream(), complete || (segment.isFinished() && !upToIncl.isPresent())))
+            return this.path0(this.pathStart(), upToIncl.isPresent() ? fixDestination(this.path.get(upToIncl.getAsInt())) : destinationFixed(), segment -> segment.append(after.stream(), complete || (segment.isFinished() && !upToIncl.isPresent())))
                     .whenComplete((result, ex) -> {
                         this.recalculating = false;
                         if (ex != null) {
@@ -335,6 +394,9 @@ public final class ElytraBehavior implements Helper {
             }
             this.path = new NetherPath(path);
             this.completePath = segment.isFinished();
+            // a detour was to see on along the old path, and the points behind were the old path's
+            ElytraBehavior.this.glideDetour = null;
+            ElytraBehavior.this.glideFallbackFrom = -1;
             this.playerNear = 0;
             this.ticksNearUnchanged = 0;
             this.maxPlayerNear = 0;
@@ -397,7 +459,7 @@ public final class ElytraBehavior implements Helper {
                 if (!canSeeAny && (ElytraBehavior.this.clearView(ctx.playerFeetAsVec(), this.path.getVec(i), false) || ElytraBehavior.this.clearView(ctx.playerHead(), this.path.getVec(i), false))) {
                     canSeeAny = true;
                 }
-                if (!ElytraBehavior.this.clearView(this.path.getVec(i), this.path.getVec(i + 1), false)) {
+                if (!ElytraBehavior.this.clearView(this.path.getVec(i), this.sightOf(i + 1), false)) {
                     // obstacle. where do we return to pathing?
                     // if the end of render distance is closer to goal, then that's fine, otherwise we'd be "digging our hole deeper" and making an already bad backtrack worse
                     OptionalInt rejoinMainPathAt;
@@ -430,6 +492,20 @@ public final class ElytraBehavior implements Helper {
             }
         }
 
+        /**
+         * Where to look at path point {@code i} from the one before it: the point, or for an appended block to stand in,
+         * where the landing comes in over it. That block's lower corner is on its floor, and a ray ending there can
+         * count the floor as in the way, which recalculated the path every tick.
+         */
+        private Vec3 sightOf(final int i) {
+            final BetterBlockPos pos = this.path.get(i);
+            if (ElytraBehavior.this.appendDestination && ElytraBehavior.this.landsOnDestination
+                    && i == this.path.size() - 1 && pos.equals(destinationFixed())) {
+                return Vec3.atBottomCenterOf(pos).add(0, LANDING_HOVER, 0);
+            }
+            return this.path.getVec(i);
+        }
+
         private void attemptNextSegment() {
             if (this.recalculating) {
                 return;
@@ -448,25 +524,35 @@ public final class ElytraBehavior implements Helper {
                 return;
             }
 
+            final ToDoubleFunction<BetterBlockPos> distance;
+            final IGlideControl control = ElytraBehavior.this.process.activeGlideControl();
+            if (control != null) {
+                // a glide moved by steps puts the box's middle on the points. measured from the feet block, a point
+                // the box is on ties with the one below it, and the nearest stays a point behind
+                final Vec3 middle = ElytraBehavior.this.glideBox(control).getCenter();
+                distance = p -> middle.distanceToSqr(p.x, p.y, p.z);
+            } else {
+                final BetterBlockPos pos = ctx.playerFeet();
+                distance = p -> p.distanceSq(pos);
+            }
             int index = this.playerNear;
-            final BetterBlockPos pos = ctx.playerFeet();
             for (int i = index; i >= Math.max(index - 1000, 0); i -= 10) {
-                if (path.get(i).distanceSq(pos) < path.get(index).distanceSq(pos)) {
+                if (distance.applyAsDouble(path.get(i)) < distance.applyAsDouble(path.get(index))) {
                     index = i; // intentional: this changes the bound of the loop
                 }
             }
             for (int i = index; i < Math.min(index + 1000, path.size()); i += 10) {
-                if (path.get(i).distanceSq(pos) < path.get(index).distanceSq(pos)) {
+                if (distance.applyAsDouble(path.get(i)) < distance.applyAsDouble(path.get(index))) {
                     index = i; // intentional: this changes the bound of the loop
                 }
             }
             for (int i = index; i >= Math.max(index - 50, 0); i--) {
-                if (path.get(i).distanceSq(pos) < path.get(index).distanceSq(pos)) {
+                if (distance.applyAsDouble(path.get(i)) < distance.applyAsDouble(path.get(index))) {
                     index = i; // intentional: this changes the bound of the loop
                 }
             }
             for (int i = index; i < Math.min(index + 50, path.size()); i++) {
-                if (path.get(i).distanceSq(pos) < path.get(index).distanceSq(pos)) {
+                if (distance.applyAsDouble(path.get(i)) < distance.applyAsDouble(path.get(index))) {
                     index = i; // intentional: this changes the bound of the loop
                 }
             }
@@ -690,9 +776,11 @@ public final class ElytraBehavior implements Helper {
     }
 
     /**
-     * Works out this tick's {@link #glideStep}: straight at the furthest point ahead on the path that the hitbox gets
-     * to in a straight line, as far as the control's limits let it go this tick, and short of anything that would cut
-     * it. The control moves the player by it whole, so there are no physics or fireworks to plan for.
+     * Works out this tick's {@link #glideStep}: towards the furthest point ahead on the path that the hitbox gets to in
+     * a straight line, as far as the control's limits let it go this tick, and short of anything that would cut it or
+     * slid along it. With no point ahead in a straight line, towards one of the next few, and after getting nowhere for
+     * a while, round by a detour first. The control moves the player by it whole, so there are no physics or fireworks
+     * to plan for.
      */
     private void tickGlideStep(final IGlideControl control) {
         final AABB box = this.glideBox(control);
@@ -700,34 +788,96 @@ public final class ElytraBehavior implements Helper {
         final double across = Math.max(0, control.maxHorizontalStep());
         final double vertical = Math.max(0, control.maxVerticalStep());
 
-        final Vec3 target;
-        final Vec3 step;
+        Vec3 target;
+        Vec3 step;
         if (this.landingMode) {
             final Vec3 column = new Vec3(this.destination.x + 0.5, feet.y, this.destination.z + 0.5);
             final Vec3 toColumn = column.subtract(feet);
             if (toColumn.horizontalDistanceSqr() > LANDING_CENTERED * LANDING_CENTERED) {
                 // over the middle of the landing column before going down it
                 target = column;
-                step = this.uncutGlideStep(box, withinGlideLimits(toColumn, across, vertical));
+                step = this.glideStepTowards(box, feet, column, across, vertical);
             } else {
                 final double probe = Math.max(vertical, LANDING_FALL) + 1;
                 final double drop = -this.collideGlideStep(box, new Vec3(0, -probe, 0)).y;
                 target = feet.subtract(0, drop, 0);
-                if (!this.landingRose && drop <= LANDING_FALL) {
+                if (!this.landingRose && drop > LANDING_FALL) {
+                    // down to where, after the rise, the rest of the way is too short a fall to hurt. aimed under that
+                    // and not at it, where rounding could leave it a hair over and taking steps of nothing
+                    step = new Vec3(toColumn.x, -Math.min(vertical, drop - (LANDING_FALL - LANDING_RISE)), toColumn.z);
+                } else if (!this.landingRose) {
                     // the server counts every block of a descent as fall, and a rise starts the count again: a little
                     // way up first, so only the last few blocks count
                     this.landingRose = true;
                     step = this.uncutGlideStep(box, new Vec3(toColumn.x, Math.min(LANDING_RISE, vertical), toColumn.z));
                 } else {
-                    // down to the floor, touching it this time
-                    step = this.collideGlideStep(box, new Vec3(toColumn.x, -Math.min(vertical, drop), toColumn.z));
+                    // down onto the floor. the game only puts the player on the ground when the floor cuts a move down
+                    // short: a step that stops on it exactly leaves the glide going, and the next one is a step of nothing
+                    step = new Vec3(toColumn.x, -vertical, toColumn.z);
                 }
             }
         } else {
-            final Vec3 ahead = this.glideTarget(box, feet);
-            // nothing in sight: the nearest point, and the step's own collision check keeps the box out of the blocks
-            target = ahead != null ? ahead : this.glideFeetAt(this.pathManager.getPath(), this.pathManager.getNear(), box);
-            step = this.uncutGlideStep(box, withinGlideLimits(target.subtract(feet), across, vertical));
+            final boolean stalled = this.noteGlidePosition(feet);
+            if (this.glideDetour != null && this.glideDetour.distanceToSqr(feet) < GLIDE_DETOUR_REACHED * GLIDE_DETOUR_REACHED) {
+                this.glideDetour = null;
+            }
+            final int tick = ctx.player().tickCount;
+            // at the last point there's nowhere further to go: it holds still there on purpose, for the next segment or
+            // a landing spot
+            final boolean pathAhead = this.pathManager.getNear() < this.pathManager.getPath().size() - 1;
+            if (stalled && pathAhead && tick >= this.nextGlideDetourSearch) {
+                // getting nowhere, on a detour or not: no straight line on from here works with the game's collisions
+                this.nextGlideDetourSearch = tick + GLIDE_STALL_TICKS;
+                this.glideDetour = this.findGlideDetour(box, feet);
+                // the points left behind may be the way after all
+                this.glideFallbackFrom = -1;
+                logVerbose(this.glideDetour != null ? "No progress, taking a detour" : "No progress, and no detour found");
+            }
+            final Vec3 ahead = this.glideDetour != null ? this.glideDetour : this.glideTarget(box, feet);
+            if (ahead != null) {
+                target = ahead;
+                step = this.glideStepTowards(box, feet, target, across, vertical);
+            } else {
+                // nothing ahead in a straight line: the first of the next few points a step gets a good way towards,
+                // else the one it gets furthest towards
+                final NetherPath path = this.pathManager.getPath();
+                final int near = this.pathManager.getNear();
+                final boolean avoidLava = this.glideAvoidsLava();
+                final int from = Math.min(Math.max(near, this.glideFallbackFrom), path.size() - 1);
+                target = this.glideFeetAt(path, from, box);
+                step = Vec3.ZERO;
+                int firstAhead = -1;
+                for (int i = from; i < Math.min(from + GLIDE_FALLBACK_POINTS, path.size()); i++) {
+                    final Vec3 point = this.glideFeetAt(path, i, box);
+                    final Vec3 want = withinGlideLimits(point.subtract(feet), across, vertical);
+                    if (want.lengthSqr() < GLIDE_AT_SQR) {
+                        continue; // there already
+                    }
+                    if (i + 1 < path.size() && point.subtract(feet).dot(this.glideFeetAt(path, i + 1, box).subtract(point)) < 0) {
+                        // past it, on the way to the next: the nearest point stays this one until halfway there, and a
+                        // step back to it and on again goes nowhere for ever
+                        continue;
+                    }
+                    if (firstAhead < 0) {
+                        firstAhead = i;
+                    }
+                    final Vec3 toward = this.glideStepTowards(box, feet, point, across, vertical);
+                    if (avoidLava && this.glideTouchesLava(box, toward)) {
+                        // no ray checked this line, and the game lets a glide into lava
+                        continue;
+                    }
+                    if (toward.lengthSqr() > step.lengthSqr()) {
+                        target = point;
+                        step = toward;
+                    }
+                    if (toward.lengthSqr() >= 0.25 * 0.25 * want.lengthSqr()) {
+                        break;
+                    }
+                }
+                if (firstAhead >= 0) {
+                    this.glideFallbackFrom = firstAhead;
+                }
+            }
         }
 
         this.glideStep = step;
@@ -779,8 +929,10 @@ public final class ElytraBehavior implements Helper {
     }
 
     /**
-     * @return The furthest of the next 20 path points (or a point between them) that the box gets to in a straight
-     * line, {@code null} if none
+     * @return The furthest of the 20 path points after the nearest (or a point between them) that the box gets to in a
+     * straight line, {@code null} if none. Not the nearest itself, nor any spot the box is at: a line of no length is
+     * clear, and a target there is a step of nothing. Inside lava every ray is blocked, so the spot between two points
+     * that the box's steps had brought it onto exactly was the one target left, and the glide held still on it.
      */
     private Vec3 glideTarget(final AABB box, final Vec3 feet) {
         final NetherPath path = this.pathManager.getPath();
@@ -789,31 +941,189 @@ public final class ElytraBehavior implements Helper {
 
         // with room to spare around the box first
         final AABB roomy = box.inflate(Baritone.settings().elytraMinimumAvoidance.value);
-        for (int i = furthest; i >= near; i--) {
+        for (int i = furthest; i > near; i--) {
             final Vec3 dest = this.glideFeetAt(path, i, box);
-            if (this.isGlideClear(roomy, dest.subtract(feet))) {
+            if (this.glidesTo(roomy, feet, dest)) {
                 return dest;
             }
         }
         // then without, at the points and every block between them
-        for (int i = furthest; i >= near; i--) {
+        for (int i = furthest; i > near; i--) {
             final Vec3 dest = this.glideFeetAt(path, i, box);
-            if (this.isGlideClear(box, dest.subtract(feet))) {
+            if (this.glidesTo(box, feet, dest)) {
                 return dest;
             }
-            if (i > near) {
-                final Vec3 back = this.glideFeetAt(path, i - 1, box).subtract(dest);
-                final Vec3 unit = back.normalize();
-                final int blocks = fastFloor(back.length());
-                for (int b = 1; b < blocks; b++) {
-                    final Vec3 between = dest.add(unit.scale(b));
-                    if (this.isGlideClear(box, between.subtract(feet))) {
-                        return between;
-                    }
+            final Vec3 back = this.glideFeetAt(path, i - 1, box).subtract(dest);
+            final Vec3 unit = back.normalize();
+            final int blocks = fastFloor(back.length());
+            for (int b = 1; b < blocks; b++) {
+                final Vec3 between = dest.add(unit.scale(b));
+                if (this.glidesTo(box, feet, between)) {
+                    return between;
                 }
             }
         }
         return null;
+    }
+
+    /**
+     * Whether {@code dest} is somewhere else than the box, that the box gets to from {@code feet} in a straight line
+     */
+    private boolean glidesTo(final AABB box, final Vec3 feet, final Vec3 dest) {
+        final Vec3 offset = dest.subtract(feet);
+        return offset.lengthSqr() >= GLIDE_AT_SQR && this.isGlideClear(box, offset);
+    }
+
+    /**
+     * The step towards {@code target} within the limits, as far along it as nothing cuts, or slid along what's in the
+     * way when that gets further towards the target. The game moves the box one axis at a time, up or down first, so a
+     * line that clears a ledge can still be cut at its start by the ledge under or over the box.
+     */
+    private Vec3 glideStepTowards(final AABB box, final Vec3 feet, final Vec3 target, final double across, final double vertical) {
+        final Vec3 want = withinGlideLimits(target.subtract(feet), across, vertical);
+        if (!this.cutsGlideStep(box, want)) {
+            return want;
+        }
+        final Vec3 straight = this.uncutGlideStep(box, want);
+        final Vec3 slid = this.slidGlideStep(box, want);
+        final Vec3 toward = target.subtract(feet);
+        if (slid.dot(toward) <= straight.dot(toward)) {
+            return straight;
+        }
+        // a slide leaves the line to the target, which is all a ray checked
+        return this.glideAvoidsLava() && this.glideTouchesLava(box, slid) ? straight : slid;
+    }
+
+    /**
+     * Whether a step has to keep out of lava: not when the player is in it already, where every way out goes through it
+     */
+    private boolean glideAvoidsLava() {
+        return !ctx.player().isInLava();
+    }
+
+    /**
+     * Whether the box anywhere on its way by {@code step} would be in lava as the game counts it: under the surface of a
+     * lava block that its box, a hair smaller, overlaps. The collisions let a glide in, and only the path's rays keep it
+     * out, which see lava as solid.
+     */
+    private boolean glideTouchesLava(final AABB box, final Vec3 step) {
+        final AABB swept = box.expandTowards(step).deflate(0.001);
+        final int minX = Mth.floor(swept.minX);
+        final int maxX = Mth.ceil(swept.maxX);
+        final int minY = Mth.floor(swept.minY);
+        final int maxY = Mth.ceil(swept.maxY);
+        final int minZ = Mth.floor(swept.minZ);
+        final int maxZ = Mth.ceil(swept.maxZ);
+        final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int x = minX; x < maxX; x++) {
+            for (int y = minY; y < maxY; y++) {
+                for (int z = minZ; z < maxZ; z++) {
+                    pos.set(x, y, z);
+                    final FluidState fluid = ctx.world().getFluidState(pos);
+                    if (fluid.is(FluidTags.LAVA) && y + fluid.getHeight(ctx.world(), pos) >= swept.minY) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * {@code want} as the game's collisions slide it along what's in the way, kept {@link #GLIDE_STEP_MARGIN} off what
+     * stopped it
+     */
+    private Vec3 slidGlideStep(final AABB box, final Vec3 want) {
+        final Vec3 got = this.collideGlideStep(box, want);
+        final Vec3 kept = new Vec3(keptOff(got.x, want.x), keptOff(got.y, want.y), keptOff(got.z, want.z));
+        // backing off one axis moves the ones after it in the game's order a little, onto what might cut them
+        return this.cutsGlideStep(box, kept) ? this.uncutGlideStep(box, kept) : kept;
+    }
+
+    private static double keptOff(final double got, final double want) {
+        return Math.abs(got - want) > 1.0E-7 ? got - Math.signum(want) * GLIDE_STEP_MARGIN : got;
+    }
+
+    /**
+     * Notes where the glide is this tick
+     *
+     * @return Whether it has gone less than {@link #GLIDE_STALL_DISTANCE} over the last {@link #GLIDE_STALL_TICKS}
+     * ticks
+     */
+    private boolean noteGlidePosition(final Vec3 feet) {
+        final int tick = ctx.player().tickCount;
+        if (tick != this.glideHistoryTick + 1) {
+            // a tick with no step worked out (a pause, or the path still coming) held it still on purpose
+            this.glideHistory.clear();
+        }
+        this.glideHistoryTick = tick;
+        final boolean stalled = this.glideHistory.size() >= GLIDE_STALL_TICKS
+                && this.glideHistory.peekFirst().distanceToSqr(feet) < GLIDE_STALL_DISTANCE * GLIDE_STALL_DISTANCE;
+        this.glideHistory.addLast(feet);
+        if (this.glideHistory.size() > GLIDE_STALL_TICKS) {
+            this.glideHistory.removeFirst();
+        }
+        return stalled;
+    }
+
+    /**
+     * @return The nearest spot within {@link #GLIDE_DETOUR_RANGE} that the box gets to in one straight move the game's
+     * collisions don't cut, and from which one of the next {@link #GLIDE_DETOUR_POINTS} points after the nearest is in
+     * a straight line, {@code null} if none. A path starts at the nearest empty cube to the player, which can be behind
+     * a wall the box has to go over first, and its points are cube middles, which a 1.8 high box can't always go
+     * between in a straight line.
+     */
+    private Vec3 findGlideDetour(final AABB box, final Vec3 feet) {
+        final NetherPath path = this.pathManager.getPath();
+        final int near = this.pathManager.getNear();
+        final int last = Math.min(near + GLIDE_DETOUR_POINTS, path.size() - 1);
+        for (final Vec3 offset : GLIDE_DETOURS) {
+            if (this.cutsGlideStep(box, offset) || !this.isGlideClear(box, offset)) {
+                continue;
+            }
+            final AABB moved = box.move(offset);
+            final Vec3 at = feet.add(offset);
+            for (int i = last; i > near; i--) {
+                final Vec3 on = this.glideFeetAt(path, i, box).subtract(at);
+                if (on.lengthSqr() > 0.25 && this.isGlideClear(moved, on)) {
+                    return at;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static List<Vec3> glideDetours() {
+        final int n = fastFloor(GLIDE_DETOUR_RANGE / GLIDE_DETOUR_GRID);
+        final List<Vec3> offsets = new ArrayList<>();
+        for (int x = -n; x <= n; x++) {
+            for (int y = -n; y <= n; y++) {
+                for (int z = -n; z <= n; z++) {
+                    final Vec3 offset = new Vec3(x, y, z).scale(GLIDE_DETOUR_GRID);
+                    if (offset.lengthSqr() > 0 && offset.length() <= GLIDE_DETOUR_RANGE) {
+                        offsets.add(offset);
+                    }
+                }
+            }
+        }
+        offsets.sort(Comparator.comparingDouble(Vec3::lengthSqr));
+        return Collections.unmodifiableList(offsets);
+    }
+
+    /**
+     * The level a path from feet at {@code feetY} in lava starts at: the first block straight over them that is not
+     * lava, when that is air within {@code maxRise}; else {@code feetY}. The planner takes lava for rock and starts from
+     * the nearest air cube it finds, which deep in a lake can be a sealed pocket beside it that no path leaves, so every
+     * ask fails at once. Under rock instead of air, the feet as before.
+     */
+    static int lavaStartY(final int feetY, final IntPredicate lava, final IntPredicate air, final int maxRise) {
+        for (int y = feetY + 1; y <= feetY + maxRise; y++) {
+            if (lava.test(y)) {
+                continue;
+            }
+            return air.test(y) ? y : feetY;
+        }
+        return feetY;
     }
 
     /**
