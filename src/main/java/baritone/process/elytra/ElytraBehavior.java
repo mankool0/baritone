@@ -371,12 +371,9 @@ public final class ElytraBehavior implements Helper {
                 // not loaded yet?
                 return;
             }
-            final BetterBlockPos rangeStart = path.get(rangeStartIncl);
-            if (!ElytraBehavior.this.passable(rangeStart.x, rangeStart.y, rangeStart.z, false)) {
-                // we're in a wall
-                return; // previous iterations of this function SHOULD have fixed this by now :rage_cat:
-            }
-
+            // before the wall check: a path found while the player's chunk wasn't packed yet runs through blocks that
+            // were air to it, lava as well, and once they're packed the nearest point is in one for good. nothing else
+            // here re-paths then, and the flight sat still until the whole flight was asked for again
             if (ElytraBehavior.this.process.state != ElytraProcess.State.LANDING && this.ticksNearUnchanged > 100) {
                 this.pathRecalcSegment(OptionalInt.of(rangeEndExcl - 1))
                         .thenRun(() -> {
@@ -384,6 +381,12 @@ public final class ElytraBehavior implements Helper {
                         });
                 this.ticksNearUnchanged = 0;
                 return;
+            }
+
+            final BetterBlockPos rangeStart = path.get(rangeStartIncl);
+            if (!ElytraBehavior.this.passable(rangeStart.x, rangeStart.y, rangeStart.z, false)) {
+                // we're in a wall
+                return; // previous iterations of this function SHOULD have fixed this by now :rage_cat:
             }
 
             boolean canSeeAny = false;

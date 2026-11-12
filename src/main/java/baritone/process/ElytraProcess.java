@@ -99,6 +99,8 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
     private static final int SHORT_LANDING_COLUMN_HEIGHT = 15;
     private static final int LONG_LANDING_COLUMN_HEIGHT = 39;
     private static final long LANDING_SEARCH_BUDGET_NANOS = TimeUnit.MILLISECONDS.toNanos(25); // half a tick
+    // chunks around the player packed before the first path: its start's search for air can go a dozen blocks out
+    private static final int PACK_NOW_RADIUS = 2;
     private int landingColumnHeight = SHORT_LANDING_COLUMN_HEIGHT;
     private Set<BetterBlockPos> badLandingSpots = new HashSet<>();
     private LandingSearchState landingSearchState;
@@ -413,6 +415,15 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
 
     @Override
     public void repackChunks() {
+        this.repackChunks(false);
+    }
+
+    /**
+     * @param packNearNow Whether to pack the chunks within {@link #PACK_NOW_RADIUS} of the player's here and now, for
+     *                    the path about to be asked for. Queued, they race that path, and a chunk it gets to first counts
+     *                    as air: it starts where the player is, inside whatever it's in.
+     */
+    private void repackChunks(final boolean packNearNow) {
         if (this.npfContext == null) return;
 
         ChunkSource chunkProvider = ctx.world().getChunkSource();
@@ -421,6 +432,20 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
         int playerChunkX = playerPos.getX() >> 4;
         int playerChunkZ = playerPos.getZ() >> 4;
 
+        if (packNearNow) {
+            // before anything is queued. the write thread starts on the queue at once and holds the lock for each chunk
+            // it packs, so packed here after the far chunks were queued, these mostly found the lock taken and went in
+            // the queue behind them, and the first path was searched with the player's own chunk still air
+            for (int x = playerChunkX - PACK_NOW_RADIUS; x <= playerChunkX + PACK_NOW_RADIUS; x++) {
+                for (int z = playerChunkZ - PACK_NOW_RADIUS; z <= playerChunkZ + PACK_NOW_RADIUS; z++) {
+                    LevelChunk chunk = chunkProvider.getChunk(x, z, false);
+                    if (chunk != null && !chunk.isEmpty() && !npfContext.tryPackNow(chunk)) {
+                        npfContext.queueForPacking(chunk);
+                    }
+                }
+            }
+        }
+
         int minX = playerChunkX - 40;
         int minZ = playerChunkZ - 40;
         int maxX = playerChunkX + 40;
@@ -428,6 +453,9 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
 
         for (int x = minX; x <= maxX; x++) {
             for (int z = minZ; z <= maxZ; z++) {
+                if (packNearNow && Math.abs(x - playerChunkX) <= PACK_NOW_RADIUS && Math.abs(z - playerChunkZ) <= PACK_NOW_RADIUS) {
+                    continue; // done above
+                }
                 LevelChunk chunk = chunkProvider.getChunk(x, z, false);
 
                 if (chunk != null && !chunk.isEmpty()) {
@@ -483,7 +511,7 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
         this.behavior = new ElytraBehavior(this.baritone, this, getNpfContext(), destination, appendDestination, landsOnDestination);
 
         if (ctx.world() != null) {
-            this.repackChunks();
+            this.repackChunks(true);
         }
         this.behavior.pathTo();
     }

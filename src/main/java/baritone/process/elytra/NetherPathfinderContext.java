@@ -115,15 +115,42 @@ public final class NetherPathfinderContext implements IElytraPathFinder {
             if (chunk != null) {
                 writeLock.lock();
                 try {
-                    // we might replace this chunk
-                    this.boi.chunk = null;
-                    final Chunk packed = this.context.allocateAndInsertChunk(chunk.getPos().x, chunk.getPos().z);
-                    writeChunkData(chunk, packed);
+                    this.pack(chunk);
                 } finally {
                     writeLock.unlock();
                 }
             }
         });
+    }
+
+    /**
+     * Packs {@code chunk} on the calling thread, so a path asked for after this sees it. A path asked for while it is
+     * only queued finds no chunk there, which counts as air, and can start in the middle of a lava lake.
+     *
+     * @return Whether it was packed, {@code false} when something else is writing (or the caller holds the read lock)
+     * or packing it failed, and it should be queued instead
+     */
+    public boolean tryPackNow(final LevelChunk chunk) {
+        if (!writeLock.tryLock()) {
+            return false;
+        }
+        try {
+            this.pack(chunk);
+            return true;
+        } catch (RuntimeException e) {
+            // already printed. the caller is the game thread, which a chunk that can't be packed mustn't stop
+            return false;
+        } finally {
+            writeLock.unlock();
+        }
+    }
+
+    // required write lock to be held
+    private void pack(final LevelChunk chunk) {
+        // we might replace this chunk
+        this.boi.chunk = null;
+        final Chunk packed = this.context.allocateAndInsertChunk(chunk.getPos().x, chunk.getPos().z);
+        writeChunkData(chunk, packed);
     }
 
     public void queueBlockUpdate(BlockChangeEvent event) {
