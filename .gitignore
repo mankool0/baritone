@@ -4,6 +4,9 @@
 run/
 autotest/
 dist/
+
+# Local, git-ignored deploy helper (see guarded apply in fabric/build.gradle)
+deploy.gradle
 volderyarn/
 
 # Gradle

@@ -102,3 +102,8 @@ publishing {
         // Add repositories to publish to here.
     }
 }
+
+// Local, git-ignored deploy helper. No-op unless a deploy.gradle exists.
+if (rootProject.file("deploy.gradle").exists()) {
+    apply from: rootProject.file("deploy.gradle")
+}
