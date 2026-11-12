@@ -21,90 +21,84 @@ import baritone.api.pathing.goals.GoalBlock;
 import baritone.api.utils.BetterBlockPos;
 import baritone.api.utils.Helper;
 import baritone.api.utils.IPlayerContext;
+import baritone.api.utils.Rotation;
+import baritone.api.utils.RotationUtils;
 import baritone.api.utils.input.Input;
 import baritone.behavior.highway.HighwayContext;
+import baritone.behavior.highway.NetherHighwayBuilderBehavior;
 import baritone.behavior.highway.State;
 import baritone.behavior.highway.enums.HighwayState;
 import baritone.pathing.movement.MovementHelper;
-import baritone.utils.ExplosionExposure;
+import baritone.utils.CrystalBreakPlanner;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
-import net.minecraft.util.Mth;
+import net.minecraft.core.Holder;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.Pose;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.ClipContext;
-import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.item.enchantment.Enchantment;
+import net.minecraft.world.item.enchantment.Enchantments;
+import net.minecraft.world.item.enchantment.ItemEnchantments;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
-import net.minecraft.world.phys.shapes.CollisionContext;
 
-import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
 /**
  * Breaks an end crystal standing where the highway puts a block. A crystal never moves, so no hole drops it out of the
- * way, and hitting it sets off a power 6 explosion: from the nearest a hit reaches, about 20 HP through Protection IV
- * netherite on Hard. Vanilla scales that by how much of us the blast can see ({@link ExplosionExposure}), and it goes
- * off at the crystal's base, so a block at our feet between us and it hides nearly all of us while we hit it over the
- * top. One sitting under the road needs none: the edge of the floor we stand on hides us from it. So: pick a spot in
- * reach of it where a little cover brings that down far enough, walk there, put the cover down, check it from where we
- * actually stand, hit.
+ * way, and hitting it sets off a power 6 explosion. So: pick a spot in reach of it where a little cover keeps the blast
+ * off ({@link CrystalBreakPlanner}), put obsidian under it if the blast would take the floor there, walk there, put the
+ * cover down, check it from where we actually stand, hit. When nowhere hides us, or no spot that does works out, take
+ * the blast on an enchanted golden apple from wherever it costs the least and the knockback leaves us safe.
  */
 public class CrystalRemoval extends State {
 
-    /** The most of us the blast may see: about 2 HP through Protection IV netherite on Hard, from where we hit it. */
-    private static final float MAX_EXPOSURE = 0.25f;
-    /** No nearer than this to where it goes off, feet to the crystal's base. */
-    private static final double MIN_BLAST_DISTANCE = 3.0;
-    /** Eye to its hitbox, under the 3 block entity reach. */
-    private static final double ATTACK_REACH = 2.8;
-    /** How far out from the crystal to look for somewhere to stand. */
-    private static final int STAND_RADIUS = 5;
-    /**
-     * Feet heights to look at, from its base. Its box reaches two blocks up from where it sits, so a crystal on a
-     * pillar or the support row under the road gets in the way of the floor, and the road we stand on is two or
-     * three blocks above it.
-     */
-    private static final int STAND_DY_MIN = -1;
-    private static final int STAND_DY_MAX = 3;
-    /** Cover goes this far out from where we stand, at our feet. */
-    private static final int COVER_RANGE = 2;
-    private static final int MAX_COVERS = 3;
-    /** Heights above the crystal's base to aim a hit at, so it goes over cover at our feet. */
-    private static final double[] AIM_HEIGHTS = {1.5, 1.85};
-    /**
-     * Failing those, the part of its box nearest us, this far in. Looking down on a crystal below the road, its
-     * middle is out of reach past the edge of the floor, but its top edge on our side isn't.
-     */
-    private static final double AIM_INSET = 0.2;
     private static final int PATH_TIMEOUT_TICKS = 400;
     private static final int CENTER_TIMEOUT_TICKS = 60;
     private static final int COVER_TIMEOUT_TICKS = 60;
     private static final int ATTACK_TIMEOUT_TICKS = 100;
-    /** Spots tried before giving up on the crystal for {@link #IGNORE_TICKS}. */
+    private static final int SWAP_TIMEOUT_TICKS = 100;
+    private static final int EAT_TIMEOUT_TICKS = 120;
+    /** Ticks with the use key held and the client not eating before the eat counts as not starting. */
+    private static final int EAT_START_TICKS = 40;
+    /** Spots behind cover tried before taking the blast instead. */
     private static final int MAX_PLANS = 3;
+    /** Spots to take the blast from tried before giving up on the crystal for {@link #IGNORE_TICKS}. */
+    private static final int MAX_TANK_PLANS = 2;
     private static final int IGNORE_TICKS = 1200;
+    /** Health and absorption the hit and any fall after it must leave us. */
+    private static final float TANK_KEEP_HEALTH = 10;
+    /** Absorption IV from an enchanted golden apple. */
+    private static final float GAPPLE_ABSORPTION = 16;
+    /** Resistance this much from running out is eaten again before the hit. */
+    private static final int MIN_RESISTANCE_TICKS = 200;
+    /** Health lost since a tank plan was made that makes its budget a different one. */
+    private static final float TANK_HEALTH_SLACK = 4;
 
-    private enum Phase {GOING, CENTERING, COVERING, ATTACKING}
-
-    /** Where to stand, what to put down first, and where to hit it, worked out for the middle of that block. */
-    private record Plan(BetterBlockPos stand, List<BlockPos> covers, Vec3 aim, float exposure) {}
+    private enum Phase {GOING, SWAPPING, CENTERING, COVERING, EATING, ATTACKING}
 
     private EndCrystal crystal;
-    private Plan plan;
+    private CrystalBreakPlanner.Plan plan;
     private Phase phase;
+    private BetterBlockPos goingTo; // the plan's stand, or the spot beside it to swap its floor from first
     private int phaseTicks;
     private int plans;
+    private boolean tanking; // hiding is out, plans take the blast on a gapple
+    private int tankPlans;
+    private float plannedHealth; // our health when the tank plan was made, its budget counted from it
+    private int gapplesBefore; // the gapples on us as the eat began, so it's done once one is gone
+    private int notEatingTicks;
     private final Set<BetterBlockPos> badStands = new HashSet<>();
 
     public CrystalRemoval(HighwayState state) {
@@ -122,31 +116,78 @@ public class CrystalRemoval extends State {
             return;
         }
 
-        if (plan == null) {
-            if (plans >= MAX_PLANS) {
-                giveUp(context, "tried " + MAX_PLANS + " spots");
-                return;
-            }
-            plans++;
-            plan = plan(context);
-            if (plan == null) {
-                giveUp(context, "nowhere in reach of it where cover keeps the blast off");
-                return;
-            }
-            Helper.HELPER.logDirect(String.format("Breaking the end crystal at %s from %s behind %d block(s) of cover, %.0f%% of us in view of the blast.",
-                    crystal.blockPosition().toShortString(), plan.stand().toShortString(), plan.covers().size(), plan.exposure() * 100));
-            context.baritone().getPathingBehavior().cancelEverything();
-            context.baritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(plan.stand()));
-            setPhase(Phase.GOING);
+        if (plan == null && !planNext(context)) {
+            return;
         }
 
         phaseTicks++;
         switch (phase) {
             case GOING -> going(context);
+            case SWAPPING -> swapping(context);
             case CENTERING -> centering(context);
             case COVERING -> covering(context);
+            case EATING -> eating(context);
             case ATTACKING -> attacking(context);
         }
+    }
+
+    /**
+     * Works out the next spot to try and sets off for it: behind cover first, then, with those used up, taking the
+     * blast on a gapple. Returns false when there's none, having left the state.
+     */
+    private boolean planNext(HighwayContext context) {
+        if (!tanking) {
+            String why;
+            if (plans < MAX_PLANS) {
+                plans++;
+                plan = plan(context);
+                if (plan != null) {
+                    begin(context);
+                    return true;
+                }
+                if (context.threats().deferCrystal(crystal)) {
+                    Helper.HELPER.logDirect("Can't break the end crystal at " + crystal.blockPosition().toShortString()
+                            + " yet: nowhere in reach of it where cover keeps the blast off. Trying again once the builder has nothing else to do.");
+                    finish(context);
+                    return false;
+                }
+                why = "nowhere in reach of it where cover keeps the blast off";
+            } else {
+                why = "tried " + MAX_PLANS + " spots behind cover";
+            }
+            if (!context.eating().hasGapple() && needsGapple(context.playerContext().player())) {
+                giveUp(context, why + ", and there's no enchanted golden apple to take the blast on");
+                return false;
+            }
+            Helper.HELPER.logDirect("End crystal at " + crystal.blockPosition().toShortString() + ": " + why + ", so taking the blast on an enchanted golden apple instead.");
+            tanking = true;
+        }
+        if (tankPlans >= MAX_TANK_PLANS) {
+            giveUp(context, "tried " + MAX_TANK_PLANS + " spots to take the blast from");
+            return false;
+        }
+        tankPlans++;
+        plannedHealth = context.playerContext().player().getHealth();
+        plan = planner(context).tankPlan(context.playerContext().player().position(), badStands, tank(context));
+        if (plan == null) {
+            giveUp(context, "nowhere in reach of it leaves us enough health and somewhere safe to land, even on a gapple");
+            return false;
+        }
+        begin(context);
+        return true;
+    }
+
+    private void begin(HighwayContext context) {
+        String swap = plan.swap() != null ? ", with obsidian put in for the floor there first" : "";
+        if (plan.tank()) {
+            Helper.HELPER.logDirect(String.format("Breaking the end crystal at %s from %s on an enchanted golden apple, behind %d block(s) of cover, %.0f%% of us in view of the blast, about %.0f HP%s.",
+                    crystal.blockPosition().toShortString(), plan.stand().toShortString(), plan.covers().size(), plan.exposure() * 100, plan.damage(), swap));
+        } else {
+            Helper.HELPER.logDirect(String.format("Breaking the end crystal at %s from %s behind %d block(s) of cover, %.0f%% of us in view of the blast%s.",
+                    crystal.blockPosition().toShortString(), plan.stand().toShortString(), plan.covers().size(), plan.exposure() * 100, swap));
+        }
+        context.baritone().getPathingBehavior().cancelEverything();
+        goTo(context, plan.swap() != null ? plan.swapFrom() : plan.stand());
     }
 
     @Override
@@ -158,17 +199,77 @@ public class CrystalRemoval extends State {
         IPlayerContext ctx = context.playerContext();
         if (context.baritone().getCustomGoalProcess().isActive() || context.baritone().getPathingBehavior().isPathing()) {
             if (phaseTicks > PATH_TIMEOUT_TICKS) {
-                replan(context, "took too long to get to " + plan.stand().toShortString());
+                replan(context, "took too long to get to " + goingTo.toShortString());
             }
             return;
         }
-        if (!ctx.playerFeet().equals(plan.stand())) {
-            replan(context, "couldn't get to " + plan.stand().toShortString());
+        if (!ctx.playerFeet().equals(goingTo)) {
+            replan(context, "couldn't get to " + goingTo.toShortString());
             return;
         }
         if (ctx.player().onGround()) {
-            setPhase(Phase.CENTERING);
+            setPhase(goingTo.equals(plan.stand()) ? Phase.CENTERING : Phase.SWAPPING);
         }
+    }
+
+    private void goTo(HighwayContext context, BetterBlockPos target) {
+        goingTo = target;
+        context.baritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(target));
+        setPhase(Phase.GOING);
+    }
+
+    /**
+     * From beside the stand, mines the floor under it and puts obsidian in its place. The blast hurts us before it
+     * breaks any block, and then takes the netherrack around us, so this keeps our footing where we'd otherwise drop
+     * into the hole it leaves.
+     */
+    private void swapping(HighwayContext context) {
+        IPlayerContext ctx = context.playerContext();
+        BlockPos floor = plan.swap();
+        BlockState state = ctx.world().getBlockState(floor);
+        if (CrystalBreakPlanner.blastProof(state)) {
+            releaseKeys(context);
+            goTo(context, plan.stand());
+            return;
+        }
+        if (phaseTicks > SWAP_TIMEOUT_TICKS) {
+            replan(context, "couldn't put obsidian in for the floor at " + floor.toShortString());
+            return;
+        }
+        if (!state.canBeReplaced()) {
+            int pick = context.inventory().putPickaxeHotbar();
+            if (pick == -1) {
+                replan(context, "nothing to mine the floor at " + floor.toShortString() + " with");
+                return;
+            }
+            if (pick >= 9) {
+                return; // the move onto the hotbar hasn't landed yet
+            }
+            Optional<Rotation> rotation = RotationUtils.reachable(ctx, floor, ctx.playerController().getBlockReachDistance());
+            if (rotation.isEmpty()) {
+                replan(context, "can't reach the floor at " + floor.toShortString());
+                return;
+            }
+            ctx.player().getInventory().setSelectedSlot(pick);
+            context.baritone().getLookBehavior().updateTarget(rotation.get(), true);
+            context.baritone().getInputOverrideHandler().setInputForceState(Input.CLICK_LEFT, true);
+            return;
+        }
+        context.baritone().getInputOverrideHandler().setInputForceState(Input.CLICK_LEFT, false);
+        int slot = context.inventory().putItemHotbar(Item.getId(Items.CRYING_OBSIDIAN));
+        if (slot == -1) {
+            slot = context.inventory().putItemHotbar(Item.getId(Items.OBSIDIAN));
+        }
+        if (slot == -1) {
+            replan(context, "no obsidian left to put in for the floor at " + floor.toShortString());
+            return;
+        }
+        if (slot >= 9) {
+            return;
+        }
+        ctx.player().getInventory().setSelectedSlot(slot);
+        context.baritone().getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
+        context.placer().place(floor, (float) ctx.playerController().getBlockReachDistance(), true, false, InteractionHand.MAIN_HAND);
     }
 
     /** The plan was worked out from the middle of the block, and the cover goes right beside it. */
@@ -192,12 +293,16 @@ public class CrystalRemoval extends State {
         BlockPos next = plan.covers().stream().filter(pos -> ctx.world().getBlockState(pos).canBeReplaced()).findFirst().orElse(null);
         if (next == null) {
             releaseKeys(context);
-            float exposure = exposureHere(ctx);
-            if (exposure > MAX_EXPOSURE) {
+            float exposure = exposureHere(context);
+            if (exposure > plan.maxExposure()) {
                 replan(context, String.format("%.0f%% of us is still in view behind the cover", exposure * 100));
                 return;
             }
-            setPhase(Phase.ATTACKING);
+            if (plan.tank() && needsGapple(ctx.player())) {
+                startEating(context);
+            } else {
+                setPhase(Phase.ATTACKING);
+            }
             return;
         }
         if (phaseTicks > COVER_TIMEOUT_TICKS * plan.covers().size()) {
@@ -205,6 +310,9 @@ public class CrystalRemoval extends State {
             return;
         }
         int slot = context.inventory().putAcceptableThrowawayHotbar();
+        if (slot == -1) {
+            slot = context.inventory().putItemHotbar(Item.getId(Items.CRYING_OBSIDIAN));
+        }
         if (slot == -1) {
             slot = context.inventory().putItemHotbar(Item.getId(Items.OBSIDIAN));
         }
@@ -220,20 +328,82 @@ public class CrystalRemoval extends State {
         context.placer().place(next, (float) ctx.playerController().getBlockReachDistance(), true, false, InteractionHand.MAIN_HAND);
     }
 
+    /** Whether taking the blast needs a gapple first: no Resistance that lasts, or less than a fresh one's absorption. */
+    private static boolean needsGapple(Player player) {
+        MobEffectInstance resistance = player.getEffect(MobEffects.RESISTANCE);
+        return resistance == null || resistance.getDuration() < MIN_RESISTANCE_TICKS
+                || !player.hasEffect(MobEffects.ABSORPTION) || player.getAbsorptionAmount() < GAPPLE_ABSORPTION - 0.5f;
+    }
+
+    private void startEating(HighwayContext context) {
+        gapplesBefore = context.inventory().getItemCountInventory(Item.getId(Items.ENCHANTED_GOLDEN_APPLE));
+        notEatingTicks = 0;
+        setPhase(Phase.EATING);
+    }
+
+    /** One enchanted golden apple, standing behind the cover: done once one is gone and its Resistance is on us. */
+    private void eating(HighwayContext context) {
+        LocalPlayer player = context.playerContext().player();
+        int gapples = context.inventory().getItemCountInventory(Item.getId(Items.ENCHANTED_GOLDEN_APPLE));
+        if (gapples < gapplesBefore && player.hasEffect(MobEffects.RESISTANCE)) {
+            releaseKeys(context);
+            setPhase(Phase.ATTACKING);
+            return;
+        }
+        if (phaseTicks > EAT_TIMEOUT_TICKS || notEatingTicks > EAT_START_TICKS) {
+            replan(context, "the gapple never went down");
+            return;
+        }
+        if (gapples == 0) {
+            giveUp(context, "no enchanted golden apple left to take the blast on");
+            return;
+        }
+        if (player.hasContainerOpen()) {
+            player.closeContainer();
+            return;
+        }
+        if (!player.isUsingItem()) {
+            int slot = context.inventory().putItemHotbar(Item.getId(Items.ENCHANTED_GOLDEN_APPLE));
+            if (slot == -1 || slot >= 9) {
+                notEatingTicks++;
+                return; // not on the hotbar yet
+            }
+            player.getInventory().setSelectedSlot(slot);
+            if (context.eating().clientLoaded()) {
+                notEatingTicks++;
+            }
+        } else {
+            notEatingTicks = 0;
+        }
+        // nothing in view to right-click instead of eating
+        NetherHighwayBuilderBehavior.suppressHitResult = true;
+        context.eating().holdUseToEat(Items.ENCHANTED_GOLDEN_APPLE);
+    }
+
     private void attacking(HighwayContext context) {
         IPlayerContext ctx = context.playerContext();
         if (phaseTicks > ATTACK_TIMEOUT_TICKS) {
             replan(context, "the hit never landed");
             return;
         }
+        if (plan.tank()) {
+            if (needsGapple(ctx.player()) && !ctx.player().hasEffect(MobEffects.RESISTANCE)) {
+                startEating(context); // it ran out before we got the hit in
+                return;
+            }
+            if (ctx.player().getHealth() < plannedHealth - TANK_HEALTH_SLACK) {
+                replan(context, "something else hurt us since the plan was made");
+                return;
+            }
+        }
         // checked every tick: anything that shoves us out from behind the cover makes this a different hit
-        float exposure = exposureHere(ctx);
-        if (exposure > MAX_EXPOSURE) {
+        float exposure = exposureHere(context);
+        if (exposure > plan.maxExposure()) {
             replan(context, String.format("%.0f%% of us came into view of the blast", exposure * 100));
             return;
         }
         Vec3 eye = ctx.player().getEyePosition();
-        if (!clearShot(ctx.world(), eye, plan.aim())) {
+        if (!planner(context).clearShot(ctx.world(), eye, plan.aim())) {
             replan(context, "something's in the way of the hit");
             return;
         }
@@ -250,131 +420,54 @@ public class CrystalRemoval extends State {
     }
 
     /**
-     * The nearest spot in reach of the crystal that's at least {@link #MIN_BLAST_DISTANCE} from it and where no more
-     * than {@link #MAX_COVERS} blocks at our feet bring the blast's view of us down to {@link #MAX_EXPOSURE}, each
-     * cover the one that hides the most of what's left. Fewer covers win a near tie.
+     * What taking the blast costs us: the armour we wear and its Protection and Blast Protection, the server's
+     * difficulty, the Resistance and absorption the gapple gives (or what we have, when it's still fresh), and the
+     * health the budget has to leave.
      */
-    private Plan plan(HighwayContext context) {
+    private static CrystalBreakPlanner.Tank tank(HighwayContext context) {
+        Player player = context.playerContext().player();
+        float protection = 0;
+        for (EquipmentSlot slot : new EquipmentSlot[]{EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET}) {
+            ItemEnchantments enchantments = player.getItemBySlot(slot).getEnchantments();
+            for (Holder<Enchantment> enchant : enchantments.keySet()) {
+                if (enchant.is(Enchantments.PROTECTION)) {
+                    protection += enchantments.getLevel(enchant);
+                } else if (enchant.is(Enchantments.BLAST_PROTECTION)) {
+                    protection += 2 * enchantments.getLevel(enchant);
+                }
+            }
+        }
+        boolean eats = needsGapple(player);
+        MobEffectInstance resistance = player.getEffect(MobEffects.RESISTANCE);
+        int amplifier = Math.max(eats ? 0 : -1, resistance != null ? resistance.getAmplifier() : -1);
+        float absorption = eats ? Math.max(player.getAbsorptionAmount(), GAPPLE_ABSORPTION) : player.getAbsorptionAmount();
+        return new CrystalBreakPlanner.Tank(context.playerContext().world().getDifficulty(), player.getArmorValue(),
+                (float) player.getAttributeValue(Attributes.ARMOR_TOUGHNESS), protection, amplifier,
+                (float) player.getAttributeValue(Attributes.EXPLOSION_KNOCKBACK_RESISTANCE),
+                player.getHealth() + absorption - TANK_KEEP_HEALTH);
+    }
+
+    /** The nearest spot in reach of the crystal where a little cover keeps the blast off, see {@link CrystalBreakPlanner}. */
+    private CrystalBreakPlanner.Plan plan(HighwayContext context) {
+        return planner(context).plan(context.playerContext().player().position(), badStands);
+    }
+
+    private CrystalBreakPlanner planner(HighwayContext context) {
         IPlayerContext ctx = context.playerContext();
-        Player player = ctx.player();
-        BlockGetter world = ctx.world();
-        Vec3 blast = crystal.position();
-        BlockPos base = crystal.blockPosition();
-        BlockState coverState = Blocks.NETHERRACK.defaultBlockState();
-        double eyeHeight = player.getEyeHeight(Pose.STANDING);
-        Plan best = null;
-        double bestScore = Double.MAX_VALUE;
-        for (int dy = STAND_DY_MIN; dy <= STAND_DY_MAX; dy++) {
-            for (int dx = -STAND_RADIUS; dx <= STAND_RADIUS; dx++) {
-                for (int dz = -STAND_RADIUS; dz <= STAND_RADIUS; dz++) {
-                    BetterBlockPos stand = new BetterBlockPos(base.getX() + dx, base.getY() + dy, base.getZ() + dz);
-                    Vec3 feet = Vec3.atBottomCenterOf(stand);
-                    if (badStands.contains(stand) || feet.distanceTo(blast) < MIN_BLAST_DISTANCE || !standable(ctx, stand)) {
-                        continue;
-                    }
-                    Vec3 eye = feet.add(0, eyeHeight, 0);
-                    AABB box = player.getDimensions(Pose.STANDING).makeBoundingBox(feet);
-                    Set<BlockPos> covers = new LinkedHashSet<>();
-                    Vec3 aim = aimFrom(world, eye);
-                    if (aim == null) {
-                        continue; // out of reach, or nothing to hit it past
-                    }
-                    float exposure = ExplosionExposure.seenPercent(world, blast, box);
-                    while (exposure > MAX_EXPOSURE && covers.size() < MAX_COVERS) {
-                        BlockPos bestCover = null;
-                        float bestExposure = exposure;
-                        for (BlockPos cover : coverCandidates(context, stand)) {
-                            if (!covers.add(cover)) {
-                                continue;
-                            }
-                            BlockGetter covered = ExplosionExposure.withBlocks(world, covers, coverState);
-                            if (clearShot(covered, eye, aim)) {
-                                float coveredExposure = ExplosionExposure.seenPercent(covered, blast, box);
-                                if (coveredExposure < bestExposure) {
-                                    bestExposure = coveredExposure;
-                                    bestCover = cover;
-                                }
-                            }
-                            covers.remove(cover);
-                        }
-                        if (bestCover == null) {
-                            break;
-                        }
-                        covers.add(bestCover);
-                        exposure = bestExposure;
-                    }
-                    if (exposure > MAX_EXPOSURE) {
-                        continue;
-                    }
-                    double score = feet.distanceTo(player.position()) + 2 * covers.size();
-                    if (score < bestScore) {
-                        bestScore = score;
-                        best = new Plan(stand, List.copyOf(covers), aim, exposure);
-                    }
-                }
-            }
-        }
-        return best;
-    }
-
-    /** Cells at our feet a block or two out towards the crystal, that a block can go in and nothing stands in. */
-    private List<BlockPos> coverCandidates(HighwayContext context, BetterBlockPos stand) {
-        IPlayerContext ctx = context.playerContext();
-        Vec3 blast = crystal.position();
-        double standDist = horizontalDistance(Vec3.atBottomCenterOf(stand), blast);
-        List<BlockPos> candidates = new ArrayList<>();
-        for (int dx = -COVER_RANGE; dx <= COVER_RANGE; dx++) {
-            for (int dz = -COVER_RANGE; dz <= COVER_RANGE; dz++) {
-                BlockPos cell = new BlockPos(stand.x + dx, stand.y, stand.z + dz);
-                if ((dx == 0 && dz == 0) || horizontalDistance(Vec3.atBottomCenterOf(cell), blast) >= standDist) {
-                    continue;
-                }
-                if (!ctx.world().getBlockState(cell).canBeReplaced()
-                        || ctx.world().getBlockState(cell.below()).getCollisionShape(ctx.world(), cell.below()).isEmpty()
-                        || !context.baritone().getBuilderProcess().checkNoEntityCollision(new AABB(cell), ctx.player())) {
-                    continue;
-                }
-                candidates.add(cell);
-            }
-        }
-        return candidates;
-    }
-
-    /** The first of {@link #AIM_HEIGHTS}, then the nearest part of its box, that a hit from {@code eye} reaches the crystal at, or null. */
-    private Vec3 aimFrom(BlockGetter world, Vec3 eye) {
-        for (double height : AIM_HEIGHTS) {
-            Vec3 aim = new Vec3(crystal.getX(), crystal.getBoundingBox().minY + height, crystal.getZ());
-            if (clearShot(world, eye, aim)) {
-                return aim;
-            }
-        }
-        AABB inner = crystal.getBoundingBox().deflate(AIM_INSET);
-        Vec3 nearest = new Vec3(Mth.clamp(eye.x, inner.minX, inner.maxX), Mth.clamp(eye.y, inner.minY, inner.maxY), Mth.clamp(eye.z, inner.minZ, inner.maxZ));
-        return clearShot(world, eye, nearest) ? nearest : null;
-    }
-
-    /** Whether a hit from {@code eye} towards {@code aim} meets the crystal's box within reach, with no block before it. */
-    private boolean clearShot(BlockGetter world, Vec3 eye, Vec3 aim) {
-        Vec3 reach = eye.add(aim.subtract(eye).normalize().scale(ATTACK_REACH));
-        Optional<Vec3> entry = crystal.getBoundingBox().clip(eye, reach);
-        return entry.isPresent() && world.clip(new ClipContext(eye, entry.get(), ClipContext.Block.OUTLINE,
-                ClipContext.Fluid.NONE, CollisionContext.empty())).getType() == HitResult.Type.MISS;
+        return new CrystalBreakPlanner(ctx.world(), crystal.position(), crystal.getBoundingBox(), ctx.player().getDimensions(Pose.STANDING),
+                stand -> standable(ctx, stand),
+                cell -> context.baritone().getBuilderProcess().checkNoEntityCollision(new AABB(cell), ctx.player()),
+                context.inventory().getObsidianCountInventory() > 0);
     }
 
     /** How much of us the blast would see, standing up where we are now, the way it'll be when we hit. */
-    private float exposureHere(IPlayerContext ctx) {
-        AABB box = ctx.player().getDimensions(Pose.STANDING).makeBoundingBox(ctx.player().position());
-        return ExplosionExposure.seenPercent(ctx.world(), crystal.position(), box);
+    private float exposureHere(HighwayContext context) {
+        IPlayerContext ctx = context.playerContext();
+        return planner(context).exposureAt(ctx.world(), ctx.player().position());
     }
 
     private static boolean standable(IPlayerContext ctx, BetterBlockPos pos) {
         return MovementHelper.canWalkOn(ctx, pos.below()) && MovementHelper.canWalkThrough(ctx, pos) && MovementHelper.canWalkThrough(ctx, pos.above());
-    }
-
-    private static double horizontalDistance(Vec3 a, Vec3 b) {
-        double dx = a.x - b.x;
-        double dz = a.z - b.z;
-        return Math.sqrt(dx * dx + dz * dz);
     }
 
     private void setPhase(Phase phase) {
@@ -404,8 +497,13 @@ public class CrystalRemoval extends State {
         context.transitionTo(HighwayState.Nothing);
     }
 
-    private static void releaseKeys(HighwayContext context) {
+    private void releaseKeys(HighwayContext context) {
         context.baritone().getInputOverrideHandler().setInputForceState(Input.SNEAK, false);
         context.baritone().getInputOverrideHandler().setInputForceState(Input.MOVE_FORWARD, false);
+        context.baritone().getInputOverrideHandler().setInputForceState(Input.CLICK_LEFT, false);
+        if (phase == Phase.EATING) {
+            NetherHighwayBuilderBehavior.suppressHitResult = false;
+            context.eating().releaseUseToEat();
+        }
     }
 }

@@ -641,7 +641,9 @@ public class HighwayScanner extends ContextComponent {
                                             renderLockBuilding.unlock();
                                             return HighwayBlockState.Boat;
                                         }
-                                        if (entity instanceof EndCrystal && entity.isAlive() && !ctx.threats().isCrystalIgnored(entity)) {
+                                        // only in the way of a block that has to go in: digging a block out of its box works fine
+                                        if (entity instanceof EndCrystal && entity.isAlive() && !(desiredState.getBlock() instanceof AirBlock)
+                                                && !ctx.threats().isCrystalIgnored(entity)) {
                                             // never moves, so no hole drops it: it has to be broken
                                             crystalLocation = new BlockPos(blockX, blockY, blockZ);
                                             renderLockBuilding.unlock();

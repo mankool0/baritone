@@ -59,6 +59,13 @@ public class Threats extends ContextComponent {
     private final Map<java.util.UUID, WalkVerdict> walkVerdicts = new HashMap<>(); // last walk check answer per mob, see canAttackUs
     private final Map<java.util.UUID, Long> ignoredMobs = new HashMap<>(); // mobs a stalled chase gave up on, to the game time they stay ignored until
     private final Map<java.util.UUID, Long> ignoredCrystals = new HashMap<>(); // end crystals CrystalRemoval gave up on, likewise
+    private final Map<java.util.UUID, CrystalDeferral> deferredCrystals = new HashMap<>(); // see deferCrystal
+    /** How long the builder sits with nothing to do before a deferred crystal is planned for again. */
+    private static final int CRYSTAL_RETRY_IDLE_TICKS = 40;
+    /** The longest a crystal stays deferred, for a builder that never settles. */
+    private static final int CRYSTAL_DEFER_MAX_TICKS = 1200;
+    /** Deferrals in a row, each with work done in between, before a builder that keeps finding work counts as settled anyway. */
+    private static final int CRYSTAL_MAX_DEFERRALS = 5;
     // MobCombat's chase-stall clock, kept here because every engagement starts a new MobCombat, see chaseStalled
     private final Map<java.util.UUID, Double> chaseClosestReach = new HashMap<>();
     private int chaseStallTicks = 0;
@@ -95,6 +102,7 @@ public class Threats extends ContextComponent {
     private void clearIgnoredMobs() {
         ignoredMobs.clear();
         ignoredCrystals.clear();
+        deferredCrystals.clear();
         ghastSightings.clear();
         walkVerdicts.clear();
         engagedGhasts.clear();
@@ -107,10 +115,40 @@ public class Threats extends ContextComponent {
         ignoredCrystals.put(crystal.getUUID(), now + ticks);
     }
 
-    boolean isCrystalIgnored(Entity crystal) {
-        Long until = ignoredCrystals.get(crystal.getUUID());
-        return until != null && until > playerContext.world().getGameTime();
+    /**
+     * Leaves an end crystal out of {@link HighwayScanner#isHighwayCorrect} until the builder has nothing left to do,
+     * for a crystal there's nowhere to break from yet. The scan finds a crystal a few blocks ahead of us, before the
+     * floor around it is down, and the spots to stand on and the cells for cover are on that floor. The builder lays
+     * everything the crystal doesn't block, then goes idle, and that's when planning again can see the finished road.
+     * <p>
+     * Returns false and holds nothing back when the builder has placed and broken nothing since this crystal was last
+     * deferred, or it has been deferred {@link #CRYSTAL_MAX_DEFERRALS} times: the blocks around it are as finished as
+     * they get, so another plan would find the same nothing.
+     */
+    public boolean deferCrystal(Entity crystal) {
+        long work = ctx.diagnostics().builderWork();
+        CrystalDeferral last = deferredCrystals.get(crystal.getUUID());
+        if (last != null && (last.work() == work || last.times() >= CRYSTAL_MAX_DEFERRALS)) {
+            deferredCrystals.remove(crystal.getUUID());
+            return false;
+        }
+        long until = playerContext.world().getGameTime() + CRYSTAL_DEFER_MAX_TICKS;
+        deferredCrystals.put(crystal.getUUID(), new CrystalDeferral(work, until, last == null ? 1 : last.times() + 1));
+        return true;
     }
+
+    boolean isCrystalIgnored(Entity crystal) {
+        long now = playerContext.world().getGameTime();
+        Long until = ignoredCrystals.get(crystal.getUUID());
+        if (until != null && until > now) {
+            return true;
+        }
+        CrystalDeferral deferral = deferredCrystals.get(crystal.getUUID());
+        return deferral != null && deferral.until() > now && ctx.diagnostics().builderIdleTicks() < CRYSTAL_RETRY_IDLE_TICKS;
+    }
+
+    /** A crystal held back by {@link #deferCrystal}: the builder's work count then, and the latest it's held back until. */
+    private record CrystalDeferral(long work, long until, int times) {}
 
     /**
      * Counts a tick of chasing {@code mob} from {@code reach} away and returns true, restarting the
