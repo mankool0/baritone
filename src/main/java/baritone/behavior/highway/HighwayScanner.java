@@ -313,6 +313,9 @@ public class HighwayScanner extends ContextComponent {
         if (layout().schematic() == null) {
             return "Front: no schematic";
         }
+        if (playerContext.player() == null) {
+            return "Front: not in game"; // nhwstatus can be asked between a disconnect and the rejoin
+        }
         int dist = getHighwayFrontDistance();
         String corridor = String.format("cross-section %d wide, we're in column %.0f, watching columns %d-%d",
                 frontBlockerCrossLen, frontBlockerPlayerColumn, frontBlockerLaneLo, frontBlockerLaneHi);

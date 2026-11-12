@@ -17,6 +17,7 @@
 
 package baritone.behavior.highway;
 
+import baritone.api.utils.Helper;
 import baritone.behavior.highway.enums.HighwayState;
 import baritone.process.BuilderProcess;
 import baritone.utils.PendingPlaces;
@@ -66,6 +67,18 @@ public class HighwayDiagnostics extends ContextComponent {
     private int pavingPlacedBlocks;
     private Vec3 pavingLastPos; // null once a tick wasn't paving, so the walk back from elsewhere isn't counted
 
+    // blocks placed or broken in BuildingHighway since the build started; only ever goes up
+    private long builderWork;
+    private long brokenSeen = -1;
+    // ticks in a row the builder has been running, not pathing, with nothing placed or broken
+    private int builderIdleTicks;
+    /**
+     * How long the builder may sit doing nothing before a line says what pins it. A builder parked
+     * at a goal it has nothing in reach from logs nothing of its own, and a stuck check can be set
+     * to minutes, so without this a stall says nothing until someone asks nhwstatus.
+     */
+    private static final int BUILDER_IDLE_LOG_TICKS = 200;
+
     HighwayDiagnostics(HighwayContext ctx) {
         super(ctx);
     }
@@ -74,6 +87,20 @@ public class HighwayDiagnostics extends ContextComponent {
     @Override
     void onBuildStart() {
         resetStateDwell();
+        builderIdleTicks = 0;
+    }
+
+    /**
+     * Blocks placed or broken in BuildingHighway since the build started. It only goes up, so two
+     * readings that are the same mean the builder got nothing done in between.
+     */
+    public long builderWork() {
+        return builderWork;
+    }
+
+    /** Ticks in a row the builder has been running in BuildingHighway, not pathing, with nothing placed or broken. */
+    public int builderIdleTicks() {
+        return builderIdleTicks;
     }
 
     void noteStateTick(HighwayState state) {
@@ -149,6 +176,7 @@ public class HighwayDiagnostics extends ContextComponent {
             printerTickNanos += now - printerLastTickNanos;
             printerTickGaps++;
         }
+        noteBuilderWork(report);
         if (ctx.currentState().getState() == HighwayState.BuildingHighway) {
             Vec3 pos = playerContext.player().position();
             if (continuous && pavingLastPos != null) {
@@ -182,6 +210,28 @@ public class HighwayDiagnostics extends ContextComponent {
             }
         }
         printerTally.merge(report != null ? report.idleReason() : printerNotTickingReason(), 1, Integer::sum);
+    }
+
+    /** Adds this tick's places and breaks to {@link #builderWork}, and says so once the builder has sat idle too long. */
+    private void noteBuilderWork(BuilderProcess.PrinterReport report) {
+        long broken = baritone.getInputOverrideHandler().getBlockBreakHelper().broken().count();
+        long work = 0;
+        BuilderProcess builder = baritone.getBuilderProcess();
+        boolean building = ctx.currentState().getState() == HighwayState.BuildingHighway;
+        if (building) {
+            work = (report != null ? report.placed() : 0) + (brokenSeen >= 0 ? broken - brokenSeen : 0);
+            builderWork += work;
+        }
+        brokenSeen = broken;
+        if (!building || work > 0 || !builder.isActive() || builder.isPaused() || baritone.getPathingBehavior().isPathing()) {
+            builderIdleTicks = 0;
+            return;
+        }
+        if (++builderIdleTicks == BUILDER_IDLE_LOG_TICKS) {
+            Helper.HELPER.logDiagnostic("Builder idle for " + BUILDER_IDLE_LOG_TICKS / 20 + " s at " + playerContext.playerFeet().toShortString()
+                    + ", nothing placed or broken and no path. " + ctx.scanner().frontDistanceDiagnostic()
+                    + "; printer: " + (report != null && report.idleReason() != null ? report.idleReason() : printerNotTickingReason()));
+        }
     }
 
     private String printerNotTickingReason() {
