@@ -27,6 +27,7 @@ import baritone.api.utils.IPlayerController;
 import baritone.api.utils.RayTraceUtils;
 import baritone.api.utils.Rotation;
 import baritone.pathing.movement.MovementHelper;
+import baritone.utils.accessor.IClientLevel;
 import baritone.utils.accessor.IPlayerControllerMP;
 import net.minecraft.client.multiplayer.MultiPlayerGameMode;
 import net.minecraft.core.BlockPos;
@@ -89,6 +90,18 @@ public final class DoubleMine implements AbstractGameEventListener {
     private final BrokenBlocks broken;
     private Dig regular;
     private Dig parked;
+    /**
+     * The regular dig last finished with a predicted stop, until the server answers that stop. A
+     * stop the server judges short of the threshold (a server or client stall moves its clock
+     * against ours) breaks nothing, and the ack puts the block back. When the delayed slot was free
+     * the server parked the block there instead, to break it at full break time with whatever is
+     * in hand then. Forgotten at the stop, it would have been left to whatever the bot holds next.
+     */
+    private Dig finishing;
+    private int finishingSequence;
+    private long finishingSent;
+    // the delayed slot was free as far as we knew, so a refused stop parked the block
+    private boolean finishingParks;
     private boolean sending;
     private boolean sentThisTick;
 
@@ -108,6 +121,15 @@ public final class DoubleMine implements AbstractGameEventListener {
     public BlockPos tick(List<Tuple<BetterBlockPos, Rotation>> candidates) {
         long now = ctx.world().getGameTime();
         sentThisTick = false;
+        if (finishing != null && ((IClientLevel) ctx.world()).getLastAckedSequence() >= finishingSequence) {
+            if (!gone(finishing) && finishingParks) {
+                // a park sent after the refused stop found the delayed slot taken and went nowhere
+                parked = finishing;
+            }
+            finishing = null;
+        } else if (finishing != null && now > finishingSent + PARK_TIMEOUT_TICKS) {
+            finishing = null; // never answered: lost on the way
+        }
         if (parked != null && gone(parked)) {
             broken.add(parked.pos, parked.state);
             parked = null;
@@ -119,9 +141,12 @@ public final class DoubleMine implements AbstractGameEventListener {
             regular = null;
         }
         if (regular != null && now >= regular.start + ServerDigTarget.ticksToReach(progress(regular), IPlayerController.SERVER_FINISH_DIG_PROGRESS) + FINISH_MARGIN_TICKS) {
-            send(regular, ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, true);
+            finishingParks = parked == null;
+            finishingSequence = send(regular, ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, true);
+            finishingSent = now;
             // predicted gone, so a refused break that the ack restores doesn't count
             broken.add(regular.pos, regular.state);
+            finishing = regular;
             regular = null;
         }
         // start one, park it and start another: at most two passes
@@ -145,11 +170,11 @@ public final class DoubleMine implements AbstractGameEventListener {
         }
         show(REGULAR_BREAKER_ID, regular, now, IPlayerController.SERVER_FINISH_DIG_PROGRESS, FINISH_MARGIN_TICKS);
         show(PARKED_BREAKER_ID, parked, now, 1.0f, 0);
-        Dig current = regular != null ? regular : parked;
+        Dig current = regular != null ? regular : parked != null ? parked : finishing;
         if (current == null) {
             return null;
         }
-        // both slots finish with whatever is in hand at that moment
+        // both slots finish with whatever is in hand at that moment, and an unanswered stop may have parked its block
         MovementHelper.switchToBestToolFor(ctx, current.state);
         return current.pos;
     }
@@ -169,12 +194,14 @@ public final class DoubleMine implements AbstractGameEventListener {
     }
 
     public boolean isMining(BlockPos pos) {
-        return regular != null && regular.pos.equals(pos) || parked != null && parked.pos.equals(pos);
+        return regular != null && regular.pos.equals(pos) || parked != null && parked.pos.equals(pos)
+                || finishing != null && finishing.pos.equals(pos);
     }
 
     public void reset() {
         regular = null;
         parked = null;
+        finishing = null;
         show(REGULAR_BREAKER_ID, null, 0, 0, 0);
         show(PARKED_BREAKER_ID, null, 0, 0, 0);
     }
@@ -234,24 +261,28 @@ public final class DoubleMine implements AbstractGameEventListener {
     /**
      * @param predictBreak remove the block client-side under the packet's sequence, the way a
      *                     vanilla finished dig does, so a refused break is restored by the ack
+     * @return the packet's sequence, which the server's ack of it covers
      */
-    private void send(Dig dig, ServerboundPlayerActionPacket.Action action, boolean predictBreak) {
+    private int send(Dig dig, ServerboundPlayerActionPacket.Action action, boolean predictBreak) {
         MovementHelper.switchToBestToolFor(ctx, dig.state);
         // the server judges the dig with the tool it believes is held when the packet arrives
         ctx.playerController().syncHeldItem();
         MultiPlayerGameMode gameMode = ctx.minecraft().gameMode;
+        int[] sent = new int[1];
         sending = true;
         try {
             ((IPlayerControllerMP) gameMode).callStartPrediction(ctx.minecraft().level, sequence -> {
                 if (predictBreak) {
                     gameMode.destroyBlock(dig.pos);
                 }
+                sent[0] = sequence;
                 return new ServerboundPlayerActionPacket(action, dig.pos, dig.face, sequence);
             });
         } finally {
             sending = false;
         }
         sentThisTick = true;
+        return sent[0];
     }
 
     /**

@@ -143,6 +143,9 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private boolean paused;
     private int layer;
     private int numRepeats;
+    // the prediction sequence the finish is held for, and for how many ticks so far
+    private int doneWaitSequence = -1;
+    private int doneWaitTicks;
     private List<BlockState> approxPlaceable;
     /**
      * The block last placed from each hotbar slot. When a slot runs dry, the server puts the next
@@ -183,6 +186,12 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
      * revert there is outside the schematic and nothing looks at it again.
      */
     private static final int COMPLETED_WATCH_TICKS = 40;
+
+    /**
+     * How long the build may stay unfinished waiting on the server's answer to our last block
+     * prediction. Every action is acked, but one dropped on its way never is.
+     */
+    private static final int DONE_ANSWER_WAIT_TICKS = 40;
 
     /** Where {@link #reachableTopFace} aims across a top face, along each axis. */
     private static final double[] TOP_FACE_POINTS = {0.15, 0.5, 0.85};
@@ -1984,8 +1993,13 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             }
             Vec3i repeat = Baritone.settings().buildRepeat.value;
             int max = Baritone.settings().buildRepeatCount.value;
+            boolean finished = repeat.equals(new Vec3i(0, 0, 0)) || (max != -1 && numRepeats + 1 >= max);
+            if (finished && awaitingServerAnswer()) {
+                // what looks built may still be our own prediction: a refused break or place comes back with the ack
+                return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
+            }
             numRepeats++;
-            if (repeat.equals(new Vec3i(0, 0, 0)) || (max != -1 && numRepeats >= max)) {
+            if (finished) {
                 logDirect("Done building");
                 if (Baritone.settings().notificationOnBuildFinished.value) {
                     logNotification("Done building", false);
@@ -2437,6 +2451,25 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             fullRecalc(bcc);
         }
         return !incorrectPositions.isEmpty();
+    }
+
+    /**
+     * Whether the server is still to answer a block change we predicted. Until its ack the world
+     * shows the prediction, a dig's finishing stop as air, and a stop the server judged early is
+     * put back by that ack. The server may have parked that block in its delayed slot to break with
+     * whatever is in hand at full break time, so stopping on the prediction leaves it standing.
+     */
+    private boolean awaitingServerAnswer() {
+        IClientLevel level = (IClientLevel) ctx.world();
+        int sent = level.getPredictionHandler().currentSequence();
+        if (level.getLastAckedSequence() >= sent) {
+            return false;
+        }
+        if (sent != doneWaitSequence) {
+            doneWaitSequence = sent;
+            doneWaitTicks = 0;
+        }
+        return doneWaitTicks++ < DONE_ANSWER_WAIT_TICKS;
     }
 
     private void watchCompleted(BuilderCalculationContext bcc, BetterBlockPos pos, BlockState current) {
