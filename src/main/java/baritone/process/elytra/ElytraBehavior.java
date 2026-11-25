@@ -34,6 +34,8 @@ import baritone.utils.accessor.IFireworkRocketEntity;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import it.unimi.dsi.fastutil.floats.FloatArrayList;
 import it.unimi.dsi.fastutil.floats.FloatIterator;
+import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.NonNullList;
@@ -51,12 +53,15 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.Fireworks;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.AirBlock;
+import net.minecraft.world.level.block.BaseFireBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkSource;
 import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
@@ -68,7 +73,10 @@ import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.LockSupport;
+import java.util.function.BiPredicate;
+import java.util.function.IntFunction;
 import java.util.function.IntPredicate;
+import java.util.function.Predicate;
 import java.util.function.ToDoubleFunction;
 import java.util.function.UnaryOperator;
 
@@ -121,6 +129,49 @@ public final class ElytraBehavior implements Helper {
      * of the newest
      */
     private final ArrayDeque<Vec3> glideHistory = new ArrayDeque<>();
+    // the glide's steps over the last second, oldest first, for the line when it catches fire: the game says so a few
+    // ticks after the move that did it
+    private final ArrayDeque<GlideMove> recentMoves = new ArrayDeque<>();
+    private static final int RECENT_MOVES = 100;
+    // how far a step keeps the box from lava and fire, every way: the server sets it alight within 0.3 of it. paths keep
+    // a block off them (elytraKeepOffLava), so only a step's corners and a box already nearer come this close
+    private static final double BURN_CLEARANCE = 0.4;
+    // this tick's step slid along what was in its way, off the line to its target
+    private boolean stepSlid;
+
+    private static final class GlideMove {
+        final Vec3 feet;
+        final String kind;
+        final int tick;
+        final double length;
+
+        GlideMove(final Vec3 feet, final String kind, final int tick, final double length) {
+            this.feet = feet;
+            this.kind = kind;
+            this.tick = tick;
+            this.length = length;
+        }
+    }
+
+    // the tick the server last moved the player back, and how the glide's speed comes back after it: from RAMP_FROM of
+    // it to all of it over RAMP_TICKS
+    private int rampFromTick = Integer.MIN_VALUE / 2;
+    // the sink the server pulls it down by, as a level glide's velocity, from a standstill at each setback
+    private Vec3 pullVelocity = Vec3.ZERO;
+    private static final int RAMP_TICKS = 20;
+    private static final double RAMP_FROM = 0.25;
+
+    // the nearest the glide has come to the goal, and when: no closer for STUCK_TICKS, and a line says what holds it
+    private double closestToGoal = Double.MAX_VALUE;
+    private int closestToGoalTick;
+    private int stuckSaidTick = Integer.MIN_VALUE / 2;
+    private static final int STUCK_TICKS = 300;
+    // no closer for ElytraProcess#askAgainAfterTicks, and getting nowhere besides: the flight is asked for again from
+    // here, once. a glide held on a path whose start goes nowhere flies on at once when #elytra is asked for again,
+    // while the flight's own re-paths, which rejoin the path it has, find the same path every time
+    private static final int STUCK_MOVES = 20;
+    private static final double STUCK_NET = 1.0;
+    private boolean restartAsked;
     private int glideHistoryTick;
 
     /**
@@ -129,6 +180,8 @@ public final class ElytraBehavior implements Helper {
      */
     private Vec3 glideDetour;
     private int nextGlideDetourSearch;
+    // when to look again for a way out of blocks the pathfinder has as solid that the box is partly in
+    private int nextEscapeSearch;
 
     /**
      * The first path point the fallback of a glide moved by steps last headed for, the ones before it found behind the
@@ -136,6 +189,29 @@ public final class ElytraBehavior implements Helper {
      * the box at it and ahead of the box one step on from it, and the fallback went back and forth between the two
      */
     private int glideFallbackFrom = -1;
+
+    /**
+     * The target in a straight line a glide moved by steps last headed for and how far along the path it is
+     * ({@link Aim#progress}), and the furthest along the path a step has got the box to one; -1 for none. No target is
+     * one before either. Near a wall the furthest point in a straight line changes with each step, and from the
+     * furthest spot along a stretch that the box can get to the only one left is a step back: without these the glide
+     * goes back and forth between two spots indefinitely, and looks to be flying at the rock.
+     */
+    private Vec3 glideTargetAt;
+    private double glideTargetProgress = -1;
+    private double glideReachedProgress = -1;
+
+    /**
+     * A target in a straight line: {@code at}, the feet's spot, and how far along the path it is, the index of a point,
+     * or for a spot between two points the second's less the share of the way back to the first
+     */
+    record Aim(Vec3 at, double progress) {}
+
+    /**
+     * Whether this tick's step was held back at the edge of the chunks the client has, and the tick that was last said
+     */
+    private boolean waitingForChunks;
+    private int chunkWaitSaidTick = Integer.MIN_VALUE / 2;
 
     /**
      * The most recent minimum number of firework boost ticks, equivalent to {@code 10 * (1 + Flight)}
@@ -167,6 +243,12 @@ public final class ElytraBehavior implements Helper {
     private static final double LANDING_HOVER = 0.5;
     // a glide moved by steps that has gone less than GLIDE_STALL_DISTANCE in GLIDE_STALL_TICKS looks for a detour
     private static final int GLIDE_STALL_TICKS = 20;
+    // the path points ahead checked against the game's blocks each tick, and how long before a chunk packed again for
+    // it is checked again
+    private static final int PATH_CHECK_POINTS = 20;
+    private static final int REPACK_AGAIN_TICKS = 100;
+    private final Long2IntOpenHashMap repackAgainTick = new Long2IntOpenHashMap();
+    private final LongOpenHashSet repackSaid = new LongOpenHashSet();
     private static final double GLIDE_STALL_DISTANCE = 0.5;
     // with nothing ahead in a straight line, a glide moved by steps heads for one of this many points from the nearest
     private static final int GLIDE_FALLBACK_POINTS = 3;
@@ -174,6 +256,8 @@ public final class ElytraBehavior implements Helper {
     // first, from which one of the next GLIDE_DETOUR_POINTS points is in a straight line
     private static final double GLIDE_DETOUR_RANGE = 2.5;
     private static final double GLIDE_DETOUR_GRID = 0.5;
+    // out of lava and the block round it from a pool under a lavafall takes further than a detour goes
+    private static final List<Vec3> LAVA_ESCAPES = offsetsWithin(4.0);
     private static final int GLIDE_DETOUR_POINTS = 5;
     private static final double GLIDE_DETOUR_REACHED = 0.05;
     // a glide moved by steps is at a spot less than this squared distance from it, and a step there is a step of nothing
@@ -181,6 +265,23 @@ public final class ElytraBehavior implements Helper {
     private static final List<Vec3> GLIDE_DETOURS = glideDetours();
     // a path from a player in lava starts at most this far straight up, out of it (lavaStartY)
     static final int LAVA_START_RISE = 64;
+    // waiting at the edge of the chunks the client has is said at most this often
+    private static final int CHUNK_WAIT_SAY_TICKS = 200;
+    // a path search that found nothing starts again from the player (feet, over the head, higher, back along the path,
+    // bigger cubes), or from the end of the path (its end, higher, further back, bigger cubes)
+    private static final int PLAYER_STARTS = 5;
+    private static final int ONWARD_STARTS = 4;
+    private static final int HEAD_RISE = 2;
+    private static final int HIGHER_RISE = 5;
+    private static final int PASSED_POINTS = 3;
+    private static final int ONWARD_RISE = 3;
+    private static final int ONWARD_BACK_POINTS = 8;
+    // the end of a path this close to the goal (across, for a goal with no height) is as close as it gets when the way
+    // on can't be found
+    private static final int CLOSE_TO_GOAL = 16;
+    private static final int CLOSE_TO_GOAL_ACROSS = 32;
+    // giving up on the way on waits for the player to be this close to the end of the path it has
+    private static final int NEAR_PATH_END = 32;
 
     private final ExecutorService solverExecutor;
     private Future<Solution> solver;
@@ -221,6 +322,31 @@ public final class ElytraBehavior implements Helper {
         }
     }
 
+    /**
+     * Where a path search starts: a block, whether it goes through 4 block cubes of air only, and for the way on from
+     * the end of a path, the last point of the path that goes before it
+     */
+    private static final class Start {
+        final BlockPos pos;
+        final boolean atLeastX4;
+        final int after;
+
+        Start(BlockPos pos, boolean atLeastX4, int after) {
+            this.pos = pos;
+            this.atLeastX4 = atLeastX4;
+            this.after = after;
+        }
+    }
+
+    /**
+     * What a path search was for: the flight's first path, a path again from the player, or the way on from the end
+     */
+    private enum Search {
+        FIRST,
+        AGAIN,
+        ONWARD
+    }
+
     public final class PathManager {
 
         public NetherPath path;
@@ -229,7 +355,29 @@ public final class ElytraBehavior implements Helper {
 
         private int maxPlayerNear;
         private int ticksNearUnchanged;
+        // ticks the nearest point has been in a block, and how many before the path is asked for again from here
+        private int inWallTicks;
+        private static final int IN_WALL_TICKS = 20;
         private int playerNear;
+
+        // searches that found nothing, from the player and on from the end of the path, and when to ask again
+        private final PathRetry fromPlayer = new PathRetry(PLAYER_STARTS);
+        private final PathRetry onward = new PathRetry(ONWARD_STARTS);
+        // the first path found nothing, and is asked for again from other starts
+        private boolean firstFailed;
+        // the way on from the end ran out of air at the edge of the chunks the game has sent, where the seed has rock (a
+        // dug tunnel): asked again once more chunks are packed, besides the retries' own times. along a highway tunnel
+        // that's most searches, and each new chunk ahead lets the next one through, so a 2 s wait after every failure
+        // leaves the end of the path that far behind the chunks that have come
+        private boolean onwardWaitsForChunks;
+        private int onwardFailedTick;
+        // npfContext.chunksPacked() when the last onward search was asked for, and whether that was because more had
+        // come, ahead of its turn
+        private int onwardChunksPacked;
+        private boolean onwardForChunks;
+        // said once a flight: along a tunnel it would be every other search
+        private boolean saidChunkEdge;
+        private static final int CHUNK_RETRY_TICKS = 10;
 
         public PathManager() {
             // lol imagine initializing fields normally
@@ -239,10 +387,12 @@ public final class ElytraBehavior implements Helper {
         public void tick() {
             // Recalculate closest path node
             this.updatePlayerNear();
+            ElytraBehavior.this.checkPathAhead();
             final int prevMaxNear = this.maxPlayerNear;
             this.maxPlayerNear = Math.max(this.maxPlayerNear, this.playerNear);
 
-            if (this.maxPlayerNear == prevMaxNear && ctx.player().isFallFlying()) {
+            // held at the edge of the chunks the client has isn't getting nowhere: a path again goes the same way
+            if (this.maxPlayerNear == prevMaxNear && ctx.player().isFallFlying() && !ElytraBehavior.this.waitingForChunks) {
                 this.ticksNearUnchanged++;
             } else {
                 this.ticksNearUnchanged = 0;
@@ -263,7 +413,19 @@ public final class ElytraBehavior implements Helper {
         }
 
         public CompletableFuture<Void> pathToDestination() {
-            return this.pathToDestination(this.pathStart());
+            return this.pathToDestination(this.playerStarts()[0], 0);
+        }
+
+        /**
+         * With no path yet because the first search found nothing: the next start, when its turn has come
+         */
+        void retryFirst() {
+            if (!this.firstFailed || this.recalculating || !this.fromPlayer.mayAsk(ElytraBehavior.this.gameTick())) {
+                return;
+            }
+            final Start[] starts = this.playerStarts();
+            final int kind = this.fromPlayer.kind(k -> starts[k] != null);
+            this.pathToDestination(starts[kind], kind);
         }
 
         /**
@@ -285,7 +447,12 @@ public final class ElytraBehavior implements Helper {
         }
 
         public CompletableFuture<Void> pathToDestination(final BlockPos from) {
+            return this.pathToDestination(new Start(from, false, -1), 0);
+        }
+
+        private CompletableFuture<Void> pathToDestination(final Start from, final int kind) {
             final long start = System.nanoTime();
+            this.recalculating = true;
             return this.path0(from, destinationFixed(), UnaryOperator.identity())
                     .thenRun(() -> {
                         final double distance = this.path.get(0).distanceTo(this.path.get(this.path.size() - 1));
@@ -295,17 +462,7 @@ public final class ElytraBehavior implements Helper {
                             logVerbose(String.format("Computed segment (Next %.1f blocks in %.4f seconds)", distance, (System.nanoTime() - start) / 1e9d));
                         }
                     })
-                    .whenComplete((result, ex) -> {
-                        this.recalculating = false;
-                        if (ex != null) {
-                            final Throwable cause = ex.getCause();
-                            if (cause instanceof PathCalculationException) {
-                                logDirect("Failed to compute path to destination");
-                            } else {
-                                logUnhandledException(cause);
-                            }
-                        }
-                    });
+                    .whenComplete((result, ex) -> this.searched(Search.FIRST, from, kind, ex));
         }
 
         public CompletableFuture<Void> pathRecalcSegment(final OptionalInt upToIncl) {
@@ -316,19 +473,13 @@ public final class ElytraBehavior implements Helper {
             this.recalculating = true;
             final List<BetterBlockPos> after = upToIncl.isPresent() ? this.path.subList(upToIncl.getAsInt() + 1, this.path.size()) : Collections.emptyList();
             final boolean complete = this.completePath;
+            // the same start again finds the same nothing
+            final Start[] starts = this.playerStarts();
+            final int kind = this.fromPlayer.kind(k -> starts[k] != null);
+            final Start from = starts[kind];
 
-            return this.path0(this.pathStart(), upToIncl.isPresent() ? fixDestination(this.path.get(upToIncl.getAsInt())) : destinationFixed(), segment -> segment.append(after.stream(), complete || (segment.isFinished() && !upToIncl.isPresent())))
-                    .whenComplete((result, ex) -> {
-                        this.recalculating = false;
-                        if (ex != null) {
-                            final Throwable cause = ex.getCause();
-                            if (cause instanceof PathCalculationException) {
-                                logDirect("Failed to recompute segment");
-                            } else {
-                                logUnhandledException(cause);
-                            }
-                        }
-                    });
+            return this.path0(from, upToIncl.isPresent() ? fixDestination(this.path.get(upToIncl.getAsInt())) : destinationFixed(), segment -> segment.append(after.stream(), complete || (segment.isFinished() && !upToIncl.isPresent())))
+                    .whenComplete((result, ex) -> this.searched(Search.AGAIN, from, kind, ex));
         }
 
         public void pathNextSegment(final int afterIncl) {
@@ -337,11 +488,14 @@ public final class ElytraBehavior implements Helper {
             }
 
             this.recalculating = true;
-            final List<BetterBlockPos> before = this.path.subList(0, afterIncl + 1);
+            this.onwardChunksPacked = npfContext.chunksPacked();
+            final Start[] starts = this.onwardStarts(afterIncl);
+            final int kind = this.onward.kind(k -> starts[k] != null);
+            final Start from = starts[kind];
+            final List<BetterBlockPos> before = this.path.subList(0, from.after + 1);
             final long start = System.nanoTime();
-            final BetterBlockPos pathStart = this.path.get(afterIncl);
 
-            this.path0(pathStart, destinationFixed(), segment -> segment.prepend(before.stream()))
+            this.path0(from, destinationFixed(), segment -> segment.prepend(before.stream()))
                     .thenRun(() -> {
                         final int recompute = this.path.size() - before.size() - 1;
                         final double distance = recompute > 0 ? this.path.get(0).distanceTo(this.path.get(recompute)) : 0;
@@ -352,21 +506,145 @@ public final class ElytraBehavior implements Helper {
                             logVerbose(String.format("Computed segment (Next %.1f blocks in %.4f seconds)", distance, (System.nanoTime() - start) / 1e9d));
                         }
                     })
-                    .whenComplete((result, ex) -> {
-                        this.recalculating = false;
-                        if (ex != null) {
-                            final Throwable cause = ex.getCause();
-                            if (cause instanceof PathCalculationException) {
-                                logDirect("Failed to compute next segment");
-                                if (ctx.player().distanceToSqr(pathStart.getCenter()) < 16 * 16) {
-                                    logVerbose("Player is near the segment start, therefore repeating this calculation is pointless. Marking as complete");
-                                    completePath = true;
-                                }
-                            } else {
-                                logUnhandledException(cause);
-                            }
-                        }
-                    });
+                    .whenComplete((result, ex) -> this.searched(Search.ONWARD, from, kind, ex));
+        }
+
+        /**
+         * After a search: one that found a path starts the count of failures again, and one that found nothing waits
+         * its turn to be asked again from somewhere else, or gives up. The game thread does the counting, so a search
+         * isn't asked for again before the failure is counted.
+         */
+        private void searched(final Search search, final Start from, final int kind, final Throwable ex) {
+            if (ex == null) {
+                // setPath ran on the game thread, and this after it
+                this.recalculating = false;
+                this.retry(search).succeeded();
+                if (search == Search.FIRST) {
+                    this.firstFailed = false;
+                } else if (search == Search.ONWARD) {
+                    this.onwardWaitsForChunks = false;
+                }
+                return;
+            }
+            ctx.minecraft().execute(() -> {
+                this.recalculating = false;
+                if (!ElytraBehavior.this.process.flies(ElytraBehavior.this)) {
+                    return; // a flight since replaced
+                }
+                final Throwable cause = ex instanceof CompletionException && ex.getCause() != null ? ex.getCause() : ex;
+                if (!(cause instanceof PathCalculationException)) {
+                    logUnhandledException(cause);
+                }
+                final PathCalculationException failure = cause instanceof PathCalculationException ? (PathCalculationException) cause : null;
+                this.failed(search, from, kind, failure != null ? failure.reason : null, failure == null || failure.startMatters(),
+                        failure != null && failure.waitsForChunks());
+            });
+        }
+
+        private void failed(final Search search, final Start from, final int kind, final String why, final boolean startMatters, final boolean waitsForChunks) {
+            final String reason = why != null ? why : "no path found";
+            final PathRetry retry = this.retry(search);
+            final int now = ElytraBehavior.this.gameTick();
+            final boolean chunkEdge = search == Search.ONWARD && waitsForChunks;
+            if (search == Search.ONWARD) {
+                this.onwardWaitsForChunks = chunkEdge;
+                this.onwardFailedTick = now;
+            }
+            if (chunkEdge) {
+                if (!this.saidChunkEdge) {
+                    this.saidChunkEdge = true;
+                    logDirect(PathRetry.chunkEdgeLine());
+                }
+                if (this.onwardForChunks) {
+                    // an extra try because more chunks came, ahead of its turn: the retries' count and times stand, so
+                    // a path that really ends there gives up as it did
+                    return;
+                }
+            }
+            final Start[] starts = search == Search.ONWARD
+                    ? (this.path.isEmpty() ? new Start[ONWARD_STARTS] : this.onwardStarts(this.path.size() - 1))
+                    : this.playerStarts();
+            // the first path is all the flight has: one round of starts, then it says so. when the goal is the trouble
+            // the start doesn't matter, and each try can be a search that ran to its timeout: a round is one try, and
+            // there are as many of them as there are kinds of start in the rounds for a start shut in
+            final int setting = Math.max(1, Baritone.settings().elytraPathRetries.value);
+            final int retries = search == Search.FIRST ? PLAYER_STARTS : startMatters ? setting : Math.max(1, setting / PLAYER_STARTS);
+            final boolean last = retry.failed(now, retries, kind, k -> starts[k] != null, startMatters)
+                    || (search == Search.FIRST && retry.rounds() > 0);
+            if (!last) {
+                if (search == Search.FIRST) {
+                    this.firstFailed = true;
+                }
+                if (!chunkEdge && retry.sayReason()) {
+                    logDirect(PathRetry.retryingLine(search == Search.ONWARD ? "the end of the path" : "here", reason));
+                }
+                return;
+            }
+            final int tries = retry.failures();
+            if (ElytraBehavior.this.appendDestination) {
+                // a flight to a landing spot: another spot, not the end of the flight
+                ElytraBehavior.this.process.landingSpotUnreachable(ElytraBehavior.this.destination, reason);
+                return;
+            }
+            switch (search) {
+                case FIRST:
+                    ElytraBehavior.this.process.giveUpOnPath(PathRetry.firstGivesUpLine(reason));
+                    return;
+                case AGAIN:
+                    ElytraBehavior.this.process.giveUpOnPath(PathRetry.againGivesUpLine(tries, reason));
+                    return;
+                default: // ONWARD
+                    if (this.path.isEmpty()) {
+                        return;
+                    }
+                    final BlockPos end = this.path.get(Math.min(from.after, this.path.size() - 1));
+                    if (ElytraBehavior.this.closeToGoal(end)) {
+                        logDirect("The path gets no closer to the goal than this (" + reason + "), landing near its end");
+                        this.completePath = true;
+                    } else if (ctx.player().distanceToSqr(Vec3.atCenterOf(end)) < NEAR_PATH_END * NEAR_PATH_END) {
+                        ElytraBehavior.this.process.giveUpOnPath(PathRetry.onwardGivesUpLine(tries, reason));
+                    } else {
+                        // the player is still a way off it: the chunks between may change what's found
+                        retry.keepTrying(now);
+                    }
+            }
+        }
+
+        private PathRetry retry(final Search search) {
+            return search == Search.ONWARD ? this.onward : this.fromPlayer;
+        }
+
+        /**
+         * The starts of a search from the player, by kind, {@code null} for a kind that isn't one here: the feet
+         * ({@link #pathStart()}), over the head, higher up, the path a few points back, the feet in bigger cubes. The
+         * planner starts from the nearest cube of air to the block it is given, which can be a sealed pocket.
+         */
+        private Start[] playerStarts() {
+            final BetterBlockPos feet = this.pathStart();
+            final Start[] starts = new Start[PLAYER_STARTS];
+            starts[0] = new Start(feet, false, -1);
+            starts[1] = ElytraBehavior.this.airStart(feet.above(HEAD_RISE), -1);
+            starts[2] = ElytraBehavior.this.airStart(feet.above(HIGHER_RISE), -1);
+            starts[3] = !this.path.isEmpty() && this.playerNear > 0
+                    ? new Start(this.path.get(Math.max(0, this.playerNear - PASSED_POINTS)), false, -1)
+                    : null;
+            starts[4] = ElytraBehavior.this.biggerCubes() ? new Start(feet, true, -1) : null;
+            return starts;
+        }
+
+        /**
+         * The starts of the way on from point {@code afterIncl}, by kind, {@code null} for a kind that isn't one here:
+         * the point, higher, further back along the path, the point in bigger cubes
+         */
+        private Start[] onwardStarts(final int afterIncl) {
+            final BetterBlockPos end = this.path.get(afterIncl);
+            final int back = afterIncl - ONWARD_BACK_POINTS;
+            final Start[] starts = new Start[ONWARD_STARTS];
+            starts[0] = new Start(end, false, afterIncl);
+            starts[1] = ElytraBehavior.this.airStart(end.above(ONWARD_RISE), afterIncl);
+            starts[2] = back > 0 ? new Start(this.path.get(back), false, back) : null;
+            starts[3] = ElytraBehavior.this.biggerCubes() ? new Start(end, true, afterIncl) : null;
+            return starts;
         }
 
         public void clear() {
@@ -376,6 +654,7 @@ public final class ElytraBehavior implements Helper {
             this.playerNear = 0;
             this.ticksNearUnchanged = 0;
             this.maxPlayerNear = 0;
+            this.onwardWaitsForChunks = false;
         }
 
         private void setPath(final UnpackedSegment segment) {
@@ -392,11 +671,17 @@ public final class ElytraBehavior implements Helper {
                     process.landingSpotIsBad(new BetterBlockPos(dest));
                 }
             }
+            final NetherPath old = this.path;
             this.path = new NetherPath(path);
             this.completePath = segment.isFinished();
             // a detour was to see on along the old path, and the points behind were the old path's
             ElytraBehavior.this.glideDetour = null;
             ElytraBehavior.this.glideFallbackFrom = -1;
+            // how far along it the glide has got stands for the same points, when the path only goes on further
+            final int along = (int) Math.ceil(Math.max(ElytraBehavior.this.glideReachedProgress, ElytraBehavior.this.glideTargetProgress));
+            if (along < 0 || along >= old.size() || along >= path.size() || !old.subList(0, along + 1).equals(path.subList(0, along + 1))) {
+                ElytraBehavior.this.forgetGlideTarget();
+            }
             this.playerNear = 0;
             this.ticksNearUnchanged = 0;
             this.maxPlayerNear = 0;
@@ -411,15 +696,41 @@ public final class ElytraBehavior implements Helper {
         }
 
         // mickey resigned
-        private CompletableFuture<Void> path0(BlockPos src, BlockPos dst, UnaryOperator<UnpackedSegment> operator) {
-            return ElytraBehavior.this.pathFinder.pathFindAsync(src, dst)
+        private CompletableFuture<Void> path0(Start src, BlockPos dst, UnaryOperator<UnpackedSegment> operator) {
+            final CompletableFuture<UnpackedSegment> found = src.atLeastX4
+                    ? npfContext.pathFindAsync(src.pos, dst, true)
+                    : ElytraBehavior.this.pathFinder.pathFindAsync(src.pos, dst);
+            return found
                     .thenApply(operator)
                     .thenAcceptAsync(this::setPath, ctx.minecraft()::execute);
         }
 
+        /**
+         * After a setback: the nearest point again from the whole path, which the server may have put the player
+         * anywhere along, and progress counted from there
+         */
+        void retakeNearest() {
+            if (this.path.isEmpty()) {
+                return;
+            }
+            final ToDoubleFunction<BetterBlockPos> distance = this.nearDistance();
+            int best = 0;
+            double bestDistance = Double.MAX_VALUE;
+            for (int i = 0; i < this.path.size(); i++) {
+                final double d = distance.applyAsDouble(this.path.get(i));
+                if (d < bestDistance) {
+                    best = i;
+                    bestDistance = d;
+                }
+            }
+            this.playerNear = best;
+            this.maxPlayerNear = best;
+            this.ticksNearUnchanged = 0;
+        }
+
         // required read lock to be held
         private void pathfindAroundObstacles() {
-            if (this.recalculating) {
+            if (this.recalculating || !this.fromPlayer.mayAsk(ElytraBehavior.this.gameTick())) {
                 return;
             }
 
@@ -429,27 +740,35 @@ public final class ElytraBehavior implements Helper {
                 rangeEndExcl++;
             }
             // rangeEndExcl now represents an index either not in the path, or just outside render distance
-            if (rangeStartIncl >= rangeEndExcl) {
-                // not loaded yet?
-                return;
-            }
-            // before the wall check: a path found while the player's chunk wasn't packed yet runs through blocks that
-            // were air to it, lava as well, and once they're packed the nearest point is in one for good. nothing else
-            // here re-paths then, and the flight sat still until the whole flight was asked for again
+            // before the returns below, the one for the nearest point's chunk not packed yet as well: a path found while
+            // the player's chunk isn't packed yet runs through blocks that were air to it, lava as well, and once
+            // they're packed the nearest point is in one for good. nothing else here re-paths then, and the flight sits
+            // still until the whole flight is asked for again
             if (ElytraBehavior.this.process.state != ElytraProcess.State.LANDING && this.ticksNearUnchanged > 100) {
-                this.pathRecalcSegment(OptionalInt.of(rangeEndExcl - 1))
+                this.pathRecalcSegment(rangeStartIncl < rangeEndExcl ? OptionalInt.of(rangeEndExcl - 1) : OptionalInt.empty())
                         .thenRun(() -> {
                             logVerbose("Recalculating segment, no progress in last 100 ticks");
                         });
                 this.ticksNearUnchanged = 0;
                 return;
             }
+            if (rangeStartIncl >= rangeEndExcl) {
+                // not loaded yet?
+                return;
+            }
 
             final BetterBlockPos rangeStart = path.get(rangeStartIncl);
             if (!ElytraBehavior.this.passable(rangeStart.x, rangeStart.y, rangeStart.z, false)) {
-                // we're in a wall
-                return; // previous iterations of this function SHOULD have fixed this by now :rage_cat:
+                // the nearest point is in a block: the path was found before that block was packed. nothing on from
+                // here is looked along, so nothing asks for another way, and the glide flies at the rock indefinitely
+                if (++this.inWallTicks >= IN_WALL_TICKS && ElytraBehavior.this.process.state != ElytraProcess.State.LANDING) {
+                    this.inWallTicks = 0;
+                    this.pathRecalcSegment(OptionalInt.empty())
+                            .thenRun(() -> logVerbose("Recalculated the path, its nearest point was in a block"));
+                }
+                return;
             }
+            this.inWallTicks = 0;
 
             boolean canSeeAny = false;
             for (int i = rangeStartIncl; i < rangeEndExcl - 1; i++) {
@@ -510,13 +829,37 @@ public final class ElytraBehavior implements Helper {
             if (this.recalculating) {
                 return;
             }
+            final int now = ElytraBehavior.this.gameTick();
+            final boolean due = this.onward.mayAsk(now);
+            final boolean chunksCame = !due && this.onwardWaitsForChunks
+                    && npfContext.chunksPacked() != this.onwardChunksPacked
+                    && now - this.onwardFailedTick >= CHUNK_RETRY_TICKS;
+            if (!due && !chunksCame) {
+                return;
+            }
 
             final int last = this.path.size() - 1;
             final BetterBlockPos lastPos = this.path.get(this.path.size() - 1);
             // `ctx.world().isLoaded` cannot be used here as it returns false is the y-value is beyond the build limits.
             if (!this.completePath && ctx.world().getChunkSource().hasChunk(lastPos.x >> 4,lastPos.z >> 4)) {
+                this.onwardForChunks = chunksCame;
                 this.pathNextSegment(last);
             }
+        }
+
+        /**
+         * How far a point is from the player, squared, for which is nearest
+         */
+        private ToDoubleFunction<BetterBlockPos> nearDistance() {
+            final GlideSteps control = ElytraBehavior.this.process.glideSteps();
+            if (control != null) {
+                // a glide moved by steps puts the box's middle on the points. measured from the feet block, a point
+                // the box is on ties with the one below it, and the nearest stays a point behind
+                final Vec3 middle = ElytraBehavior.this.glideBox(control).getCenter();
+                return p -> middle.distanceToSqr(p.x, p.y, p.z);
+            }
+            final BetterBlockPos pos = ctx.playerFeet();
+            return p -> p.distanceSq(pos);
         }
 
         public void updatePlayerNear() {
@@ -524,17 +867,7 @@ public final class ElytraBehavior implements Helper {
                 return;
             }
 
-            final ToDoubleFunction<BetterBlockPos> distance;
-            final GlideSteps control = ElytraBehavior.this.process.glideSteps();
-            if (control != null) {
-                // a glide moved by steps puts the box's middle on the points. measured from the feet block, a point
-                // the box is on ties with the one below it, and the nearest stays a point behind
-                final Vec3 middle = ElytraBehavior.this.glideBox(control).getCenter();
-                distance = p -> middle.distanceToSqr(p.x, p.y, p.z);
-            } else {
-                final BetterBlockPos pos = ctx.playerFeet();
-                distance = p -> p.distanceSq(pos);
-            }
+            final ToDoubleFunction<BetterBlockPos> distance = this.nearDistance();
             int index = this.playerNear;
             for (int i = index; i >= Math.max(index - 1000, 0); i -= 10) {
                 if (distance.applyAsDouble(path.get(i)) < distance.applyAsDouble(path.get(index))) {
@@ -708,6 +1041,7 @@ public final class ElytraBehavior implements Helper {
 
         final List<BetterBlockPos> path = this.pathManager.getPath();
         if (path.isEmpty()) {
+            this.pathManager.retryFirst();
             return;
         } else if (this.destination == null) { // null check why????
             this.pathManager.clear();
@@ -726,6 +1060,134 @@ public final class ElytraBehavior implements Helper {
     }
 
     /**
+     * The path ahead against the blocks the game has. Its points are the middles of cubes the pathfinder had as air, so
+     * a block there that a glide can't go through, or a chunk there that the pathfinder never got from the game, is a
+     * path through rock. A chunk missing from its table is air to a search but solid to its rays, so the path goes
+     * straight through it, the look along the path stops short of it, and the glide bounces off the rock with
+     * nothing asking for another way. The chunk is packed again from the game's, the look along the path then finds
+     * the way blocked and asks for one round it, and the line says which it was.
+     */
+    private void checkPathAhead() {
+        final NetherPath path = this.pathManager.getPath();
+        final int near = this.pathManager.getNear();
+        final int last = Math.min(near + PATH_CHECK_POINTS, path.size() - 1);
+        final int tick = this.gameTick();
+        for (int i = near; i <= last; i++) {
+            final BetterBlockPos point = path.get(i);
+            final long key = ChunkPos.asLong(point.x >> 4, point.z >> 4);
+            if (this.repackAgainTick.get(key) > tick || npfContext.packQueued(point.x >> 4, point.z >> 4)) {
+                // packed again lately, or the game has just given it and it's on its way in
+                continue;
+            }
+            final LevelChunk chunk = ctx.world().getChunkSource().getChunk(point.x >> 4, point.z >> 4, false);
+            if (chunk == null || chunk.isEmpty()) {
+                continue; // the game hasn't got it either
+            }
+            final String line;
+            switch (npfContext.held(point.x, point.y, point.z)) {
+                case NOTHING:
+                    line = "The path goes into a chunk the pathfinder never got from the game, so it took it for air: packing it now";
+                    break;
+                case PREDICTED:
+                    line = "The path goes into a chunk the pathfinder had only the seed's guess at: packing the game's now";
+                    break;
+                case AIR: {
+                    final int section = chunk.getSectionIndex(point.y);
+                    final LevelChunkSection held = section >= 0 && section < chunk.getSections().length ? chunk.getSection(section) : null;
+                    // the game's getBlockState has a section the server sent as empty all air, whatever is in it, so
+                    // read through it this never sees a block there: the block is read from the section itself
+                    final boolean sentEmpty = NetherPathfinderContext.sentEmpty(held);
+                    final BlockState state = sentEmpty ? held.getBlockState(point.x & 15, point.y & 15, point.z & 15) : chunk.getBlockState(point);
+                    if (!NetherPathfinderContext.solidAt(ctx.world(), point, state)) {
+                        continue;
+                    }
+                    // the block itself, the top of a fence under it, or air next to lava or fire
+                    final String what = !NetherPathfinderContext.glidesThrough(state) ? BuiltInRegistries.BLOCK.getKey(state.getBlock()).getPath()
+                            : NetherPathfinderContext.reachesAbove(ctx.world().getBlockState(point.below()))
+                            ? "the top of " + BuiltInRegistries.BLOCK.getKey(ctx.world().getBlockState(point.below()).getBlock()).getPath()
+                            : "the air next to lava or fire";
+                    line = "The path goes through " + what + " the pathfinder had as air"
+                            + (sentEmpty ? " (the server sent that part of the chunk as empty)" : "") + ": packing that chunk again";
+                    break;
+                }
+                default:
+                    continue;
+            }
+            this.repackAgainTick.put(key, tick + REPACK_AGAIN_TICKS);
+            npfContext.queueForPacking(chunk);
+            if (this.repackSaid.add(key)) {
+                logDirect(line);
+            }
+        }
+    }
+
+    /**
+     * The server has put the player somewhere else: the stall watch and any detour were for where it was, and the
+     * nearest point is looked for afresh. A path is asked for again only if no point can be seen from here, which the
+     * next tick's look along the path finds.
+     */
+    public void onSetback() {
+        this.glideHistory.clear();
+        this.recentMoves.clear();
+        // put back where the server has it, from a standstill
+        this.pullVelocity = Vec3.ZERO;
+        this.rampFromTick = this.gameTick();
+        this.glideDetour = null;
+        this.glideFallbackFrom = -1;
+        this.forgetGlideTarget();
+        this.waitingForChunks = false;
+        this.pathManager.retakeNearest();
+    }
+
+    /**
+     * The target in a straight line, and how far along the path the glide has got, start afresh: a new way, or the
+     * player put somewhere else
+     */
+    private void forgetGlideTarget() {
+        this.glideTargetAt = null;
+        this.glideTargetProgress = -1;
+        this.glideReachedProgress = -1;
+    }
+
+    int gameTick() {
+        return ctx.player().tickCount;
+    }
+
+
+    /**
+     * @return A search start at {@code pos} when the planner can start there, inside its height and in air, else
+     * {@code null}
+     */
+    private Start airStart(final BlockPos pos, final int after) {
+        final int minY = ctx.world().getMinY();
+        if (pos.getY() < minY || pos.getY() >= minY + npfContext.getMaxHeight()) {
+            return null;
+        }
+        return ctx.world().getBlockState(pos).isAir() ? new Start(pos, false, after) : null;
+    }
+
+    /**
+     * @return Whether a search can be asked to go through bigger cubes of air than it does already
+     */
+    private boolean biggerCubes() {
+        return this.pathFinder == this.npfContext && Baritone.settings().elytraAllowTightSpaces.value;
+    }
+
+    /**
+     * @return Whether {@code end} is as close to the goal as a path needs to come: within the search's own goal radius,
+     * or for a goal with no height, that far across
+     */
+    private boolean closeToGoal(final BlockPos end) {
+        final BetterBlockPos goal = this.destinationFixed();
+        if (this.appendDestination || this.process.goalHasHeight()) {
+            return end.distSqr(goal) <= CLOSE_TO_GOAL * CLOSE_TO_GOAL;
+        }
+        final double dx = end.getX() - goal.x;
+        final double dz = end.getZ() - goal.z;
+        return dx * dx + dz * dz <= CLOSE_TO_GOAL_ACROSS * CLOSE_TO_GOAL_ACROSS;
+    }
+
+    /**
      * Called by {@link baritone.process.ElytraProcess#onTick(boolean, boolean)} when the process is in control and the player is flying
      */
     public void tick() {
@@ -741,9 +1203,9 @@ public final class ElytraBehavior implements Helper {
             logVerbose("vbonk");
         }
 
-        final GlideSteps glideControl = this.process.glideSteps();
-        if (glideControl != null) {
-            this.tickGlideStep(glideControl);
+        final GlideSteps glideSteps = this.process.glideSteps();
+        if (glideSteps != null) {
+            this.tickGlideStep(glideSteps);
             return;
         }
 
@@ -792,20 +1254,36 @@ public final class ElytraBehavior implements Helper {
 
     /**
      * Works out this tick's {@link #glideStep}: towards the furthest point ahead on the path that the hitbox gets to in
-     * a straight line, as far as the control's limits let it go this tick, and short of anything that would cut it or
+     * a straight line, as far as the step limits let it go this tick, and short of anything that would cut it or
      * slid along it. With no point ahead in a straight line, towards one of the next few, and after getting nowhere for
-     * a while, round by a detour first. The control moves the player by it whole, so there are no physics or fireworks
-     * to plan for.
+     * a while, round by a detour first. The player's move takes it whole, so there are no physics or fireworks to plan
+     * for.
      */
     private void tickGlideStep(final GlideSteps control) {
         final AABB box = this.glideBox(control);
         final Vec3 feet = ctx.player().position();
-        final double across = Math.max(0, control.maxHorizontalStep());
-        final double vertical = Math.max(0, control.maxVerticalStep());
+        this.stepSlid = false;
+        String kind;
+        // brought down by the server: the look it steers the game's glide by
+        Rotation yieldLook = null;
+        // slowed by the pull-downs so far (elytraGlideSpeed), and back up to it over a second after a setback
+        final double across = Math.max(0, control.maxHorizontalStep()) * this.process.glideSpeed() * this.rampAfterSetback();
+        // and up and down: the server turns a settle's drops down too after a setback
+        final double vertical = Math.max(0, control.maxVerticalStep()) * this.rampAfterSetback();
 
         Vec3 target;
         Vec3 step;
-        if (this.landingMode) {
+        // the target in a straight line, when that's what the step is towards
+        Aim aimed = null;
+        // coming down after a pull-down, the server has it whatever it was doing: a landing's steps are turned down too
+        // in lava it gets out of it slowly, below, rather than being brought down
+        final boolean yields = this.process.yields() && (!this.landingMode || this.process.settlingAfterPullDown())
+                && !ctx.player().isInLava();
+        if (!yields) {
+            this.pullVelocity = Vec3.ZERO;
+        }
+        if (this.landingMode && !yields) {
+            kind = "landing";
             final Vec3 column = new Vec3(this.destination.x + 0.5, feet.y, this.destination.z + 0.5);
             final Vec3 toColumn = column.subtract(feet);
             if (toColumn.horizontalDistanceSqr() > LANDING_CENTERED * LANDING_CENTERED) {
@@ -831,6 +1309,34 @@ public final class ElytraBehavior implements Helper {
                     step = new Vec3(toColumn.x, -vertical, toColumn.z);
                 }
             }
+        } else if (yields) {
+            // pulled down: the server sinks the player at the game's glide speed, nearly straight down, a little the way
+            // it faces, and turns down every move of the step's making, up, down or across. all that counts is where it
+            // faces: it faces where it would come down, and sinks as the server sinks it
+            final Vec3 velocity = ctx.player().getDeltaMovement();
+            final BetterBlockPos floor = this.process.yieldAim();
+            final Vec3 aim;
+            if (floor != null) {
+                aim = Vec3.atCenterOf(floor);
+                kind = "brought down by the server, facing the floor it picked";
+            } else if (this.process.settlingAfterPullDown()) {
+                aim = velocity.lengthSqr() > 1.0E-6 ? ctx.playerHead().add(velocity) : null;
+                kind = "brought down by the server, facing the way it goes";
+            } else {
+                final Vec3 ahead = this.glideTarget(box, feet);
+                aim = ahead != null ? ahead.add(0, box.getYsize() / 2, 0) : velocity.lengthSqr() > 1.0E-6 ? ctx.playerHead().add(velocity) : null;
+                kind = "set back down lately, facing the way on";
+            }
+            final Rotation want = aim != null
+                    ? RotationUtils.calcRotationFromVec3d(ctx.playerHead(), aim, ctx.playerRotations())
+                    : ctx.playerRotations();
+            // level: looking down at the floor dives, faster than the server's pull, and it puts the glide back up
+            yieldLook = new Rotation(want.getYaw(), 0);
+            // the way it faces this tick, as the aim processor has it: the little it drifts goes that way
+            final Rotation actual = baritone.getLookBehavior().getAimProcessor().peekRotation(yieldLook);
+            step = pullStep(this.pullVelocity, actual.getYaw());
+            this.pullVelocity = step;
+            target = aim != null ? aim : feet.add(step);
         } else {
             final boolean stalled = this.noteGlidePosition(feet);
             if (this.glideDetour != null && this.glideDetour.distanceToSqr(feet) < GLIDE_DETOUR_REACHED * GLIDE_DETOUR_REACHED) {
@@ -848,11 +1354,27 @@ public final class ElytraBehavior implements Helper {
                 this.glideFallbackFrom = -1;
                 logVerbose(this.glideDetour != null ? "No progress, taking a detour" : "No progress, and no detour found");
             }
-            final Vec3 ahead = this.glideDetour != null ? this.glideDetour : this.glideTarget(box, feet);
+            if (this.glideDetour == null && tick >= this.nextEscapeSearch && this.inPackedSolid(box)) {
+                // the box is partly in a block the pathfinder has as solid, a fence's block beside its thin post, say,
+                // where it came down. every ray from it starts in that block, so none finds a line anywhere and the
+                // glide slides along the fence back and forth: out of it first, by the game's collisions
+                this.nextEscapeSearch = tick + GLIDE_STALL_TICKS / 2;
+                this.glideDetour = this.findSolidEscape(box, feet);
+                logVerbose(this.glideDetour != null ? "In a block the pathfinder has as solid, getting out of it" : "In a block the pathfinder has as solid, and nowhere near to get out of it to");
+            }
+            if (this.glideDetour == null) {
+                aimed = keepAim(this.aimAhead(box, feet), this.glideTargetAt, this.glideTargetProgress,
+                        at -> this.glidesTo(box, feet, at));
+                this.glideTargetAt = aimed != null ? aimed.at() : null;
+                this.glideTargetProgress = aimed != null ? aimed.progress() : -1;
+            }
+            final Vec3 ahead = this.glideDetour != null ? this.glideDetour : aimed != null ? aimed.at() : null;
             if (ahead != null) {
+                kind = this.glideDetour != null ? "detour" : "ray-checked";
                 target = ahead;
                 step = this.glideStepTowards(box, feet, target, across, vertical);
             } else {
+                kind = "fallback (no ray-checked line)";
                 // nothing ahead in a straight line: the first of the next few points a step gets a good way towards,
                 // else the one it gets furthest towards
                 final NetherPath path = this.pathManager.getPath();
@@ -861,6 +1383,7 @@ public final class ElytraBehavior implements Helper {
                 final int from = Math.min(Math.max(near, this.glideFallbackFrom), path.size() - 1);
                 target = this.glideFeetAt(path, from, box);
                 step = Vec3.ZERO;
+                boolean slid = false;
                 int firstAhead = -1;
                 for (int i = from; i < Math.min(from + GLIDE_FALLBACK_POINTS, path.size()); i++) {
                     final Vec3 point = this.glideFeetAt(path, i, box);
@@ -876,14 +1399,16 @@ public final class ElytraBehavior implements Helper {
                     if (firstAhead < 0) {
                         firstAhead = i;
                     }
+                    this.stepSlid = false;
                     final Vec3 toward = this.glideStepTowards(box, feet, point, across, vertical);
                     if (avoidLava && this.glideTouchesLava(box, toward)) {
-                        // no ray checked this line, and the game lets a glide into lava
+                        // no ray checked this line, and the game lets a glide into lava and fire
                         continue;
                     }
                     if (toward.lengthSqr() > step.lengthSqr()) {
                         target = point;
                         step = toward;
+                        slid = this.stepSlid;
                     }
                     if (toward.lengthSqr() >= 0.25 * 0.25 * want.lengthSqr()) {
                         break;
@@ -892,19 +1417,88 @@ public final class ElytraBehavior implements Helper {
                 if (firstAhead >= 0) {
                     this.glideFallbackFrom = firstAhead;
                 }
+                this.stepSlid = slid;
             }
         }
 
+        if (yieldLook == null && this.glideAvoidsLava() && step.lengthSqr() > 1.0E-12) {
+            // whatever kind of step it is: the rays looked along a straight line, and the game doesn't move along one
+            final Vec3 unburnt = this.unburntGlideStep(box, step);
+            if (unburnt != step) {
+                kind += unburnt == null ? ", held: any of it would burn" : ", shortened or slid to keep off lava and fire";
+                step = unburnt == null ? Vec3.ZERO : unburnt;
+            }
+        }
+
+        if (ctx.player().isInLava()) {
+            // the server turns down a fast move out of lava, and puts it back in: slow until the box is out
+            final double most = Math.max(0.01, Baritone.settings().elytraInLavaSpeed.value);
+            if (step.lengthSqr() > most * most) {
+                step = step.normalize().scale(most);
+                kind += ", slowed in lava";
+            }
+        }
+
+        this.waitingForChunks = false;
+        if (!this.landingMode && step.horizontalDistanceSqr() > 1.0E-12 && !this.clientHasChunkAt(feet.add(step))) {
+            // not into a chunk the client hasn't got, which the server sends slowly when it's busy: it has no blocks to
+            // collide with, and may be anything. held here on purpose, so the stall watch doesn't take it for being
+            // stuck and look for a detour, nor the flight for a path again
+            step = Vec3.ZERO;
+            this.waitingForChunks = true;
+            this.glideHistory.clear();
+            final int tick = this.gameTick();
+            if (tick - this.chunkWaitSaidTick >= CHUNK_WAIT_SAY_TICKS) {
+                this.chunkWaitSaidTick = tick;
+                logDirect("Waiting for the server to send the chunks ahead");
+            }
+        }
+
+        if (aimed != null && feet.add(step).distanceToSqr(aimed.at()) < GLIDE_AT_SQR) {
+            // there: nothing up to here along the path is a target again
+            this.glideReachedProgress = Math.max(this.glideReachedProgress, aimed.progress());
+        }
         this.glideStep = step;
+        // before the progress check, whose line says where it aims
         this.aimPos = new BetterBlockPos(target.x, target.y, target.z);
         this.simulationLine = Arrays.asList(Vec3.ZERO, target.subtract(feet));
+        this.noteGlideMove(feet, kind);
+        if (!this.landingMode && !this.waitingForChunks && this.pathManager.getNear() < this.pathManager.getPath().size() - 1) {
+            this.noteProgress(feet);
+        }
 
         // the step's heading, flat
         final Vec3 facing = step.horizontalDistanceSqr() > 1.0E-6 ? step : target.subtract(feet);
         final float yaw = facing.horizontalDistanceSqr() > 1.0E-6
                 ? RotationUtils.calcRotationFromVec3d(Vec3.ZERO, new Vec3(facing.x, 0, facing.z), ctx.playerRotations()).getYaw()
                 : ctx.playerRotations().getYaw();
-        baritone.getLookBehavior().updateTarget(new Rotation(yaw, 0), false);
+        baritone.getLookBehavior().updateTarget(yieldLook != null ? yieldLook : new Rotation(yaw, 0), false);
+    }
+
+    /**
+     * @return What a pull-down moves the player by this tick from {@code velocity}, facing {@code yaw}, which is also
+     * the velocity next tick: it sinks as the game's glide does looking level ({@code
+     * LivingEntity.updateFallFlyingMovement} at pitch 0), to about 0.15 a tick from a standstill, and goes across only
+     * the lift that turns a tenth of this tick's fall the way it faces, nothing carried over. The server's pull is that
+     * slow and that nearly straight down: neither a fall nor a glide, which picks up speed across
+     */
+    static Vec3 pullStep(final Vec3 velocity, final float yaw) {
+        // Entity.calculateViewVector at pitch 0: level, length 1
+        final float negYawRadians = -yaw * (float) (Math.PI / 180.0);
+        final double lookX = Mth.sin(negYawRadians);
+        final double lookZ = Mth.cos(negYawRadians);
+        // gravity 0.08, three quarters of it held up looking level
+        double y = velocity.y + 0.08 * (-1.0 + 0.75);
+        double lift = 0;
+        if (y < 0.0) {
+            lift = y * -0.1;
+            y += lift;
+        }
+        return new Vec3(lookX * lift * 0.99F, y * 0.98F, lookZ * lift * 0.99F);
+    }
+
+    private boolean clientHasChunkAt(final Vec3 pos) {
+        return ctx.world().getChunkSource().hasChunk(Mth.floor(pos.x) >> 4, Mth.floor(pos.z) >> 4);
     }
 
     /**
@@ -950,35 +1544,78 @@ public final class ElytraBehavior implements Helper {
      * that the box's steps had brought it onto exactly was the one target left, and the glide held still on it.
      */
     private Vec3 glideTarget(final AABB box, final Vec3 feet) {
+        final Aim aim = this.aimAhead(box, feet);
+        return aim != null ? aim.at() : null;
+    }
+
+    /**
+     * {@link #glideTarget}, and how far along the path it is. Nothing the box has already got to along the path
+     * ({@link #glideReachedProgress}) or before it, and no spot between two points that is behind the box on the way
+     * from the first to the second: at the furthest spot along a stretch that the box gets to in a straight line, those
+     * are all that is left, a block or a step back, and from there that spot is in a straight line again.
+     */
+    private Aim aimAhead(final AABB box, final Vec3 feet) {
         final NetherPath path = this.pathManager.getPath();
         final int near = this.pathManager.getNear();
-        final int furthest = Math.min(near + 20, path.size() - 1);
-
-        // with room to spare around the box first
         final AABB roomy = box.inflate(Baritone.settings().elytraMinimumAvoidance.value);
-        for (int i = furthest; i > near; i--) {
-            final Vec3 dest = this.glideFeetAt(path, i, box);
-            if (this.glidesTo(roomy, feet, dest)) {
-                return dest;
+        return aimAhead(i -> this.glideFeetAt(path, i, box), near, Math.min(near + 20, path.size() - 1),
+                this.glideReachedProgress, feet, (dest, withRoom) -> this.glidesTo(withRoom ? roomy : box, feet, dest));
+    }
+
+    /**
+     * {@link #aimAhead(AABB, Vec3)} with what it looks at given
+     *
+     * @param pointFeet Where the feet go for the box to be at each point
+     * @param near      The nearest point, which is never a target
+     * @param furthest  The furthest point looked at
+     * @param reached   How far along the path the box has got to a target ({@link #glideReachedProgress}), -1 for not
+     * @param feet      Where the feet are
+     * @param glidesTo  Whether the box gets to a spot in a straight line: with room to spare round it, or just
+     */
+    static Aim aimAhead(final IntFunction<Vec3> pointFeet, final int near, final int furthest, final double reached,
+                        final Vec3 feet, final BiPredicate<Vec3, Boolean> glidesTo) {
+        // with room to spare around the box first
+        for (int i = furthest; i > near && i > reached; i--) {
+            final Vec3 dest = pointFeet.apply(i);
+            if (glidesTo.test(dest, true)) {
+                return new Aim(dest, i);
             }
         }
         // then without, at the points and every block between them
-        for (int i = furthest; i > near; i--) {
-            final Vec3 dest = this.glideFeetAt(path, i, box);
-            if (this.glidesTo(box, feet, dest)) {
-                return dest;
+        for (int i = furthest; i > near && i > reached; i--) {
+            final Vec3 dest = pointFeet.apply(i);
+            if (glidesTo.test(dest, false)) {
+                return new Aim(dest, i);
             }
-            final Vec3 back = this.glideFeetAt(path, i - 1, box).subtract(dest);
+            final Vec3 back = pointFeet.apply(i - 1).subtract(dest);
+            final double length = back.length();
             final Vec3 unit = back.normalize();
-            final int blocks = fastFloor(back.length());
+            final int blocks = fastFloor(length);
             for (int b = 1; b < blocks; b++) {
+                final double progress = i - b / length;
                 final Vec3 between = dest.add(unit.scale(b));
-                if (this.glidesTo(box, feet, between)) {
-                    return between;
+                if (progress <= reached || between.subtract(feet).dot(back) >= 0) {
+                    // got to already, or back along the stretch from the box: the spots on from here are further back
+                    break;
+                }
+                if (glidesTo.test(between, false)) {
+                    return new Aim(between, progress);
                 }
             }
         }
         return null;
+    }
+
+    /**
+     * @return {@code found}, or the target it was heading for when that is further along the path and still in a
+     * straight line ({@code stillClear}): one step from a wall the box has room for a line to a nearer point, and at
+     * the wall only the line on is clear, so it would go back and forth between the two
+     */
+    static Aim keepAim(final Aim found, final Vec3 lastAt, final double lastProgress, final Predicate<Vec3> stillClear) {
+        if (found != null && lastAt != null && found.progress() < lastProgress && stillClear.test(lastAt)) {
+            return new Aim(lastAt, lastProgress);
+        }
+        return found;
     }
 
     /**
@@ -1006,7 +1643,11 @@ public final class ElytraBehavior implements Helper {
             return straight;
         }
         // a slide leaves the line to the target, which is all a ray checked
-        return this.glideAvoidsLava() && this.glideTouchesLava(box, slid) ? straight : slid;
+        if (this.glideAvoidsLava() && this.glideTouchesLava(box, slid)) {
+            return straight;
+        }
+        this.stepSlid = true;
+        return slid;
     }
 
     /**
@@ -1017,31 +1658,381 @@ public final class ElytraBehavior implements Helper {
     }
 
     /**
-     * Whether the box anywhere on its way by {@code step} would be in lava as the game counts it: under the surface of a
-     * lava block that its box, a hair smaller, overlaps. The collisions let a glide in, and only the path's rays keep it
-     * out, which see lava as solid.
+     * Whether the box anywhere on its way by {@code step} would catch fire: see {@link #burnsOnTheWay}. The collisions let
+     * a glide into lava and fire, and only the path's rays keep it out, which see both as solid.
      */
     private boolean glideTouchesLava(final AABB box, final Vec3 step) {
-        final AABB swept = box.expandTowards(step).deflate(0.001);
+        return this.burnsOnTheWay(this.burnBox(box), step) != null;
+    }
+
+    /**
+     * @return The box to keep clear of lava and fire: with {@link #BURN_CLEARANCE} round it, unless it's that near one
+     * already. Then the box itself: kept that near it, it would hold still beside the lava with every step refused
+     */
+    private AABB burnBox(final AABB box) {
+        final AABB roomy = box.inflate(BURN_CLEARANCE);
+        return this.burnsOnTheWay(roomy, Vec3.ZERO) == null ? roomy : box;
+    }
+
+    /**
+     * @return The first block on the box's way by {@code step} that sets the player on fire, {@code null} if none: lava
+     * over its fluid's surface, or fire. The game works out what a move went through one axis at a time, the way its
+     * collisions move the box: up or down first, then the longer way across, then the shorter. A diagonal step's path
+     * is an L, not the straight line the rays looked along, and its corner swings off that line by as much as the step
+     * goes across: a step of two blocks past a lavafall a block off the line sets the player on fire
+     */
+    private BlockPos burnsOnTheWay(final AABB box, final Vec3 step) {
+        return burnsOnTheWay(box, step, (x, y, z, minY) -> {
+            final BlockPos pos = new BlockPos(x, y, z);
+            final FluidState fluid = ctx.world().getFluidState(pos);
+            if (fluid.is(FluidTags.LAVA) && y + fluid.getHeight(ctx.world(), pos) >= minY) {
+                return true;
+            }
+            return ctx.world().getBlockState(pos).getBlock() instanceof BaseFireBlock;
+        });
+    }
+
+    /**
+     * What sets the player on fire in a block, for {@link #burnsOnTheWay(AABB, Vec3, Burns)}
+     */
+    @FunctionalInterface
+    interface Burns {
+        /**
+         * @return Whether a box with its bottom at {@code minY} that reaches into block ({@code x}, {@code y},
+         * {@code z}) is set on fire there
+         */
+        boolean at(int x, int y, int z, double minY);
+    }
+
+    /**
+     * {@link #burnsOnTheWay(AABB, Vec3)} with what burns given
+     */
+    static BlockPos burnsOnTheWay(final AABB box, final Vec3 step, final Burns burns) {
+        AABB at = box;
+        boolean moved = false;
+        for (final Direction.Axis axis : Direction.axisStepOrder(step)) {
+            final double d = step.get(axis);
+            if (d == 0) {
+                continue;
+            }
+            final Vec3 part = axis == Direction.Axis.Y ? new Vec3(0, d, 0) : axis == Direction.Axis.X ? new Vec3(d, 0, 0) : new Vec3(0, 0, d);
+            final BlockPos hit = burnsAlong(at, part, burns);
+            if (hit != null) {
+                return hit;
+            }
+            at = at.move(part);
+            moved = true;
+        }
+        return moved ? null : burnsAlong(box, Vec3.ZERO, burns);
+    }
+
+    /**
+     * @return The first block that sets the player on fire in the box swept by {@code part}, a move along one axis, so
+     * that its sweep is a box too, a hair smaller as the game's own is. {@code null} if none
+     */
+    private static BlockPos burnsAlong(final AABB box, final Vec3 part, final Burns burns) {
+        final AABB swept = box.expandTowards(part).deflate(1.0E-5);
         final int minX = Mth.floor(swept.minX);
         final int maxX = Mth.ceil(swept.maxX);
         final int minY = Mth.floor(swept.minY);
         final int maxY = Mth.ceil(swept.maxY);
         final int minZ = Mth.floor(swept.minZ);
         final int maxZ = Mth.ceil(swept.maxZ);
-        final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         for (int x = minX; x < maxX; x++) {
             for (int y = minY; y < maxY; y++) {
                 for (int z = minZ; z < maxZ; z++) {
-                    pos.set(x, y, z);
-                    final FluidState fluid = ctx.world().getFluidState(pos);
-                    if (fluid.is(FluidTags.LAVA) && y + fluid.getHeight(ctx.world(), pos) >= swept.minY) {
-                        return true;
+                    if (burns.at(x, y, z, swept.minY)) {
+                        return new BlockPos(x, y, z);
                     }
                 }
             }
         }
-        return false;
+        return null;
+    }
+
+    /**
+     * @return {@code step}, or as much of it as gets the box nowhere that burns on its way as the game counts it (see
+     * {@link #burnsOnTheWay}): a shorter step's path swings less far off its line. {@code null} when even the start of
+     * it burns, or the box is in something that burns already
+     */
+    private Vec3 unburntGlideStep(final AABB box, final Vec3 step) {
+        return unburntSlidStep(this.burnBox(box), step, (b, st) -> this.burnsOnTheWay(b, st) != null);
+    }
+
+    /**
+     * {@link #unburntStep}, and of the step without each axis in turn, and of each axis alone, the longest: what
+     * burns is slid along like a wall. Only shortened, a step with any of it into a fire's face, pressed up against
+     * it, burns however short it gets, and the glide holds still beside the fire. {@code null} when none
+     * of them gets anywhere
+     */
+    static Vec3 unburntSlidStep(final AABB box, final Vec3 step, final java.util.function.BiPredicate<AABB, Vec3> burns) {
+        if (!burns.test(box, step)) {
+            return step;
+        }
+        final Vec3[] candidates = {
+                step,
+                new Vec3(0, step.y, step.z), new Vec3(step.x, 0, step.z), new Vec3(step.x, step.y, 0),
+                new Vec3(step.x, 0, 0), new Vec3(0, step.y, 0), new Vec3(0, 0, step.z)
+        };
+        Vec3 best = null;
+        double bestLength = 0;
+        for (final Vec3 candidate : candidates) {
+            if (candidate.lengthSqr() < 1.0E-12) {
+                continue;
+            }
+            final Vec3 kept = unburntStep(box, candidate, burns);
+            if (kept != null && kept.lengthSqr() > bestLength) {
+                best = kept;
+                bestLength = kept.lengthSqr();
+            }
+        }
+        return best;
+    }
+
+    /**
+     * {@link #unburntGlideStep} with what burns given: whether the box's way by a step burns
+     */
+    static Vec3 unburntStep(final AABB box, final Vec3 step, final java.util.function.BiPredicate<AABB, Vec3> burns) {
+        if (!burns.test(box, step)) {
+            return step;
+        }
+        double lo = 0;
+        double hi = 1;
+        for (int i = 0; i < 10; i++) {
+            final double mid = (lo + hi) / 2;
+            if (!burns.test(box, step.scale(mid))) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        final Vec3 kept = step.scale(lo);
+        return lo > 0 && !burns.test(box, kept) ? kept : null;
+    }
+
+
+    /**
+     * @return The share of the glide's speed it may go at this tick: after a setback it starts slow and comes back up.
+     * The server puts the player back with the speed it had worked out there, and a glide that sets off again at full
+     * speed from a standstill is put back again and again
+     */
+    private double rampAfterSetback() {
+        final int since = this.gameTick() - this.rampFromTick;
+        return since >= 0 && since < RAMP_TICKS ? RAMP_FROM + (1 - RAMP_FROM) * since / RAMP_TICKS : 1;
+    }
+
+    /**
+     * Notes how near the glide has come to the goal, and says what holds it when it has come no nearer for
+     * {@link #STUCK_TICKS}: without it, flying at rock the pathfinder has as air says nothing at all
+     */
+    private void noteProgress(final Vec3 feet) {
+        final BetterBlockPos goal = this.destinationFixed();
+        final double dx = feet.x - goal.x;
+        final double dz = feet.z - goal.z;
+        final double dy = this.process.goalHasHeight() ? feet.y - goal.y : 0;
+        final double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        final int tick = this.gameTick();
+        if (distance < this.closestToGoal - 2 || tick - this.closestToGoalTick < 0) {
+            this.closestToGoal = distance;
+            this.closestToGoalTick = tick;
+            return;
+        }
+        final int still = tick - this.closestToGoalTick;
+        if (still >= STUCK_TICKS && tick - this.stuckSaidTick >= STUCK_TICKS) {
+            this.stuckSaidTick = tick;
+            logDirect(this.stuckLine(still / 20));
+        }
+        // a detour away from the goal gets no closer either, but it goes somewhere; a glide the server is bringing down
+        // is the recovery's to finish; and a flight to a landing spot isn't the one to ask for again
+        if (still >= this.process.askAgainAfterTicks() && !this.restartAsked && !this.appendDestination
+                && !this.process.yields() && this.goesNowhere()) {
+            this.restartAsked = true;
+            if (this.stuckSaidTick < this.closestToGoalTick) {
+                // what held it, before it's asked for again: said once for this hold
+                this.stuckSaidTick = tick;
+                logDirect(this.stuckLine(still / 20));
+            }
+            logDirect(String.format(Locale.ROOT, "No closer to the goal in %d s and getting nowhere: asking for the flight again from here, as a fresh #elytra would",
+                    still / 20));
+            this.process.askForFlightAgain();
+        }
+    }
+
+    /**
+     * @return Whether the last {@link #STUCK_MOVES} steps left the feet within {@link #STUCK_NET} of where they began:
+     * held where it is, or going back and forth
+     */
+    private boolean goesNowhere() {
+        if (this.recentMoves.size() <= STUCK_MOVES) {
+            return false;
+        }
+        final Iterator<GlideMove> moves = this.recentMoves.descendingIterator();
+        final Vec3 now = moves.next().feet;
+        Vec3 then = now;
+        for (int i = 0; i < STUCK_MOVES && moves.hasNext(); i++) {
+            then = moves.next().feet;
+        }
+        return now.distanceToSqr(then) < STUCK_NET * STUCK_NET;
+    }
+
+    private String stuckLine(final int seconds) {
+        final NetherPath path = this.pathManager.getPath();
+        final int near = this.pathManager.getNear();
+        final BetterBlockPos point = path.get(near);
+        final BetterBlockPos feet = ctx.playerFeet();
+        final GlideMove last = this.recentMoves.peekLast();
+        final String search = this.pathManager.recalculating ? "a search running"
+                : !this.pathManager.fromPlayer.mayAsk(this.gameTick()) ? "the next search waiting its turn after one found nothing"
+                : "no search running";
+        final List<Vec3> at = new ArrayList<>();
+        final List<Double> asked = new ArrayList<>();
+        for (final GlideMove move : this.recentMoves) {
+            at.add(move.feet);
+            asked.add(move.length);
+        }
+        final BlockPos aim = this.aimPos;
+        final String aiming = aim == null ? "nothing"
+                : this.glideTargetAt != null && this.glideTargetProgress >= 0
+                ? String.format(Locale.ROOT, "%s (point %.1f of the path)", blockAt(aim), this.glideTargetProgress + 1)
+                : blockAt(aim);
+        return String.format(Locale.ROOT, "No closer to the goal in %d s: %s steps of %.1f blocks; %s; at %s, aiming at %s; the path's nearest point (%d of %d) is %s to the game and %s to the pathfinder, where the player is %s to it; %d chunks waiting to be packed, %s",
+                seconds, last != null ? last.kind : "no", last != null ? last.length : 0, lastStepsMoved(at, asked, 20),
+                blockAt(feet), aiming, near + 1, path.size(),
+                this.gameBlockName(point),
+                heldName(npfContext.held(point.x, point.y, point.z)), heldName(npfContext.held(feet.x, feet.y, feet.z)),
+                npfContext.packsQueued(), search);
+    }
+
+    /**
+     * @return The block at {@code pos} as the game has it, and when the server sent its section as empty, which the
+     * game takes for air, what is in it all the same
+     */
+    private String gameBlockName(final BlockPos pos) {
+        final BlockState state = ctx.world().getBlockState(pos);
+        final String name = BuiltInRegistries.BLOCK.getKey(state.getBlock()).getPath();
+        final LevelChunk chunk = ctx.world().getChunkSource().getChunk(pos.getX() >> 4, pos.getZ() >> 4, false);
+        if (chunk == null) {
+            return name;
+        }
+        final int index = chunk.getSectionIndex(pos.getY());
+        final LevelChunkSection section = index >= 0 && index < chunk.getSections().length ? chunk.getSection(index) : null;
+        if (!NetherPathfinderContext.sentEmpty(section)) {
+            return name;
+        }
+        final BlockState inIt = section.getBlockState(pos.getX() & 15, pos.getY() & 15, pos.getZ() & 15);
+        return inIt.isAir() ? name : name + " (" + BuiltInRegistries.BLOCK.getKey(inIt.getBlock()).getPath() + " in a section the server sent as empty)";
+    }
+
+    private static String blockAt(final BlockPos pos) {
+        return SettingsUtil.maybeCensor(pos.getX()) + " " + SettingsUtil.maybeCensor(pos.getY()) + " " + SettingsUtil.maybeCensor(pos.getZ());
+    }
+
+    /**
+     * How the last {@code ticks} steps went: how far they asked to go, how far the player went, and how far it got. A
+     * glide held where it is and one going back and forth both get no closer, and only this tells them apart: a step
+     * the move never made, or steps that undo each other.
+     *
+     * @param feet  Where the feet were each tick, oldest first; the last is this tick's, its step not made yet
+     * @param asked The length of the step worked out each tick, with {@code feet}
+     */
+    static String lastStepsMoved(final List<Vec3> feet, final List<Double> asked, final int ticks) {
+        final int n = feet.size();
+        if (n < 2) {
+            return "no steps made yet to measure";
+        }
+        final int from = Math.max(0, n - 1 - ticks);
+        double want = 0;
+        double went = 0;
+        for (int i = from; i < n - 1; i++) {
+            want += asked.get(i);
+            went += feet.get(i + 1).distanceTo(feet.get(i));
+        }
+        return String.format(Locale.ROOT, "the last %d steps asked for %.1f blocks and it went %.1f (%.1f from where they began)",
+                n - 1 - from, want, went, feet.get(n - 1).distanceTo(feet.get(from)));
+    }
+
+    private static String heldName(final NetherPathfinderContext.Held held) {
+        switch (held) {
+            case NOTHING:
+                return "in a chunk it hasn't got";
+            case PREDICTED:
+                return "the seed's guess";
+            case AIR:
+                return "air";
+            default:
+                return "solid";
+        }
+    }
+
+    /**
+     * Notes the step worked out this tick, from where the feet are, for {@link #burnLine}
+     */
+    private void noteGlideMove(final Vec3 feet, final String kind) {
+        this.recentMoves.addLast(new GlideMove(feet, this.stepSlid ? kind + ", slid along what was in the way," : kind, this.gameTick(),
+                this.glideStep != null ? this.glideStep.length() : 0));
+        while (this.recentMoves.size() > RECENT_MOVES) {
+            this.recentMoves.removeFirst();
+        }
+    }
+
+    /**
+     * Why the player has just caught fire, from the glide's last moves, newest first: what its box went through, on what
+     * kind of step, and what the pathfinder had there. Steps the rays checked went through what the pathfinder had as
+     * air, the others went where no ray looked.
+     */
+    public String burnLine() {
+        final GlideSteps control = this.process.glideSteps();
+        if (control == null || this.recentMoves.isEmpty()) {
+            return null;
+        }
+        final List<GlideMove> moves = new ArrayList<>(this.recentMoves);
+        final int now = this.gameTick();
+        for (int i = moves.size() - 1; i >= 0; i--) {
+            final GlideMove move = moves.get(i);
+            final Vec3 end = i + 1 < moves.size() ? moves.get(i + 1).feet : ctx.player().position();
+            final Vec3 way = end.subtract(move.feet);
+            String box = control.standsWhileGliding() ? "standing box" : "gliding box";
+            BlockPos hit = this.burnsOnTheWay(this.glideBoxAt(control, move.feet), way);
+            if (hit == null && !control.standsWhileGliding()) {
+                // the server has the player standing whenever it isn't gliding
+                hit = this.burnsOnTheWay(ctx.player().getDimensions(Pose.STANDING).makeBoundingBox(move.feet), way);
+                box = "standing box (the one the server has when it isn't gliding)";
+            }
+            if (hit == null) {
+                continue;
+            }
+            final String what = ctx.world().getFluidState(hit).is(FluidTags.LAVA) ? "lava" : "fire";
+            final String had;
+            switch (npfContext.held(hit.getX(), hit.getY(), hit.getZ())) {
+                case NOTHING:
+                    had = "in a chunk it never got from the game";
+                    break;
+                case PREDICTED:
+                    had = "only as the seed's guess";
+                    break;
+                case AIR:
+                    had = "as air";
+                    break;
+                default:
+                    had = "as solid";
+            }
+            return "Caught fire: " + (now - move.tick) + " ticks before, the " + box + " went through " + what + " on a "
+                    + move.kind + " step, and the pathfinder had that block " + had;
+        }
+        // how near it came, which says whether the server can have had it in there
+        for (final double margin : new double[]{0.05, 0.15, 0.3, 0.6, 1, 2}) {
+            for (int i = moves.size() - 1; i >= 0; i--) {
+                final GlideMove move = moves.get(i);
+                final Vec3 end = i + 1 < moves.size() ? moves.get(i + 1).feet : ctx.player().position();
+                if (this.burnsOnTheWay(this.glideBoxAt(control, move.feet).inflate(margin), end.subtract(move.feet)) != null) {
+                    return "Caught fire with no lava or fire on the glide's way in the last " + moves.size()
+                            + " ticks; the nearest it came was within " + margin + " blocks, " + (now - move.tick)
+                            + " ticks before, on a " + move.kind + " step";
+                }
+            }
+        }
+        return "Caught fire with no lava or fire within 2 blocks of the glide's way in the last " + moves.size()
+                + " ticks: something else set it alight, or the server had the player somewhere else";
     }
 
     /**
@@ -1088,6 +2079,43 @@ public final class ElytraBehavior implements Helper {
      * a wall the box has to go over first, and its points are cube middles, which a 1.8 high box can't always go
      * between in a straight line.
      */
+    /**
+     * @return Whether the box is partly in a block the pathfinder has as solid: one with a box of its own smaller than
+     * the block, that the game lets it be in beside
+     */
+    private boolean inPackedSolid(final AABB box) {
+        final AABB in = box.deflate(1.0E-5);
+        for (int x = Mth.floor(in.minX); x < Mth.ceil(in.maxX); x++) {
+            for (int y = Mth.floor(in.minY); y < Mth.ceil(in.maxY); y++) {
+                for (int z = Mth.floor(in.minZ); z < Mth.ceil(in.maxZ); z++) {
+                    if (!this.passable(x, y, z)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * @return The nearest spot within {@link #GLIDE_DETOUR_RANGE} that the box gets to in one straight move the game's
+     * collisions don't cut, through nothing that burns, and where it's in nothing the pathfinder has as solid, so the
+     * rays work from there; {@code null} if none
+     */
+    private Vec3 findSolidEscape(final AABB box, final Vec3 feet) {
+        // in lava every way out goes through it: out by the shortest of them, not up along the path. a take-off from a
+        // pool straight up the path goes up through lava the whole way, and the server puts it back in it every time
+        final boolean inLava = !this.glideAvoidsLava();
+        for (final Vec3 offset : inLava ? LAVA_ESCAPES : GLIDE_DETOURS) {
+            final AABB moved = box.move(offset);
+            if (this.inPackedSolid(moved) || this.cutsGlideStep(box, offset) || (!inLava && this.glideTouchesLava(box, offset))) {
+                continue;
+            }
+            return feet.add(offset);
+        }
+        return null;
+    }
+
     private Vec3 findGlideDetour(final AABB box, final Vec3 feet) {
         final NetherPath path = this.pathManager.getPath();
         final int near = this.pathManager.getNear();
@@ -1109,13 +2137,17 @@ public final class ElytraBehavior implements Helper {
     }
 
     private static List<Vec3> glideDetours() {
-        final int n = fastFloor(GLIDE_DETOUR_RANGE / GLIDE_DETOUR_GRID);
+        return offsetsWithin(GLIDE_DETOUR_RANGE);
+    }
+
+    private static List<Vec3> offsetsWithin(final double range) {
+        final int n = fastFloor(range / GLIDE_DETOUR_GRID);
         final List<Vec3> offsets = new ArrayList<>();
         for (int x = -n; x <= n; x++) {
             for (int y = -n; y <= n; y++) {
                 for (int z = -n; z <= n; z++) {
                     final Vec3 offset = new Vec3(x, y, z).scale(GLIDE_DETOUR_GRID);
-                    if (offset.lengthSqr() > 0 && offset.length() <= GLIDE_DETOUR_RANGE) {
+                    if (offset.lengthSqr() > 0 && offset.length() <= range) {
                         offsets.add(offset);
                     }
                 }
@@ -1179,7 +2211,7 @@ public final class ElytraBehavior implements Helper {
     /**
      * {@code offset} shortened along its own line until it is within both limits
      */
-    private static Vec3 withinGlideLimits(final Vec3 offset, final double across, final double vertical) {
+    static Vec3 withinGlideLimits(final Vec3 offset, final double across, final double vertical) {
         final double flat = Math.sqrt(offset.horizontalDistanceSqr());
         double scale = 1;
         if (flat > across) {
@@ -1364,6 +2396,10 @@ public final class ElytraBehavior implements Helper {
             return;
         }
         if (this.landingMode) {
+            return;
+        }
+        if (this.process.eatingForFireResistance()) {
+            // a firework in hand would put the apple away: 1.6 s without a boost, rather than in lava without the eat
             return;
         }
         final boolean useOnDescend = !Baritone.settings().elytraConserveFireworks.value || ctx.player().position().y < goingTo.y + 5;

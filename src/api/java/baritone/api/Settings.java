@@ -1740,7 +1740,8 @@ public final class Settings {
     public final Setting<Boolean> elytraFlyBySteps = new Setting<>(false);
 
     /**
-     * With {@link #elytraFlyBySteps}, the most a step moves the player across, in blocks per tick
+     * With {@link #elytraFlyBySteps}, the most a step moves the player across, in blocks per tick. Pull-downs by the
+     * server slow it to {@link #elytraGlideSpeed} of this.
      */
     public final Setting<Double> elytraStepMaxHorizontalSpeed = new Setting<>(1.0);
 
@@ -1748,6 +1749,13 @@ public final class Settings {
      * With {@link #elytraFlyBySteps}, the most a step moves the player up or down, in blocks per tick
      */
     public final Setting<Double> elytraStepMaxVerticalSpeed = new Setting<>(1.0);
+
+    /**
+     * With {@link #elytraFlyBySteps}, the most a step moves the player while it's in lava, in blocks per tick, every way
+     * at once. In lava the game moves a player by lava's own slow rules, elytra or not, and the server puts a glide
+     * that climbs out of a lava pool at full speed back in it, and lets a slower one out.
+     */
+    public final Setting<Double> elytraInLavaSpeed = new Setting<>(0.25);
 
     /**
      * With {@link #elytraFlyBySteps}, keep the elytra from wearing: a start-gliding packet goes before every movement
@@ -1767,11 +1775,87 @@ public final class Settings {
     public final Setting<Boolean> elytraLandAtGoal = new Setting<>(false);
 
     /**
+     * The share of {@link #elytraStepMaxHorizontalSpeed} that a flight moved by steps goes at, from
+     * {@link #elytraGlideSpeedMin} to 1. Elytra flight lowers it each time the server pulls the player down and raises
+     * it again after a clean stretch, so it holds the speed learned so far: read it to carry that speed to a later run,
+     * set it to start a flight at a speed.
+     */
+    public final Setting<Double> elytraGlideSpeed = new Setting<>(1.0);
+
+    /**
+     * The lowest {@link #elytraGlideSpeed} goes to after pull-downs
+     */
+    public final Setting<Double> elytraGlideSpeedMin = new Setting<>(0.25);
+
+    /**
+     * What {@link #elytraGlideSpeed} is multiplied by after each pull-down, and divided by after each clean stretch
+     * of {@link #elytraGlideSpeedRecoveryBlocks}
+     */
+    public final Setting<Double> elytraPullDownSlowdown = new Setting<>(0.8);
+
+    /**
+     * Blocks flown across without a setback after which {@link #elytraGlideSpeed} goes back up a step, and pull-downs
+     * stop counting towards {@link #elytraPullDownLimit}
+     */
+    public final Setting<Integer> elytraGlideSpeedRecoveryBlocks = new Setting<>(1000);
+
+    /**
+     * The window, in seconds, that setbacks are counted over, for the chat line about each and for
+     * {@link #elytraPullDownSetbacks}
+     */
+    public final Setting<Integer> elytraSetbackWindowSeconds = new Setting<>(10);
+
+    /**
+     * How many setbacks that each move the player at least {@link #elytraPullDownDrop} blocks down, or a block or more
+     * any way, within {@link #elytraSetbackWindowSeconds}, mean the server is pulling the player down or turning the
+     * glide down. A flight moved by steps then stops fighting it: it lands on the nearest floor below, waits, and takes
+     * off again slower.
+     */
+    public final Setting<Integer> elytraPullDownSetbacks = new Setting<>(3);
+
+    /**
+     * How far down, in blocks, a setback has to move the player to count towards {@link #elytraPullDownSetbacks}
+     */
+    public final Setting<Double> elytraPullDownDrop = new Setting<>(0.5);
+
+    /**
+     * Pull-downs with no clean stretch of {@link #elytraGlideSpeedRecoveryBlocks} between them after which a flight
+     * moved by steps gives up
+     */
+    public final Setting<Integer> elytraPullDownLimit = new Setting<>(5);
+
+    /**
+     * Take-offs in a row that don't get a flight moved by steps gliding before it gives up. Each waits longer than
+     * the one before.
+     */
+    public final Setting<Integer> elytraTakeOffTries = new Setting<>(5);
+
+    /**
+     * Path searches in a row that find nothing before a flight gives up on its path. After each failure the next
+     * search starts somewhere else (over the head, higher up, back along the path, in bigger cubes of air), and after
+     * every few the searches wait longer. The first path of a flight gives up after one round of those starts.
+     */
+    public final Setting<Integer> elytraPathRetries = new Setting<>(20);
+
+    /**
      * Keep elytra paths a block clear of lava and fire: above, below and beside it. A path through two-high cubes puts
      * a standing player's box a tenth of a block off a lava pool under it or lava over it, and the server sets it
      * alight there. Off, paths go right up to it, as tight passages beside lava may need.
      */
     public final Setting<Boolean> elytraKeepOffLava = new Setting<>(true);
+
+    /**
+     * Eat an enchanted golden apple for fire resistance during elytra flight: in lava or fire, on fire, and while
+     * the server pulls the player down over lava, before it goes in. Not while
+     * {@link #elytraFireResistanceMinSeconds} or more of it is left.
+     */
+    public final Setting<Boolean> elytraEatForFireResistance = new Setting<>(true);
+
+    /**
+     * Seconds of fire resistance left under which {@link #elytraEatForFireResistance} eats another enchanted golden
+     * apple. One gives 300.
+     */
+    public final Setting<Integer> elytraFireResistanceMinSeconds = new Setting<>(60);
 
     /**
      * Has the user read and understood the elytra terms and conditions

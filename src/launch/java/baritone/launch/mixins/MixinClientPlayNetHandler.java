@@ -26,6 +26,7 @@ import baritone.api.event.events.ChunkEvent;
 import baritone.api.event.events.type.EventState;
 import baritone.api.utils.Pair;
 import baritone.cache.CachedChunk;
+import baritone.process.ElytraProcess;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientCommonPacketListenerImpl;
 import net.minecraft.client.multiplayer.ClientPacketListener;
@@ -144,6 +145,24 @@ public abstract class MixinClientPlayNetHandler extends ClientCommonPacketListen
                         new ChunkEvent(EventState.POST, ChunkEvent.Type.UNLOAD, packet.pos().x, packet.pos().z)
                 );
             }
+        }
+    }
+
+    @Inject(
+            method = "handleMovePlayer",
+            at = @At(
+                    value = "INVOKE",
+                    target = "net/minecraft/network/protocol/PacketUtils.ensureRunningOnSameThread(Lnet/minecraft/network/protocol/Packet;Lnet/minecraft/network/PacketListener;Lnet/minecraft/network/PacketProcessor;)V",
+                    shift = At.Shift.AFTER
+            )
+    )
+    private void preSetback(ClientboundPlayerPositionPacket packet, CallbackInfo ci) {
+        // on the game thread, before the packet moves the player: the netty thread's call throws out of the check
+        // above. the game handles every packet it has queued before the tasks it runs each frame, so a task scheduled
+        // as the packet comes in finds the player already moved, and measures nothing
+        final IBaritone baritone = BaritoneAPI.getProvider().getBaritoneForConnection((ClientPacketListener) (Object) this);
+        if (baritone != null && baritone.getElytraProcess() instanceof ElytraProcess elytra) {
+            elytra.beforeSetback(packet);
         }
     }
 

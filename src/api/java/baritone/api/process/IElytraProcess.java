@@ -54,7 +54,8 @@ public interface IElytraProcess extends IBaritoneProcess {
 
     /**
      * @return The step Baritone moves the glide by this tick ({@link baritone.api.Settings#elytraFlyBySteps}): zero
-     * while elytra flight holds the player in place, and {@code null} when it isn't flying by steps. While it isn't
+     * while elytra flight holds the player in place, and {@code null} when it isn't flying by steps, or lets the game's
+     * own glide bring it down onto a floor a safe drop under it after the server pulled it down. While it isn't
      * {@code null}, the glide is Baritone's: a client mod's own elytra fly should leave the player's movement, its
      * packets and its hitbox alone.
      */
