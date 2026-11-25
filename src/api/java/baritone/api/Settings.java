@@ -787,9 +787,35 @@ public final class Settings {
     public final Setting<Integer> chunkPackerQueueMaxSize = new Setting<>(2000);
 
     /**
-     * Fill in blocks behind you
+     * Fill in what the path digs out behind you, to leave no trace. Each hole gets the block that
+     * was broken there, facing the same way, when you carry it, else the block most common around
+     * it, else a throwaway block. With {@link #printerNoRotate} on it digs the path's next blocks
+     * and fills holes without turning, through walls ({@link #printerAirPlace} lets it place against
+     * nothing), like the printer; otherwise it stops and looks at each.
+     * <p>
+     * Every drop is picked up before its hole is filled: a block placed on a dropped item pushes it
+     * out, straight up through the rock. It stops for drops in reach, walks back for ones left
+     * behind, and leaves a hole open only when the drop can't be picked up. Keep a few slots free.
+     * While this is on, the path doesn't place blocks to bridge or pillar, and only breaks
+     * {@link #backfillSilkTouchOnly} blocks with silk touch.
      */
     public final Setting<Boolean> backfill = new Setting<>(false);
+
+    /**
+     * With {@link #backfill} on, these are only broken with a silk touch tool on the hotbar, which
+     * then mines them. Without silk touch they drop something else, and their hole would get a
+     * different block. With no silk touch tool on the hotbar the path never breaks them.
+     */
+    public final Setting<List<Block>> backfillSilkTouchOnly = new Setting<>(new ArrayList<>(Arrays.asList(
+            Blocks.NETHER_QUARTZ_ORE, Blocks.NETHER_GOLD_ORE, Blocks.GLOWSTONE, Blocks.GILDED_BLACKSTONE,
+            Blocks.CRIMSON_NYLIUM, Blocks.WARPED_NYLIUM, Blocks.GRAVEL,
+            Blocks.STONE, Blocks.DEEPSLATE, Blocks.GRASS_BLOCK, Blocks.MYCELIUM, Blocks.PODZOL, Blocks.CLAY,
+            Blocks.SNOW_BLOCK, Blocks.PACKED_ICE, Blocks.BLUE_ICE,
+            Blocks.COAL_ORE, Blocks.DEEPSLATE_COAL_ORE, Blocks.IRON_ORE, Blocks.DEEPSLATE_IRON_ORE,
+            Blocks.COPPER_ORE, Blocks.DEEPSLATE_COPPER_ORE, Blocks.GOLD_ORE, Blocks.DEEPSLATE_GOLD_ORE,
+            Blocks.REDSTONE_ORE, Blocks.DEEPSLATE_REDSTONE_ORE, Blocks.LAPIS_ORE, Blocks.DEEPSLATE_LAPIS_ORE,
+            Blocks.DIAMOND_ORE, Blocks.DEEPSLATE_DIAMOND_ORE, Blocks.EMERALD_ORE, Blocks.DEEPSLATE_EMERALD_ORE
+    )));
 
     /**
      * Shows popup message in the upper right corner, similarly to when you make an advancement

@@ -45,6 +45,7 @@ import baritone.utils.BlockStateInterface;
 import baritone.utils.BreakGoalStall;
 import baritone.utils.DoubleMine;
 import baritone.utils.EntityHole;
+import baritone.utils.PrinterClicks;
 import baritone.utils.PathingCommandContext;
 import baritone.utils.PendingPlaces;
 import baritone.utils.PlaceRateLimiter;
@@ -852,25 +853,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem) || !baritone.getInventoryBehavior().hotbarStackLasts(i, stack)) {
                 continue;
             }
-            float originalYaw = ctx.player().getYRot();
-            float originalPitch = ctx.player().getXRot();
-            // the state depends on the facing of the player sometimes
-            ctx.player().setYRot(rot.getYaw());
-            ctx.player().setXRot(rot.getPitch());
-            BlockPlaceContext meme = new BlockPlaceContext(new UseOnContext(
-                    ctx.world(),
-                    ctx.player(),
-                    InteractionHand.MAIN_HAND,
-                    stack,
-                    (BlockHitResult) result
-            ) {}); // that {} gives us access to a protected constructor lmfao
-            BlockState wouldBePlaced = ((BlockItem) stack.getItem()).getBlock().getStateForPlacement(meme);
-            ctx.player().setYRot(originalYaw);
-            ctx.player().setXRot(originalPitch);
+            BlockState wouldBePlaced = PrinterClicks.wouldPlace(ctx, stack, (BlockHitResult) result, rot);
             if (wouldBePlaced == null) {
-                continue;
-            }
-            if (!meme.canPlace()) {
                 continue;
             }
             if (valid(wouldBePlaced, desired, true)) {
@@ -1143,11 +1127,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         if (!printerPlaceReaches(clicked, face, feet, reachSq) || !printerPlaceReaches(clicked, face, predictedFeet, reachSq)) {
             return -1;
         }
-        Vec3 hitVec = VecUtils.getBlockPosCenter(clicked)
-                .add(face.getStepX() * 0.5, face.getStepY() * 0.5, face.getStepZ() * 0.5);
-        // plain BlockPos on purpose: the hit result flows into vanilla world mutation, and
-        // BetterBlockPos's different hashCode must not leak into the block entity map
-        BlockHitResult bhr = new BlockHitResult(hitVec, face, new BlockPos(clicked.x, clicked.y, clicked.z), false);
+        BlockHitResult bhr = PrinterClicks.faceHit(clicked, face);
         int usedSlot = printerTryPlace(bcc, bhr, clicked, rot, requiredSlot, air);
         if (usedSlot < 0) {
             printerNoteIdle(PRINTER_IDLE_TRIED, printerPlaceFailure);
@@ -1157,28 +1137,10 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
 
     /**
      * Whether the server takes a no-rotation place against {@code face} of {@code clicked} from a
-     * player standing at {@code feet}. Grim's FarPlace measures to the closest point of the clicked
-     * block from every eye height the player could have, crouching included, whatever its pose. That
-     * is the reach the stationary place path gets by crouching for real, so measuring the face centre
-     * from the standing eye left a ring of cells just past the printer that the stationary path
-     * stopped and crouched for every time the printer ran out of work in reach. Grim's PositionPlace
-     * also wants the clicked face turned towards those eyes, and measured to the block rather than
-     * the face, a face on its far side would pass the reach check as easily as a near one.
+     * player standing at {@code feet}, see {@link PrinterClicks#placeReaches}
      */
     private boolean printerPlaceReaches(BetterBlockPos clicked, Direction face, Vec3 feet, double reachSq) {
-        double standingEye = feet.y + ctx.player().getEyeHeight(Pose.STANDING);
-        double crouchingEye = feet.y + ctx.player().getEyeHeight(Pose.CROUCHING);
-        boolean facing = switch (face) {
-            case UP -> standingEye >= clicked.y + 1;
-            case DOWN -> crouchingEye <= clicked.y;
-            case EAST -> feet.x >= clicked.x + 1;
-            case WEST -> feet.x <= clicked.x;
-            case SOUTH -> feet.z >= clicked.z + 1;
-            case NORTH -> feet.z <= clicked.z;
-        };
-        AABB box = new AABB(clicked.x, clicked.y, clicked.z, clicked.x + 1, clicked.y + 1, clicked.z + 1);
-        return facing && (box.distanceToSqr(new Vec3(feet.x, standingEye, feet.z)) <= reachSq
-                || box.distanceToSqr(new Vec3(feet.x, crouchingEye, feet.z)) <= reachSq);
+        return PrinterClicks.placeReaches(ctx.player(), clicked, face, feet, reachSq);
     }
 
     /**
@@ -1474,8 +1436,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
      * tick's first action always does, unless room is being kept for a place
      */
     private boolean printerPacketsFit(int packets, int reserve) {
-        int sent = baritone.getPacketTrace().actionsThisTick();
-        return sent == 0 && reserve == 0 || sent + packets + reserve <= Baritone.settings().printerPacketsPerTick.value;
+        return PrinterClicks.packetsFit(baritone, packets, reserve);
     }
 
     /**
@@ -1648,8 +1609,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
      * hold something else there. Swaps that leave the slot alone don't hold it up.
      */
     private boolean printerSlotUnsettled(int slot) {
-        return Baritone.settings().allowInventory.value
-                && baritone.getInventoryBehavior().ticksSinceHotbarMove(slot) < Baritone.settings().printerInventorySettleTicks.value;
+        return PrinterClicks.slotUnsettled(baritone, slot);
     }
 
     /**
@@ -1732,10 +1692,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
      * within a tick
      */
     private static int printerBreakPackets(float progress) {
-        if (progress >= 1.0f) {
-            return 1;
-        }
-        return Baritone.settings().printerBreakNearInstant.value && progress >= IPlayerController.SERVER_FINISH_DIG_PROGRESS ? 2 : 0;
+        return PrinterClicks.breakPackets(progress);
     }
 
     /**
@@ -1902,12 +1859,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
      * about what is instant.
      */
     private float printerBreakProgress(BlockState state, BlockPos pos) {
-        var inventory = ctx.player().getInventory();
-        int previous = inventory.getSelectedSlot();
-        MovementHelper.switchToBestToolFor(ctx, state);
-        float progress = baritone.getServerDigSpeed().progress(state, pos);
-        inventory.setSelectedSlot(previous);
-        return progress;
+        return PrinterClicks.breakProgress(baritone, state, pos);
     }
 
     /**
@@ -1928,20 +1880,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
      * handles those by sneaking, the printer just leaves them alone.
      */
     private static boolean printerAvoidClicking(BlockState state) {
-        Block block = state.getBlock();
-        return block instanceof EntityBlock
-                || block instanceof DoorBlock
-                || block instanceof TrapDoorBlock
-                || block instanceof FenceGateBlock
-                || block instanceof ButtonBlock
-                || block instanceof LeverBlock
-                || block instanceof CraftingTableBlock
-                || block instanceof AnvilBlock
-                || block instanceof CakeBlock
-                || block instanceof RepeaterBlock
-                || block instanceof ComparatorBlock
-                || block instanceof NoteBlock
-                || block instanceof BedBlock;
+        return PrinterClicks.avoidClicking(state);
     }
 
     private static boolean printerRayIntersectsCell(Vec3 eye, Rotation rotation, BlockPos cell, double range) {

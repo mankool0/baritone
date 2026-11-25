@@ -38,6 +38,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.List;
+import java.util.Set;
 import java.util.function.ToDoubleFunction;
 
 /**
@@ -61,6 +62,12 @@ public class ToolSet {
     private final LocalPlayer player;
 
     /**
+     * {@link baritone.api.Settings#backfillSilkTouchOnly} while backfill is on: these only drop
+     * themselves to silk touch, so only a silk touch tool breaks them
+     */
+    private final Set<Block> silkTouchOnly;
+
+    /**
      * Used for evaluating the material cost of a tool.
      * see {@link #getMaterialCost(ItemStack)}
      * Prefer tools with lower material cost (lower index in this list).
@@ -77,6 +84,7 @@ public class ToolSet {
     public ToolSet(LocalPlayer player) {
         breakStrengthCache = new Object2DoubleOpenHashMap<>();
         this.player = player;
+        this.silkTouchOnly = Baritone.settings().backfill.value ? Set.copyOf(Baritone.settings().backfillSilkTouchOnly.value) : Set.of();
 
         if (Baritone.settings().considerPotionEffects.value) {
             double amplifier = potionAmplifier();
@@ -128,7 +136,8 @@ public class ToolSet {
      * related to auto tool movement cost, it will either return current selected slot, or the best slot.
      *
      * @param b the blockstate to be mined
-     * @return An int containing the index in the tools array that worked best
+     * @return An int containing the index in the tools array that worked best, or -1 for a
+     * {@link #silkTouchOnly} block with no silk touch tool on the hotbar that harvests it
      */
 
     public int getBestSlot(Block b, boolean preferSilkTouch) {
@@ -141,11 +150,13 @@ public class ToolSet {
         If we actually want know what efficiency our held item has instead of the best one
         possible, this lets us make pathing depend on the actual tool to be used (if auto tool is disabled)
         */
+        boolean silkOnly = silkTouchOnly.contains(b);
         if (!Baritone.settings().autoTool.value && pathingCalculation) {
-            return player.getInventory().getSelectedSlot();
+            int held = player.getInventory().getSelectedSlot();
+            return !silkOnly || harvestsWithSilkTouch(player.getInventory().getItem(held), b.defaultBlockState()) ? held : -1;
         }
 
-        int best = 0;
+        int best = silkOnly ? -1 : 0;
         double highestSpeed = Double.NEGATIVE_INFINITY;
         int lowestCost = Integer.MIN_VALUE;
         boolean bestSilkTouch = false;
@@ -158,6 +169,9 @@ public class ToolSet {
             }
 
             if (Baritone.settings().itemSaver.value && itemSaverRetires(itemStack, pendingDamage, i)) {
+                continue;
+            }
+            if (silkOnly && !harvestsWithSilkTouch(itemStack, blockState)) {
                 continue;
             }
             double speed = calculateSpeedVsBlock(itemStack, blockState);
@@ -186,7 +200,14 @@ public class ToolSet {
         return best;
     }
 
+    private boolean harvestsWithSilkTouch(ItemStack stack, BlockState state) {
+        return hasSilkTouch(stack) && (!state.requiresCorrectToolForDrops() || stack.isCorrectToolForDrops(state));
+    }
+
     private boolean wornFurther(ItemStack stack, int slot, int than, PendingToolDamage pending) {
+        if (than < 0) {
+            return false;
+        }
         ItemStack other = player.getInventory().getItem(than);
         return stack.isDamageableItem() && ItemStack.isSameItem(stack, other)
                 && lifeLeft(stack, pending, slot) < lifeLeft(other, pending, than);
@@ -225,7 +246,11 @@ public class ToolSet {
      * @return A double containing the destruction ticks with the best tool
      */
     private double getBestDestructionTime(Block b) {
-        ItemStack stack = player.getInventory().getItem(getBestSlot(b, false, true));
+        int slot = getBestSlot(b, false, true);
+        if (slot < 0) {
+            return 0; // never broken, see silkTouchOnly
+        }
+        ItemStack stack = player.getInventory().getItem(slot);
         return calculateSpeedVsBlock(stack, b.defaultBlockState()) * avoidanceMultiplier(b);
     }
 

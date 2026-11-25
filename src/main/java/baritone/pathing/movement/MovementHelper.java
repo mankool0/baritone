@@ -691,7 +691,10 @@ public interface MovementHelper extends ActionCosts, Helper {
      */
     static void switchToBestToolFor(IPlayerContext ctx, BlockState b, ToolSet ts, boolean preferSilkTouch) {
         if (Baritone.settings().autoTool.value && !Baritone.settings().assumeExternalAutoTool.value) {
-            ctx.player().getInventory().setSelectedSlot(ts.getBestSlot(b.getBlock(), preferSilkTouch));
+            int slot = ts.getBestSlot(b.getBlock(), preferSilkTouch);
+            if (slot >= 0) { // -1: backfill keeps this block for silk touch, and there's none
+                ctx.player().getInventory().setSelectedSlot(slot);
+            }
         }
     }
 
@@ -849,8 +852,31 @@ public interface MovementHelper extends ActionCosts, Helper {
         return true;
     }
 
+    /**
+     * With backfill on, a movement never places. The path was planned without placing, so a block
+     * missing under us now was dug out since, often by this same path climbing back over its own
+     * tunnel. If it's one of backfill's holes, backfill puts back the block broken there and the
+     * movement waits for it; a throwaway block would be left behind. Anywhere else the movement
+     * fails, and the path is planned again without that block.
+     *
+     * @return whether the movement has to hold off placing at {@code placeAt}
+     */
+    static boolean backfillHoldsPlacing(MovementState state, IBaritone baritone, BlockPos placeAt) {
+        if (!Baritone.settings().backfill.value) {
+            return false;
+        }
+        if (!((Baritone) baritone).getBackfillProcess().isOpenHole(placeAt)) {
+            Helper.HELPER.logDiagnostic("Not placing at " + placeAt + " while backfill is on, planning again");
+            state.setStatus(MovementStatus.UNREACHABLE);
+        }
+        return true;
+    }
+
     static PlaceResult attemptToPlaceABlock(MovementState state, IBaritone baritone, BlockPos placeAt, boolean preferDown, boolean wouldSneak) {
         IPlayerContext ctx = baritone.getPlayerContext();
+        if (backfillHoldsPlacing(state, baritone, placeAt)) {
+            return PlaceResult.NO_OPTION;
+        }
         if (EntityObstruction.blocksPlacement(ctx, placeAt)) {
             // the click would never go through, and a fresh path won't plan a placement there while it stays
             Helper.HELPER.logDebug("Can't place at " + placeAt + ", an entity is in the way");

@@ -110,7 +110,9 @@ public class CalculationContext {
                 (WorldData) baritone.getPlayerContext().worldData(),
                 new BlockStateInterface(baritone.getPlayerContext(), forUseOnAnotherThread),
                 new ToolSet(baritone.getPlayerContext().player()),
-                Baritone.settings().allowPlace.value && ((Baritone) baritone).getInventoryBehavior().hasGenericThrowaway(),
+                // a bridge or pillar block is left behind, and backfill is for leaving no trace
+                Baritone.settings().allowPlace.value && !Baritone.settings().backfill.value
+                        && ((Baritone) baritone).getInventoryBehavior().hasGenericThrowaway(),
                 Baritone.settings().allowWaterBucketFall.value && Inventory.isHotbarSlot(baritone.getPlayerContext().player().getInventory().findSlotMatchingItem(STACK_BUCKET_WATER)) && baritone.getPlayerContext().world().dimension() != Level.NETHER,
                 Baritone.settings().allowSprint.value && baritone.getPlayerContext().player().getFoodData().getFoodLevel() > 6,
                 frostWalkerLevel(baritone.getPlayerContext().player()),

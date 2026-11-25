@@ -179,6 +179,10 @@ public class MovementAscend extends Movement {
 
         BlockState jumpingOnto = BlockStateInterface.get(ctx, positionToPlace);
         if (!MovementHelper.canWalkOn(ctx, positionToPlace, jumpingOnto)) {
+            if (MovementHelper.backfillHoldsPlacing(state, baritone, positionToPlace)) {
+                // standing at src while backfill puts the step back, so still safe to cancel
+                return state;
+            }
             ticksWithoutPlacement++;
             if (MovementHelper.attemptToPlaceABlock(state, baritone, dest.below(), false, true) == PlaceResult.READY_TO_PLACE) {
                 state.setInput(Input.SNEAK, true);

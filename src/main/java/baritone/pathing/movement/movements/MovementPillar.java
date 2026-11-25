@@ -178,6 +178,9 @@ public class MovementPillar extends Movement {
             state.setInput(Input.JUMP, true);
             return state;
         } else {
+            if (MovementHelper.backfillHoldsPlacing(state, baritone, src)) {
+                return state;
+            }
             // Get ready to place a throwaway block
             if (!((Baritone) baritone).getInventoryBehavior().selectThrowawayForLocation(true, src.x, src.y, src.z)) {
                 return state.setStatus(MovementStatus.UNREACHABLE);

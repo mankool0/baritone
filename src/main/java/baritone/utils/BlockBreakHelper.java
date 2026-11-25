@@ -142,4 +142,13 @@ public final class BlockBreakHelper {
     public BrokenBlocks broken() {
         return broken;
     }
+
+    /**
+     * Whether a multi-tick dig of ours is under way. The controller's own flag can't tell between
+     * ticks: {@link #tick} clears it at the end of each one and puts it back at the start of the
+     * next.
+     */
+    public boolean digging() {
+        return wasHitting;
+    }
 }

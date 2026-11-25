@@ -53,6 +53,12 @@ public class MovementTraverse extends Movement {
      */
     private boolean wasTheBridgeBlockAlwaysThere = true;
 
+    /**
+     * Whether we're standing at src for backfill to put back the floor, see
+     * {@link MovementHelper#backfillHoldsPlacing}
+     */
+    private boolean waitingForBackfill;
+
     public MovementTraverse(IBaritone baritone, BetterBlockPos from, BetterBlockPos to) {
         super(baritone, from, to, new BetterBlockPos[]{to.above(), to}, to.below());
     }
@@ -61,6 +67,7 @@ public class MovementTraverse extends Movement {
     public void reset() {
         super.reset();
         wasTheBridgeBlockAlwaysThere = true;
+        waitingForBackfill = false;
     }
 
     @Override
@@ -250,6 +257,7 @@ public class MovementTraverse extends Movement {
         }
 
         if (isTheBridgeBlockThere) {
+            waitingForBackfill = false;
             if (feet.equals(dest)) {
                 return state.setStatus(MovementStatus.SUCCESS);
             }
@@ -278,6 +286,11 @@ public class MovementTraverse extends Movement {
             return state;
         } else {
             wasTheBridgeBlockAlwaysThere = false;
+            if (MovementHelper.backfillHoldsPlacing(state, baritone, positionToPlace)) {
+                waitingForBackfill = true; // still at src, waiting for backfill to put the floor back
+                return state;
+            }
+            waitingForBackfill = false;
             Block standingOn = BlockStateInterface.get(ctx, feet.below()).getBlock();
             if (standingOn.equals(Blocks.SOUL_SAND) || standingOn instanceof SlabBlock) { // see issue #118
                 double dist = Math.max(Math.abs(dest.getX() + 0.5 - ctx.player().position().x), Math.abs(dest.getZ() + 0.5 - ctx.player().position().z));
@@ -354,7 +367,7 @@ public class MovementTraverse extends Movement {
         // if we're in the process of breaking blocks before walking forwards
         // or if this isn't a sneak place (the block is already there)
         // then it's safe to cancel this
-        return state.getStatus() != MovementStatus.RUNNING || MovementHelper.canWalkOn(ctx, dest.below());
+        return state.getStatus() != MovementStatus.RUNNING || MovementHelper.canWalkOn(ctx, dest.below()) || waitingForBackfill;
     }
 
     @Override

@@ -20,6 +20,7 @@ package baritone.utils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 
+import java.util.function.BiConsumer;
 import java.util.function.Function;
 
 /**
@@ -41,6 +42,20 @@ public final class BrokenBlocks {
     }
 
     public long count() {
+        return count;
+    }
+
+    /**
+     * Hands each block broken after the first {@code since} to {@code action}, oldest first.
+     * Only the last {@value #KEPT} are kept, so older ones are skipped.
+     *
+     * @return the count to pass as {@code since} next time
+     */
+    public long forEachSince(long since, BiConsumer<BlockPos, BlockState> action) {
+        for (long n = Math.max(since, count - KEPT); n < count; n++) {
+            int i = (int) (n % KEPT);
+            action.accept(pos[i], was[i]);
+        }
         return count;
     }
 
