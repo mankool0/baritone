@@ -27,6 +27,7 @@ import baritone.behavior.highway.enums.HighwayBlockState;
 import baritone.behavior.highway.enums.LocationType;
 import baritone.pathing.movement.MovementHelper;
 import baritone.utils.EntityHole;
+import baritone.utils.PortalPop;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.world.entity.Entity;
@@ -35,7 +36,6 @@ import net.minecraft.world.entity.vehicle.boat.AbstractBoat;
 import net.minecraft.world.level.block.AirBlock;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LiquidBlock;
-import net.minecraft.world.level.block.NetherPortalBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -383,11 +383,13 @@ public class HighwayScanner extends ContextComponent {
         if (desired.equals(current)) {
             return CellScan.CORRECT;
         }
-        // The same cells BuilderProcess.valid() accepts and isHighwayCorrect skips: a lit portal pops
-        // once its frame is mined, and buildIgnoreBlocks (signs) are never touched. Read as unbuilt,
-        // a sign standing on the lane pinned the travel walk short of it for good while the builder
-        // had nothing left to do, so the bot restarted the builder over and over in place.
-        if (current.getBlock() instanceof NetherPortalBlock
+        // The same cells BuilderProcess.valid() accepts and isHighwayCorrect skips: a lit portal where
+        // the road wants air, and buildIgnoreBlocks (signs) where it wants air, are never touched. A
+        // portal where it wants a block is unbuilt here and there alike, and the builder pops it by
+        // mining its frame. Had this read a cell as unbuilt that the builder leaves alone, the
+        // travel walk would stop short of it while the builder has nothing left to do, and the bot
+        // restarts the builder over and over in place.
+        if (PortalPop.leftStanding(current, desired)
                 || (desired.getBlock() instanceof AirBlock && settings.buildIgnoreBlocks.value.contains(current.getBlock()))) {
             return CellScan.CORRECT;
         }
@@ -635,8 +637,9 @@ public class HighwayScanner extends ContextComponent {
                             }
 
                             if (!desiredState.equals(current)) {
-                                if (current.getBlock() instanceof NetherPortalBlock) {
-                                    // unbreakable directly; it pops on its own once the builder mines the frame
+                                if (PortalPop.leftStanding(current, desiredState)) {
+                                    // nothing goes where the road wants air; where it wants a block,
+                                    // the portal is unbuilt road and the builder pops it by mining its frame
                                     continue;
                                 }
                                 if (!baritone.getBuilderProcess().checkNoEntityCollision(new AABB(new BlockPos(blockX, blockY, blockZ)), playerContext.player())) {

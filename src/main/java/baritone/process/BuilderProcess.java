@@ -48,6 +48,7 @@ import baritone.utils.EntityHole;
 import baritone.utils.PathingCommandContext;
 import baritone.utils.PendingPlaces;
 import baritone.utils.PlaceRateLimiter;
+import baritone.utils.PortalPop;
 import baritone.utils.accessor.IClientLevel;
 import baritone.utils.accessor.IPlayerControllerMP;
 import baritone.utils.schematic.MapArtSchematic;
@@ -170,6 +171,16 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private final Set<BetterBlockPos> entityBlocked = new HashSet<>();
     /** The ones of those a boat is in; the highway's BoatRemoval deals with boats. */
     private final Set<BetterBlockPos> boatBlocked = new HashSet<>();
+    /**
+     * Frame blocks of the lit portals standing where the build wants a block ({@link PortalPop}):
+     * the sides first, then the tops, the bottoms last. Breaking any one of a portal's frame
+     * blocks pops the whole portal.
+     */
+    private final Set<BetterBlockPos> toBreakPortal = new LinkedHashSet<>();
+    /** Why a portal in the build's way can't be popped, or null if every such portal can be. */
+    private String portalStuck;
+    /** The portals already announced in chat, each by the least {@link BlockPos#asLong} of its blocks. */
+    private final LongSet portalsAnnounced = new LongOpenHashSet();
     public int stopAtHeight = 0;
     /**
      * Positions completed within the last {@link #COMPLETED_WATCH_TICKS}, kept even after the window
@@ -434,6 +445,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         this.observedCompleted = new LongOpenHashSet();
         this.incorrectPositions = null;
         clearEntityHoles();
+        clearPortalPops();
+        portalsAnnounced.clear();
         clearCompletedWatch();
         printerResetNoRotateDetection();
         // a restart looks at every block afresh, from wherever we stand now
@@ -620,8 +633,30 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             }
         }
 
+        int minDy = Baritone.settings().breakFromAbove.value ? -1 : 0;
+        for (BetterBlockPos pos : toBreakPortal) {
+            int dy = pos.y - center.y;
+            // the same box and the same footing rule as the build's own blocks below
+            if (Math.abs(pos.x - center.x) > 5 || Math.abs(pos.z - center.z) > 5 || dy < minDy || dy > 5
+                    || dy == -1 && pos.x == pathStart.x && pos.z == pathStart.z) {
+                continue;
+            }
+            Optional<Rotation> rot = RotationUtils.reachable(ctx, pos, ctx.playerController().getBlockReachDistance());
+            if (rot.isEmpty()) {
+                // The ray to a frame face beside the portal crosses a portal block, whose 0.25 thick
+                // slab down the middle of the cell stops it, so the middles of those faces never
+                // show. Only the strips either side of the slab do.
+                rot = RotationUtils.reachableOutline(ctx, pos, ctx.playerController().getBlockReachDistance(), false);
+            }
+            if (rot.isPresent()) {
+                toReturn.add(Optional.of(new Tuple<>(pos, rot.get())));
+            } else {
+                outOfReach.add(pos);
+            }
+        }
+
         for (int dx = -5; dx <= 5; dx++) {
-            for (int dy = Baritone.settings().breakFromAbove.value ? -1 : 0; dy <= 5; dy++) {
+            for (int dy = minDy; dy <= 5; dy++) {
                 for (int dz = -5; dz <= 5; dz++) {
                     int x = center.x + dx;
                     int y = center.y + dy;
@@ -634,7 +669,11 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                         continue; // irrelevant
                     }
                     BlockState curr = bcc.bsi.get0(x, y, z);
-                    if (!(curr.getBlock() instanceof AirBlock) && !(curr.getBlock() == Blocks.WATER || curr.getBlock() == Blocks.LAVA) && !valid(curr, desired, false)) {
+                    if (!(curr.getBlock() instanceof AirBlock) && !(curr.getBlock() == Blocks.WATER || curr.getBlock() == Blocks.LAVA)
+                            // can't be broken: its frame is, above
+                            && !(curr.getBlock() instanceof NetherPortalBlock)
+                            && !valid(curr, desired, false)
+                            && (toBreakPortal.isEmpty() || !toBreakPortal.contains(new BetterBlockPos(x, y, z)))) {
                         Optional<Rotation> rot = RotationUtils.reachable(ctx, new BlockPos(x, y, z), ctx.playerController().getBlockReachDistance());
                         if (rot.isEmpty()) {
                             // a sign or slab can show only a strip that no middle of a face is on
@@ -2051,6 +2090,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             trim();
         }
         updateEntityHoles(bcc);
+        updatePortalPops(bcc);
 
         List<BetterBlockPos> outOfReach = new ArrayList<>();
         List<Optional<Tuple<BetterBlockPos, Rotation>>> toBreak = toBreakNearPlayer(bcc, outOfReach);
@@ -2351,6 +2391,16 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                 // or walking off. A pause would sit idle long after it's gone, so check every tick.
                 return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
             }
+            if (portalStuck != null) {
+                // what's left is behind a portal nothing pops safely; say which, rather than "unable to do it"
+                if (!highway.isBuildingHighwayState()) {
+                    logDirect(portalStuck + ". Pausing. resume to resume, cancel to cancel");
+                    paused = true;
+                    return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+                }
+                unreachableBreak = portalStuck; // the highway pauses on it, which is what ends the leg
+                return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
+            }
             if (Baritone.settings().skipFailedLayers.value && Baritone.settings().buildInLayers.value && layer * Baritone.settings().layerHeight.value < realSchematic.heightY()) {
                 logDirect("Skipping layer that I cannot construct! Layer #" + layer);
                 layer++;
@@ -2398,7 +2448,17 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             }
             BlockState state = bcc.bsi.get0(block);
             int struck = breakGoalStall.strike(block, state, feet);
-            if (struck >= BreakGoalStall.SPOTS_PER_BLOCK) {
+            if (struck >= BreakGoalStall.SPOTS_PER_BLOCK && toBreakPortal.contains(block)) {
+                // Any other block of the frame pops the portal just the same, and updatePortalPops
+                // leaves this one out from now on
+                if (toBreakPortal.stream().anyMatch(frame -> !frame.equals(block) && breakGoalStall.struckCount(frame) < BreakGoalStall.SPOTS_PER_BLOCK)) {
+                    logDirect("Can't see the portal frame block at " + block.x + "," + block.y + "," + block.z
+                            + " from any of the " + struck + " spots beside it we stood on, trying another block of the frame.");
+                } else {
+                    giveUp = unreachableBreakReason(bcc, block, state, "it is the last block of a lit nether portal's frame that would pop the portal,"
+                            + " and it was out of sight from all " + struck + " spots beside it we stood on");
+                }
+            } else if (struck >= BreakGoalStall.SPOTS_PER_BLOCK) {
                 giveUp = unreachableBreakReason(bcc, block, state, "out of sight from all " + struck + " spots beside it we stood on");
             } else {
                 logDirect("Can't see " + BlockUtils.blockToString(state.getBlock()) + " at " + block.x + "," + block.y + "," + block.z
@@ -2730,6 +2790,65 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         entityHoleColumns = columns;
     }
 
+    private void clearPortalPops() {
+        toBreakPortal.clear();
+        portalStuck = null;
+    }
+
+    /**
+     * Finds the lit portals standing where the build wants a block, and the frame blocks that pop
+     * them ({@link PortalPop}). The portal blocks themselves are never broken, and nothing can be
+     * placed into them. Redone every tick, as for the entity holes: a single break pops the lot.
+     * A frame block that has had every spot struck off it is left out, so a portal with frame
+     * blocks in sight elsewhere keeps the builder going round to those.
+     */
+    private void updatePortalPops(BuilderCalculationContext bcc) {
+        clearPortalPops();
+        LongSet seen = null;
+        for (BetterBlockPos pos : incorrectPositions) {
+            if (!(bcc.bsi.get0(pos).getBlock() instanceof NetherPortalBlock)) {
+                continue;
+            }
+            if (seen == null) {
+                seen = new LongOpenHashSet();
+            }
+            if (seen.contains(BlockPos.asLong(pos.x, pos.y, pos.z))) {
+                continue;
+            }
+            PortalPop.Plan plan = PortalPop.plan(bcc.bsi::get0, pos);
+            for (BlockPos cell : plan.cells()) {
+                seen.add(cell.asLong());
+            }
+            String portal = "Lit nether portal at " + pos.x + "," + pos.y + "," + pos.z;
+            if (plan.heldBack() != null) {
+                BlockPos liquid = plan.heldBack();
+                portalStuck = portal + " stands where the build wants a block, and popping it would let out the "
+                        + BlockUtils.blockToString(bcc.bsi.get0(liquid).getBlock()) + " it holds back at "
+                        + liquid.getX() + "," + liquid.getY() + "," + liquid.getZ();
+                continue;
+            }
+            List<BetterBlockPos> frames = new ArrayList<>();
+            for (BlockPos frame : plan.frames()) {
+                if (breakGoalStall.struckCount(frame) < BreakGoalStall.SPOTS_PER_BLOCK) {
+                    frames.add(new BetterBlockPos(frame));
+                }
+            }
+            if (frames.isEmpty()) {
+                portalStuck = portal + " stands where the build wants a block, and "
+                        + (plan.frames().isEmpty()
+                        ? plan.unsafe().isEmpty() ? "it has no obsidian frame to mine" : "every block of its frame that would pop it has a liquid beside it"
+                        : "no block of its frame that would pop it could be seen from any spot we stood on");
+                continue;
+            }
+            toBreakPortal.addAll(frames);
+            // keyed by a block of its own, not by whichever the set handed us first this tick
+            if (portalsAnnounced.add(plan.cells().stream().mapToLong(BlockPos::asLong).min().getAsLong())) {
+                logDirect(portal + " stands where the build wants a block, mining a block of its frame to pop it"
+                        + (plan.unsafe().isEmpty() ? "" : " (" + plan.unsafe().size() + " left alone for a liquid beside them)"));
+            }
+        }
+    }
+
     /**
      * The nearest cell of an entity's hole still to dig with us already beside it ({@link GoalBesideEntityHole}),
      * or null. Asked only once {@link #toBreakNearPlayer} found nothing it can see, which covers every one of these.
@@ -2771,6 +2890,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         AtomicBoolean liquidDetected = new AtomicBoolean(false);
         AtomicBoolean entityDetected = new AtomicBoolean(false);
         AtomicBoolean boatDetected = new AtomicBoolean(false);
+        AtomicBoolean portalDetected = new AtomicBoolean(false);
         List<BetterBlockPos> outOfBounds = new ArrayList<>();
         candidates.forEach(pos -> {
             BlockState state = bcc.bsi.get0(pos);
@@ -2804,6 +2924,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                         }
                         flowingLiquids.add(pos);
                     }
+                } else if (state.getBlock() instanceof NetherPortalBlock) {
+                    portalDetected.set(true); // unbreakable: the blocks of its frame go in its place, below
                 } else {
                     breakable.add(pos);
                 }
@@ -2813,6 +2935,15 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
 
         if (boatDetected.get()) {
             return null;
+        }
+        if (portalDetected.get()) {
+            // A frame block the build wants gone is already among them, and its goal is the same
+            Set<BetterBlockPos> already = new HashSet<>(breakable);
+            for (BetterBlockPos frame : toBreakPortal) {
+                if (already.add(frame)) {
+                    breakable.add(frame);
+                }
+            }
         }
 
         if (!breakable.isEmpty()) {
@@ -3211,6 +3342,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     public void onLostControl() {
         incorrectPositions = null;
         clearEntityHoles();
+        clearPortalPops();
         name = null;
         schematic = null;
         realSchematic = null;
@@ -3336,7 +3468,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         if (desired == null) {
             return true;
         }
-        if (current.getBlock() instanceof NetherPortalBlock) {
+        // a portal where a block goes is wrong, and updatePortalPops pops it by mining its frame
+        if (PortalPop.leftStanding(current, desired)) {
             return true;
         }
         if (current.getBlock() instanceof LiquidBlock && Baritone.settings().okIfWater.value) {
