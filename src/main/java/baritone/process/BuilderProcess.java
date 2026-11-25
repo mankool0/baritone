@@ -40,6 +40,7 @@ import baritone.pathing.movement.MovementHelper;
 import baritone.pathing.movement.Moves;
 import baritone.pathing.path.PathExecutor;
 import baritone.utils.BaritoneProcessHelper;
+import baritone.utils.ReconnectResume;
 import baritone.utils.BlockBreakHelper;
 import baritone.utils.BlockStateInterface;
 import baritone.utils.BreakGoalStall;
@@ -136,6 +137,10 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     private HashSet<BetterBlockPos> incorrectPositions;
     private LongOpenHashSet observedCompleted; // positions that are completed even if they're out of render distance and we can't make sure right now
     private String name;
+    // the build as asked for, to start again after a reconnect: build() moves the origin it's handed
+    private String askedName;
+    private ISchematic askedSchematic;
+    private Vec3i askedOrigin;
     private ISchematic realSchematic;
     private ISchematic schematic;
     /** The schematic as handed in when its cell overrides are world boxes, rebound wherever the origin moves. */
@@ -399,6 +404,11 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
 
     @Override
     public void build(String name, ISchematic schematic, Vec3i origin) {
+        // the highway's builds run only while it does, and it starts them again itself after a reconnect
+        final boolean highways = baritone.getNetherHighwayBuilderBehavior().isHighwayActive();
+        this.askedName = highways ? null : name;
+        this.askedSchematic = highways ? null : schematic;
+        this.askedOrigin = highways ? null : origin;
         this.name = name;
         this.realSchematic = null;
         boolean buildingSelectionSchematic = schematic instanceof SelectionSchematic;
@@ -3278,11 +3288,32 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     }
 
     @Override
+    public ReconnectResume.Restart restartAfterReconnect() {
+        final ISchematic asked = this.askedSchematic;
+        if (this.schematic == null || asked == null) {
+            return null;
+        }
+        final String name = this.askedName;
+        final Vec3i origin = this.askedOrigin;
+        final boolean paused = this.paused;
+        // from the start: windows a repeating build has done are seen to be done again and skipped
+        return new ReconnectResume.Restart("building " + name, () -> {
+            this.build(name, asked, origin);
+            if (paused) {
+                this.pause();
+            }
+        });
+    }
+
+    @Override
     public void onLostControl() {
         incorrectPositions = null;
         clearEntityHoles();
         clearPortalPops();
         name = null;
+        askedName = null;
+        askedSchematic = null;
+        askedOrigin = null;
         schematic = null;
         realSchematic = null;
         boundSchematic = null;

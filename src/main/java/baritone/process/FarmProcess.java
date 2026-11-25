@@ -34,6 +34,7 @@ import baritone.api.utils.RotationUtils;
 import baritone.api.utils.input.Input;
 import baritone.pathing.movement.MovementHelper;
 import baritone.utils.BaritoneProcessHelper;
+import baritone.utils.ReconnectResume;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.entity.Entity;
@@ -415,6 +416,16 @@ public final class FarmProcess extends BaritoneProcessHelper implements IFarmPro
     @Override
     public void onLostControl() {
         active = false;
+    }
+
+    @Override
+    public ReconnectResume.Restart restartAfterReconnect() {
+        if (!this.active) {
+            return null;
+        }
+        final int range = this.range;
+        final BlockPos center = this.center;
+        return new ReconnectResume.Restart("farming around " + center.toShortString(), () -> this.farm(range, center));
     }
 
     @Override

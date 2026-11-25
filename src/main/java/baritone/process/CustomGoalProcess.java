@@ -23,6 +23,7 @@ import baritone.api.process.ICustomGoalProcess;
 import baritone.api.process.PathingCommand;
 import baritone.api.process.PathingCommandType;
 import baritone.utils.BaritoneProcessHelper;
+import baritone.utils.ReconnectResume;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.network.chat.Component;
@@ -113,6 +114,7 @@ public final class CustomGoalProcess extends BaritoneProcessHelper implements IC
                     onLostControl(); // we're there xd
                     if (Baritone.settings().disconnectOnArrival.value) {
                         if (ctx.world() instanceof ClientLevel clientLevel) {
+                            baritone.getReconnectResume().disconnectingOnPurpose();
                             clientLevel.disconnect(Component.literal("[Baritone] Arrived at goal!"));
                         }
                     }
@@ -131,6 +133,19 @@ public final class CustomGoalProcess extends BaritoneProcessHelper implements IC
     public void onLostControl() {
         this.state = State.NONE;
         this.goal = null;
+    }
+
+    @Override
+    public ReconnectResume.Restart restartAfterReconnect() {
+        final Goal goal = this.goal;
+        if (this.state == State.NONE || goal == null) {
+            return null;
+        }
+        if (this.state == State.GOAL_SET) {
+            // set, not pathed to yet
+            return new ReconnectResume.Restart("the goal " + goal, () -> this.setGoal(goal));
+        }
+        return new ReconnectResume.Restart("the path to " + goal, () -> this.setGoalAndPath(goal));
     }
 
     @Override

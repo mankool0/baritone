@@ -98,11 +98,15 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
     public void onTick(TickEvent event) {
         dispatchEvents();
         if (event.getType() == TickEvent.Type.OUT) {
+            // before the cancel below wipes what the processes were doing
+            baritone.getReconnectResume().onDisconnectedTick();
             secretInternalSegmentCancel();
             baritone.getPathingControlManager().cancelEverything();
             return;
         }
 
+        // before the processes tick, so whatever this starts again after a reconnect ticks this tick
+        baritone.getReconnectResume().onConnectedTick();
         expectedSegmentStart = pathStart();
         baritone.getPathingControlManager().preTick();
         tickPath();
@@ -179,6 +183,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
                     next = null;
                     if (Baritone.settings().disconnectOnArrival.value) {
                         if (ctx.world() instanceof ClientLevel clientLevel) {
+                            baritone.getReconnectResume().disconnectingOnPurpose();
                             clientLevel.disconnect(Component.literal("[Baritone] Arrived at goal!"));
                         }
                     }

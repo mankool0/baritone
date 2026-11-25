@@ -1362,6 +1362,20 @@ public final class Settings {
     public final Setting<Boolean> disconnectOnArrival = new Setting<>(false);
 
     /**
+     * After the connection to the server is lost (a kick, a timeout, the server going down, a proxy sending you to its
+     * queue), pick up again what Baritone was doing once you're back on the same server, in the same dimension and near
+     * where you were: the path, the elytra flight, mining, building, following, exploring or farming. It starts again
+     * on the first tick the world around you is loaded, which is the first tick you move. Disconnecting from the pause
+     * menu, or by {@link #disconnectOnArrival}, forgets it. The highway builder isn't one of these: it restarts itself.
+     */
+    public final Setting<Boolean> resumeAfterReconnect = new Setting<>(true);
+
+    /**
+     * How long after the disconnect {@link #resumeAfterReconnect} still picks up what Baritone was doing, in milliseconds
+     */
+    public final Setting<Long> resumeAfterReconnectTimeoutMS = new Setting<>(600_000L);
+
+    /**
      * Disallow MineBehavior from using X-Ray to see where the ores are. Turn this option on to force it to mine "legit"
      * where it will only mine an ore once it can actually see it, so it won't do or know anything that a normal player
      * couldn't. If you don't want it to look like you're X-Raying, turn this on

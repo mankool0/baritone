@@ -28,6 +28,7 @@ import baritone.api.process.PathingCommand;
 import baritone.api.process.PathingCommandType;
 import baritone.api.utils.BetterBlockPos;
 import baritone.utils.BaritoneProcessHelper;
+import baritone.utils.ReconnectResume;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
@@ -114,6 +115,20 @@ public final class FollowProcess extends BaritoneProcessHelper implements IFollo
     public void onLostControl() {
         filter = null;
         cache = null;
+    }
+
+    @Override
+    public ReconnectResume.Restart restartAfterReconnect() {
+        final Predicate<Entity> filter = this.filter;
+        if (filter == null) {
+            return null;
+        }
+        final boolean into = this.into;
+        // a filter that holds the entities themselves matches none of the new world's, and stops by itself
+        return new ReconnectResume.Restart(into ? "the item pickup" : "the follow", () -> {
+            this.filter = filter;
+            this.into = into;
+        });
     }
 
     @Override

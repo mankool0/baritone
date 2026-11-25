@@ -29,6 +29,7 @@ import baritone.cache.CachedChunk;
 import baritone.pathing.movement.CalculationContext;
 import baritone.pathing.movement.MovementHelper;
 import baritone.utils.BaritoneProcessHelper;
+import baritone.utils.ReconnectResume;
 import baritone.utils.BlockStateInterface;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -168,6 +169,17 @@ public final class MineProcess extends BaritoneProcessHelper implements IMinePro
     @Override
     public void onLostControl() {
         mine(0, (BlockOptionalMetaLookup) null);
+    }
+
+    @Override
+    public ReconnectResume.Restart restartAfterReconnect() {
+        final BlockOptionalMetaLookup filter = this.filter;
+        if (filter == null) {
+            return null;
+        }
+        // the quantity is of what's in the inventory, so the same one is still the target
+        final int quantity = this.desiredQuantity;
+        return new ReconnectResume.Restart("mining " + filter, () -> this.mine(quantity, filter));
     }
 
     @Override

@@ -60,6 +60,13 @@ public class PathingControlManager implements IPathingControlManager {
         processes.add(process);
     }
 
+    /**
+     * @return Every registered process, active or not
+     */
+    public Set<IBaritoneProcess> processes() {
+        return Collections.unmodifiableSet(processes);
+    }
+
     public void cancelEverything() { // called by PathingBehavior on TickEvent Type OUT
         inControlLastTick = null;
         inControlThisTick = null;

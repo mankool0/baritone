@@ -36,4 +36,15 @@ public abstract class BaritoneProcessHelper implements IBaritoneProcess, Helper 
     public boolean isTemporary() {
         return false;
     }
+
+    /**
+     * How to start this process again, doing what it's doing now, once the player is back after a lost connection
+     * ({@link baritone.api.Settings#resumeAfterReconnect}). Asked on the first disconnected tick, just before every
+     * process is cancelled, so there's no player or world to look at, only this process's own fields.
+     *
+     * @return The restart, or {@code null} when there's nothing to pick up again
+     */
+    public ReconnectResume.Restart restartAfterReconnect() {
+        return null;
+    }
 }

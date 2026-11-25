@@ -31,6 +31,7 @@ import baritone.api.utils.input.Input;
 import baritone.pathing.movement.CalculationContext;
 import baritone.pathing.movement.MovementHelper;
 import baritone.utils.BaritoneProcessHelper;
+import baritone.utils.ReconnectResume;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.level.block.Block;
@@ -188,6 +189,12 @@ public final class GetToBlockProcess extends BaritoneProcessHelper implements IG
         start = null;
         blacklist = null;
         baritone.getInputOverrideHandler().clearAllKeys();
+    }
+
+    @Override
+    public ReconnectResume.Restart restartAfterReconnect() {
+        final BlockOptionalMeta block = this.gettingTo;
+        return block == null ? null : new ReconnectResume.Restart("getting to " + block, () -> this.getToBlock(block));
     }
 
     @Override

@@ -29,6 +29,7 @@ import baritone.api.process.PathingCommandType;
 import baritone.api.utils.MyChunkPos;
 import baritone.cache.CachedWorld;
 import baritone.utils.BaritoneProcessHelper;
+import baritone.utils.ReconnectResume;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
@@ -290,6 +291,16 @@ public final class ExploreProcess extends BaritoneProcessHelper implements IExpl
     @Override
     public void onLostControl() {
         explorationOrigin = null;
+    }
+
+    @Override
+    public ReconnectResume.Restart restartAfterReconnect() {
+        final BlockPos origin = this.explorationOrigin;
+        if (origin == null) {
+            return null;
+        }
+        // the json chunk filter isn't cleared when it loses control, so it's still the one asked for
+        return new ReconnectResume.Restart("exploring from " + origin.getX() + ", " + origin.getZ(), () -> this.explore(origin.getX(), origin.getZ()));
     }
 
     @Override

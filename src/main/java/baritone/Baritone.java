@@ -37,6 +37,7 @@ import baritone.utils.GuiClick;
 import baritone.utils.InputOverrideHandler;
 import baritone.utils.PacketTrace;
 import baritone.utils.PathingControlManager;
+import baritone.utils.ReconnectResume;
 import baritone.utils.ServerDigSpeed;
 import baritone.utils.ServerDigTarget;
 import baritone.utils.player.BaritonePlayerContext;
@@ -110,6 +111,7 @@ public class Baritone implements IBaritone {
     private final ServerDigTarget serverDigTarget;
     private final PacketTrace packetTrace;
     private final WorldProvider worldProvider;
+    private final ReconnectResume reconnectResume;
 
     public BlockStateInterface bsi;
 
@@ -158,6 +160,7 @@ public class Baritone implements IBaritone {
         }
 
         this.worldProvider = new WorldProvider(this);
+        this.reconnectResume = new ReconnectResume(this);
         this.selectionManager = new SelectionManager(this);
         this.commandManager = new CommandManager(this);
     }
@@ -269,6 +272,10 @@ public class Baritone implements IBaritone {
     @Override
     public SelectionManager getSelectionManager() {
         return selectionManager;
+    }
+
+    public ReconnectResume getReconnectResume() {
+        return this.reconnectResume;
     }
 
     @Override

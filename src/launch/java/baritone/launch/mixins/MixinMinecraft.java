@@ -17,6 +17,7 @@
 
 package baritone.launch.mixins;
 
+import baritone.Baritone;
 import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import baritone.api.event.events.PlayerUpdateEvent;
@@ -29,6 +30,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.phys.HitResult;
 import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Mixin;
@@ -136,6 +138,18 @@ public abstract class MixinMinecraft implements IMinecraft {
             // Intentionally call this after all entities have been updated. That way, any modification to rotations
             // can be recognized by other entity code. (Fireworks and Pigs, for example)
             baritone.getGameEventHandler().onPlayerUpdate(new PlayerUpdateEvent(EventState.POST));
+        }
+    }
+
+    @Inject(
+            method = "disconnectFromWorld",
+            at = @At("HEAD")
+    )
+    private void preDisconnectFromWorld(Component reason, CallbackInfo ci) {
+        // the pause menu's Disconnect: quitting on purpose, so what Baritone was doing isn't picked up again on the way
+        // back. a lost connection (kick, timeout, server down) comes through the connection's disconnect instead
+        if (BaritoneAPI.getProvider().getPrimaryBaritone() instanceof Baritone baritone) {
+            baritone.getReconnectResume().disconnectingOnPurpose();
         }
     }
 
