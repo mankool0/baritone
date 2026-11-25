@@ -162,12 +162,58 @@ public final class CachedWorld implements ICachedWorld, Helper {
                     }
                 }
             }
-            if (res.size() >= maximum) {
+            // enough of them, and none in a region still to look in can be nearer. a count alone stops at the region
+            // the player is in: two nether portals anywhere in its 512 blocks are 12 portal blocks, and a portal a few
+            // chunks away over the region's edge is never looked for, so #goto goes to one further off
+            if (res.size() >= maximum && nearerThanTheRest(res, maximum, centerX, centerZ, searchRadius, maxRegionDistanceSq)) {
                 return res;
             }
             searchRadius++;
         }
         return res;
+    }
+
+    /**
+     * @return Whether at least {@code maximum} of {@code found} are no further across from ({@code x}, {@code z}) than
+     * the nearest block of any region in the rings after {@code ring} (squared region offsets) up to {@code maxRing}
+     */
+    static boolean nearerThanTheRest(List<BlockPos> found, int maximum, int x, int z, int ring, int maxRing) {
+        final int regionX = x >> 9;
+        final int regionZ = z >> 9;
+        long nearest = Long.MAX_VALUE;
+        for (int r = ring + 1; r <= maxRing; r++) {
+            for (int xoff = -r; xoff <= r; xoff++) {
+                for (int zoff = -r; zoff <= r; zoff++) {
+                    if (xoff * xoff + zoff * zoff == r) {
+                        nearest = Math.min(nearest, distanceSqToRegion(x, z, regionX + xoff, regionZ + zoff));
+                    }
+                }
+            }
+        }
+        if (nearest == Long.MAX_VALUE) {
+            return true;
+        }
+        int count = 0;
+        for (BlockPos pos : found) {
+            final long dx = pos.getX() - x;
+            final long dz = pos.getZ() - z;
+            if (dx * dx + dz * dz <= nearest && ++count >= maximum) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * @return How far across ({@code x}, {@code z}) is from the nearest block of region ({@code regionX},
+     * {@code regionZ}), squared
+     */
+    static long distanceSqToRegion(int x, int z, int regionX, int regionZ) {
+        final int minX = regionX << 9;
+        final int minZ = regionZ << 9;
+        final long dx = x < minX ? minX - x : Math.max(0, x - (minX + 511));
+        final long dz = z < minZ ? minZ - z : Math.max(0, z - (minZ + 511));
+        return dx * dx + dz * dz;
     }
 
     private void updateCachedChunk(CachedChunk chunk) {
