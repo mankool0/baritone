@@ -42,6 +42,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -151,6 +152,16 @@ public abstract class MixinClientPlayNetHandler extends ClientCommonPacketListen
             at = @At("RETURN")
     )
     private void postHandleBlockChange(ClientboundBlockUpdatePacket packetIn, CallbackInfo ci) {
+        // a change the server sends on its own, as it does for most of a lava flow a step at a time. with only the ones
+        // it sends a section at a time passed on, the elytra pathfinder never hears of the rest: lava that flows in
+        // after its chunk is packed stays air to it, and a glide can clip it and catch fire
+        final IBaritone baritone = BaritoneAPI.getProvider().getBaritoneForConnection((ClientPacketListener) (Object) this);
+        if (baritone != null) {
+            baritone.getGameEventHandler().onBlockChange(new BlockChangeEvent(
+                    new ChunkPos(packetIn.getPos()),
+                    Collections.singletonList(new Pair<>(packetIn.getPos().immutable(), packetIn.getBlockState()))
+            ));
+        }
         if (!Baritone.settings().repackOnAnyBlockChange.value) {
             return;
         }

@@ -1738,6 +1738,13 @@ public final class Settings {
     public final Setting<Boolean> elytraLandAtGoal = new Setting<>(false);
 
     /**
+     * Keep elytra paths a block clear of lava and fire: above, below and beside it. A path through two-high cubes puts
+     * a standing player's box a tenth of a block off a lava pool under it or lava over it, and the server sets it
+     * alight there. Off, paths go right up to it, as tight passages beside lava may need.
+     */
+    public final Setting<Boolean> elytraKeepOffLava = new Setting<>(true);
+
+    /**
      * Has the user read and understood the elytra terms and conditions
      */
     public final Setting<Boolean> elytraTermsAccepted = new Setting<>(false);

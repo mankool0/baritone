@@ -36,6 +36,7 @@ import com.mojang.blaze3d.vertex.BufferBuilder;
 import it.unimi.dsi.fastutil.floats.FloatArrayList;
 import it.unimi.dsi.fastutil.floats.FloatIterator;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.NonNullList;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
@@ -601,13 +602,28 @@ public final class ElytraBehavior implements Helper {
 
     public void onChunkEvent(ChunkEvent event) {
         if (event.isPostPopulate() && this.npfContext != null) {
-            final LevelChunk chunk = ctx.world().getChunk(event.getX(), event.getZ());
-            npfContext.queueForPacking(chunk);
+            // not getChunk(x, z): for a chunk the game doesn't keep that's its one empty chunk, which says it's at 0, 0,
+            // and packing it puts a chunk of air there
+            final LevelChunk chunk = ctx.world().getChunkSource().getChunk(event.getX(), event.getZ(), false);
+            if (chunk != null && !chunk.isEmpty()) {
+                npfContext.queueForPacking(chunk);
+            }
         }
     }
 
     public void onBlockChange(BlockChangeEvent event) {
-        npfContext.queueBlockUpdate(event);
+        // each changed block, and the ones next to it: a fence's top is in the block over the fence, and the blocks
+        // next to lava and fire are kept off
+        final List<Pair<BlockPos, Boolean>> writes = new ArrayList<>(event.getBlocks().size() * 7);
+        for (final Pair<BlockPos, BlockState> change : event.getBlocks()) {
+            final BlockPos pos = change.first();
+            writes.add(new Pair<>(pos, NetherPathfinderContext.solidAt(ctx.world(), pos, change.second())));
+            for (final Direction direction : Direction.values()) {
+                final BlockPos next = pos.relative(direction);
+                writes.add(new Pair<>(next, NetherPathfinderContext.solidAt(ctx.world(), next, ctx.world().getBlockState(next))));
+            }
+        }
+        npfContext.queueBlockWrites(writes);
     }
 
     public void onReceivePacket(PacketEvent event) {
@@ -638,7 +654,7 @@ public final class ElytraBehavior implements Helper {
     }
 
     public void onTick() {
-        if (npfContext.tryAcquireReadLock()) {
+        if (npfContext.tryAcquireReadLockSoon()) {
             try {
                 this.onTick0();
             } finally {
