@@ -24,6 +24,7 @@ import baritone.api.process.PathingCommand;
 import baritone.api.process.PathingCommandType;
 import baritone.api.utils.BlockOptionalMeta;
 import baritone.api.utils.BlockOptionalMetaLookup;
+import baritone.api.utils.BlockUtils;
 import baritone.api.utils.Rotation;
 import baritone.api.utils.RotationUtils;
 import baritone.api.utils.input.Input;
@@ -59,6 +60,10 @@ public final class GetToBlockProcess extends BaritoneProcessHelper implements IG
         start = ctx.playerFeet();
         blacklist = new ArrayList<>();
         arrivalTickCount = 0;
+        if (keptOutOf(block.getBlock())) {
+            logDirect(BlockUtils.blockToString(block.getBlock()) + " is in blocksToAvoid, so no path can step into one: going to beside one instead. "
+                    + "Take it out of blocksToAvoid to walk in");
+        }
         rescan(new ArrayList<>(), new GetToBlockCalculationContext(false));
     }
 
@@ -249,10 +254,19 @@ public final class GetToBlockProcess extends BaritoneProcessHelper implements IG
     }
 
     private boolean walkIntoInsteadOfAdjacent(Block block) {
-        if (!Baritone.settings().enterPortal.value) {
+        if (!Baritone.settings().enterPortal.value || keptOutOf(block)) {
             return false;
         }
         return block == Blocks.NETHER_PORTAL;
+    }
+
+    /**
+     * @return Whether this is a block to walk into that blocksToAvoid keeps every path out of, so that a goal inside it
+     * could never be reached
+     */
+    private static boolean keptOutOf(Block block) {
+        return Baritone.settings().enterPortal.value && block == Blocks.NETHER_PORTAL
+                && Baritone.settings().blocksToAvoid.value.contains(block);
     }
 
     private boolean rightClickOnArrival(Block block) {
