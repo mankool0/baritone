@@ -68,6 +68,9 @@ public final class NetherHighwayBuilderBehavior extends Behavior implements INet
      */
     public static boolean suppressHitResult = false;
 
+    // The same settings IRenderer.settings holds. Read through that one, the build path initialises
+    // the renderer, whose fields need a running client, so no test can start a build.
+    private final Settings settings = Baritone.settings();
     private final HighwayContext highwayContext;
     private final SetbackTally setbacks = new SetbackTally();
 
