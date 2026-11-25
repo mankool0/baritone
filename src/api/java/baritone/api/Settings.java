@@ -1730,10 +1730,39 @@ public final class Settings {
     public final Setting<Boolean> elytraAllowLandOnNetherFortress = new Setting<>(false);
 
     /**
+     * Fly elytra by moving the player along the path a step each tick, in place of steering the game's glide with the
+     * look and fireworks. Each step goes as far as the path needs, up to {@link #elytraStepMaxHorizontalSpeed} across
+     * and {@link #elytraStepMaxVerticalSpeed} up or down: a one-block climb is a one-block step, and a long climb goes
+     * at the most. The flight takes off from where the player stands and uses no fireworks. Only for servers that let
+     * a glide move like that. A client mod's elytra fly has to be off, or leave the glide alone while Baritone flies it
+     * (this fork's Meteor elytra-fly does): one that moves the glide its own way overrides these steps.
+     */
+    public final Setting<Boolean> elytraFlyBySteps = new Setting<>(false);
+
+    /**
+     * With {@link #elytraFlyBySteps}, the most a step moves the player across, in blocks per tick
+     */
+    public final Setting<Double> elytraStepMaxHorizontalSpeed = new Setting<>(1.0);
+
+    /**
+     * With {@link #elytraFlyBySteps}, the most a step moves the player up or down, in blocks per tick
+     */
+    public final Setting<Double> elytraStepMaxVerticalSpeed = new Setting<>(1.0);
+
+    /**
+     * With {@link #elytraFlyBySteps}, keep the elytra from wearing: a start-gliding packet goes before every movement
+     * packet, and since a start while the server has the player gliding stops the glide, the server's glide goes off
+     * and on with every packet and never lasts the second that takes a point of durability. The server has the player
+     * standing half the time then, so the flight keeps a standing player's hitbox (and draws the player standing) and
+     * plans its way for one: a 2-high gap that a gliding player fits through is too low.
+     */
+    public final Setting<Boolean> elytraSaveDurability = new Setting<>(false);
+
+    /**
      * Land on the goal block itself, instead of on a safe spot near it with 15 blocks of air above it. Applies to a
-     * block goal while a client mod moves the glide by steps ({@link baritone.api.process.IGlideControl}). When the
-     * goal block can't be stood in, the flight lands on the nearest block at its height within 4 blocks that can,
-     * and when there is none it holds still where it is.
+     * block goal while flying by steps ({@link #elytraFlyBySteps}). When the goal block can't be stood in, the flight
+     * lands on the nearest block at its height within 4 blocks that can, and when there is none it holds still where it
+     * is.
      */
     public final Setting<Boolean> elytraLandAtGoal = new Setting<>(false);
 

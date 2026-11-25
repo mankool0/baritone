@@ -23,7 +23,6 @@ import baritone.api.behavior.look.IAimProcessor;
 import baritone.api.behavior.look.ITickableAimProcessor;
 import baritone.api.event.events.*;
 import baritone.api.pathing.goals.GoalBlock;
-import baritone.api.process.IGlideControl;
 import baritone.api.utils.*;
 import baritone.api.utils.input.Input;
 import baritone.pathing.movement.MovementHelper;
@@ -107,7 +106,7 @@ public final class ElytraBehavior implements Helper {
     public boolean landingMode;
 
     /**
-     * The step worked out this tick for an {@link IGlideControl} to move the glide by, {@code null} when there is none.
+     * The step worked out this tick to move the glide by ({@link GlideSteps}), {@code null} when there is none.
      * {@link ElytraProcess} clears it at the end of every tick.
      */
     public Vec3 glideStep;
@@ -526,7 +525,7 @@ public final class ElytraBehavior implements Helper {
             }
 
             final ToDoubleFunction<BetterBlockPos> distance;
-            final IGlideControl control = ElytraBehavior.this.process.activeGlideControl();
+            final GlideSteps control = ElytraBehavior.this.process.glideSteps();
             if (control != null) {
                 // a glide moved by steps puts the box's middle on the points. measured from the feet block, a point
                 // the box is on ties with the one below it, and the nearest stays a point behind
@@ -742,7 +741,7 @@ public final class ElytraBehavior implements Helper {
             logVerbose("vbonk");
         }
 
-        final IGlideControl glideControl = this.process.activeGlideControl();
+        final GlideSteps glideControl = this.process.glideSteps();
         if (glideControl != null) {
             this.tickGlideStep(glideControl);
             return;
@@ -798,7 +797,7 @@ public final class ElytraBehavior implements Helper {
      * a while, round by a detour first. The control moves the player by it whole, so there are no physics or fireworks
      * to plan for.
      */
-    private void tickGlideStep(final IGlideControl control) {
+    private void tickGlideStep(final GlideSteps control) {
         final AABB box = this.glideBox(control);
         final Vec3 feet = ctx.player().position();
         final double across = Math.max(0, control.maxHorizontalStep());
@@ -912,14 +911,14 @@ public final class ElytraBehavior implements Helper {
      * The hitbox a glide moved by steps has to fit: a standing player's when the server has the player standing for
      * part of the glide, else a gliding one's.
      */
-    private AABB glideBox(final IGlideControl control) {
+    private AABB glideBox(final GlideSteps control) {
         return this.glideBoxAt(control, ctx.player().position());
     }
 
     /**
-     * {@link #glideBox(IGlideControl)} with its feet at {@code feet}
+     * {@link #glideBox(GlideSteps)} with its feet at {@code feet}
      */
-    public AABB glideBoxAt(final IGlideControl control, final Vec3 feet) {
+    public AABB glideBoxAt(final GlideSteps control, final Vec3 feet) {
         final Pose pose = control.standsWhileGliding() ? Pose.STANDING : Pose.FALL_FLYING;
         return ctx.player().getDimensions(pose).makeBoundingBox(feet);
     }
@@ -1235,7 +1234,7 @@ public final class ElytraBehavior implements Helper {
         if (path.isEmpty()) {
             return false;
         }
-        final IGlideControl control = this.process.activeGlideControl();
+        final GlideSteps control = this.process.glideSteps();
         final Vec3 end = control != null
                 ? this.glideFeetAt(path, path.size() - 1, this.glideBox(control))
                 : path.getLast().getCenter();

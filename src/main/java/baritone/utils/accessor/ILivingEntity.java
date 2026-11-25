@@ -24,4 +24,21 @@ public interface ILivingEntity {
      * own prediction instead, which a use the server dropped never clears.
      */
     boolean isServerUsingItem();
+
+    /**
+     * The gliding flag as it was last set, by the server's reports or the client's own start, under any glide held by
+     * {@link #setGlideHeld(boolean)}
+     */
+    boolean isFallFlyingFlagSet();
+
+    /**
+     * Whether elytra flight holds the player's glide, standing ({@link baritone.api.Settings#elytraSaveDurability})
+     */
+    boolean isGlideHeld();
+
+    /**
+     * Holds the glide: {@code isFallFlying()} says gliding whatever the server reports, and the pose is standing, so
+     * the hitbox is a standing player's. The caller refreshes the dimensions.
+     */
+    void setGlideHeld(boolean held);
 }

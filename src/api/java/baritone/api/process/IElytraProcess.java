@@ -53,16 +53,10 @@ public interface IElytraProcess extends IBaritoneProcess {
     boolean isLoaded();
 
     /**
-     * Hands the glide to a client mod that moves it by a step each tick. While the control is active, elytra flight
-     * flies by those steps, within the control's limits, and uses no fireworks.
-     *
-     * @param control The mod's control, or {@code null} to steer the glide's physics again
-     */
-    void setGlideControl(IGlideControl control);
-
-    /**
-     * @return The step for the glide to take this tick: zero while elytra flight holds the player in place, and
-     * {@code null} when it isn't flying by an active {@link IGlideControl}
+     * @return The step Baritone moves the glide by this tick ({@link baritone.api.Settings#elytraFlyBySteps}): zero
+     * while elytra flight holds the player in place, and {@code null} when it isn't flying by steps. While it isn't
+     * {@code null}, the glide is Baritone's: a client mod's own elytra fly should leave the player's movement, its
+     * packets and its hitbox alone.
      */
     Vec3 getGlideStep();
 

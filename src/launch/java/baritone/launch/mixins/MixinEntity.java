@@ -21,8 +21,12 @@ import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import baritone.api.Settings;
 import baritone.api.event.events.RotationMoveEvent;
+import baritone.utils.accessor.ILivingEntity;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.network.syncher.EntityDataAccessor;
+import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.Pose;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -68,6 +72,22 @@ public class MixinEntity {
             this.xRot = this.motionUpdateRotationEvent.getOriginal().getPitch();
             this.motionUpdateRotationEvent = null;
         }
+    }
+
+    @Redirect(
+            method = "getPose",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lnet/minecraft/network/syncher/SynchedEntityData;get(Lnet/minecraft/network/syncher/EntityDataAccessor;)Ljava/lang/Object;"
+            )
+    )
+    private Object standWhileGliding(final SynchedEntityData data, final EntityDataAccessor<?> pose) {
+        // elytraSaveDurability: the server has the player standing every other packet, so the client keeps a standing
+        // player's hitbox through the glide
+        if ((Object) this instanceof ILivingEntity living && living.isGlideHeld()) {
+            return Pose.STANDING;
+        }
+        return data.get(pose);
     }
 
     @Redirect(

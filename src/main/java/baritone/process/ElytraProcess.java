@@ -30,7 +30,6 @@ import baritone.api.pathing.movement.IMovement;
 import baritone.api.pathing.path.IPathExecutor;
 import baritone.api.process.IBaritoneProcess;
 import baritone.api.process.IElytraProcess;
-import baritone.api.process.IGlideControl;
 import baritone.api.process.PathingCommand;
 import baritone.api.process.PathingCommandType;
 import baritone.api.utils.BetterBlockPos;
@@ -45,6 +44,7 @@ import baritone.utils.PathingCommandContext;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.NonNullList;
@@ -86,7 +86,8 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
     private boolean allowAboveBuildLimit;
     private boolean allowAboveRoof;
     private final Semaphore npfSema = new Semaphore(1);
-    private IGlideControl glideControl;
+    private final GlideSteps glideSteps = new GlideSteps();
+    private final GlideDurabilitySaver durabilitySaver = new GlideDurabilitySaver(ctx);
     // the take-off's jump is held every other tick: the elytra opens on a fresh press in the air
     private boolean takeOffJumpHeld;
     // the block a flight to a block goal is to stand in at the end, for elytraLandAtGoal; null for a goal without one
@@ -575,7 +576,7 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
         if (!isChunkLoaded(goal)) {
             return null; // no telling yet
         }
-        final IGlideControl control = activeGlideControl();
+        final GlideSteps control = glideSteps();
         BetterBlockPos best = null;
         int bestDistSq = Integer.MAX_VALUE;
         for (int dx = -GOAL_LANDING_RADIUS; dx <= GOAL_LANDING_RADIUS; dx++) {
@@ -607,7 +608,7 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
      * Whether a landing can stand in {@code pos}: a full top to stand on under it, and room for the landing's hitbox
      * with no fluid or fire in it
      */
-    private boolean canStandIn(BlockPos pos, IGlideControl control) {
+    private boolean canStandIn(BlockPos pos, GlideSteps control) {
         final Level world = ctx.world();
         final BlockPos floor = pos.below();
         final BlockState floorState = world.getBlockState(floor);
@@ -657,11 +658,6 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
     }
 
     @Override
-    public void setGlideControl(IGlideControl control) {
-        this.glideControl = control;
-    }
-
-    @Override
     public Vec3 getGlideStep() {
         if (this.behavior == null || !glidesBySteps()) {
             return null;
@@ -671,15 +667,23 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
     }
 
     /**
-     * @return The control that moves the glide by steps right now, or {@code null} when the glide's physics move it
+     * Called by the player's own move before it moves ({@code MixinClientPlayerEntity}): holds or lets go of the glide
+     * for {@link baritone.api.Settings#elytraSaveDurability}
      */
-    public IGlideControl activeGlideControl() {
-        final IGlideControl control = this.glideControl;
-        return control != null && control.isActive() ? control : null;
+    public void beforePlayerMove(LocalPlayer player) {
+        this.durabilitySaver.beforeMove(player, Baritone.settings().elytraSaveDurability.value && this.getGlideStep() != null);
+    }
+
+    /**
+     * @return How the glide is moved by steps ({@link baritone.api.Settings#elytraFlyBySteps}), or {@code null} when
+     * the glide's physics move it
+     */
+    public GlideSteps glideSteps() {
+        return Baritone.settings().elytraFlyBySteps.value ? this.glideSteps : null;
     }
 
     public boolean glidesBySteps() {
-        return activeGlideControl() != null;
+        return glideSteps() != null;
     }
 
     @Override
@@ -727,7 +731,25 @@ public class ElytraProcess extends BaritoneProcessHelper implements IBaritonePro
 
     @Override
     public void onReceivePacket(PacketEvent event) {
+        if (event.getState() == EventState.PRE) {
+            this.durabilitySaver.onReceivePacket(event.getPacket());
+        }
         if (this.behavior != null) this.behavior.onReceivePacket(event);
+    }
+
+    @Override
+    public void onSendPacket(PacketEvent event) {
+        if (event.getState() == EventState.PRE) {
+            // before the movement packet goes: a start goes first
+            this.durabilitySaver.onSendPacket(event.getPacket());
+        }
+    }
+
+    @Override
+    public void onTick(TickEvent event) {
+        if (event.getType() == TickEvent.Type.IN) {
+            this.durabilitySaver.onTick();
+        }
     }
 
     @Override

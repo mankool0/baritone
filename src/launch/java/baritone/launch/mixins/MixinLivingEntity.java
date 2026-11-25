@@ -60,6 +60,10 @@ public abstract class MixinLivingEntity extends Entity implements ILivingEntity 
     @Unique
     private RotationMoveEvent elytraRotationEvent;
 
+    // no initialiser: ProGuard'd jars drop a mixin's field initialisers
+    @Unique
+    private boolean baritone$glideHeld;
+
     private MixinLivingEntity(EntityType<?> entityTypeIn, Level worldIn) {
         super(entityTypeIn, worldIn);
     }
@@ -121,9 +125,36 @@ public abstract class MixinLivingEntity extends Entity implements ILivingEntity 
         }
     }
 
+    @Redirect(
+            method = "isFallFlying",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lnet/minecraft/world/entity/LivingEntity;getSharedFlag(I)Z"
+            )
+    )
+    private boolean holdGlide(final LivingEntity self, final int flag) {
+        // elytraSaveDurability: the server reports the glide off every other packet, and the client glides on through
+        return this.baritone$glideHeld || this.getSharedFlag(flag);
+    }
+
     @Override
     public boolean isServerUsingItem() {
         return (this.entityData.get(DATA_LIVING_ENTITY_FLAGS) & 1) != 0;
+    }
+
+    @Override
+    public boolean isFallFlyingFlagSet() {
+        return this.getSharedFlag(7);
+    }
+
+    @Override
+    public boolean isGlideHeld() {
+        return this.baritone$glideHeld;
+    }
+
+    @Override
+    public void setGlideHeld(final boolean held) {
+        this.baritone$glideHeld = held;
     }
 
     @Unique

@@ -24,15 +24,20 @@ import baritone.api.event.events.SprintStateEvent;
 import baritone.api.event.events.type.EventState;
 import baritone.api.utils.accessor.IClientPlayerEntity;
 import baritone.behavior.LookBehavior;
+import baritone.process.ElytraProcess;
+import baritone.utils.accessor.ILocalPlayer;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.entity.MoverType;
 import net.minecraft.world.entity.player.Abilities;
 import net.minecraft.world.entity.player.Input;
+import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.gen.Accessor;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Group;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.ModifyArg;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
@@ -45,7 +50,7 @@ import java.lang.invoke.MethodType;
  * @since 8/1/2018
  */
 @Mixin(LocalPlayer.class)
-public abstract class MixinClientPlayerEntity implements IClientPlayerEntity {
+public abstract class MixinClientPlayerEntity implements IClientPlayerEntity, ILocalPlayer {
     @Unique
     private static final MethodHandle MAY_FLY = baritone$resolveMayFly();
 
@@ -159,6 +164,35 @@ public abstract class MixinClientPlayerEntity implements IClientPlayerEntity {
         }
         return instance.tryToStartFallFlying();
     }
+
+    @ModifyArg(
+            method = "move",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lnet/minecraft/client/player/AbstractClientPlayer;move(Lnet/minecraft/world/entity/MoverType;Lnet/minecraft/world/phys/Vec3;)V"
+            ),
+            index = 1
+    )
+    private Vec3 moveByGlideStep(final MoverType type, final Vec3 movement) {
+        final LocalPlayer player = (LocalPlayer) (Object) this;
+        final IBaritone baritone = BaritoneAPI.getProvider().getBaritoneForPlayer(player);
+        if (baritone == null || !(baritone.getElytraProcess() instanceof ElytraProcess elytra)) {
+            return movement;
+        }
+        // the glide held or let go before the move, so the move collides with the box it has
+        elytra.beforePlayerMove(player);
+        if (type != MoverType.SELF || !player.isFallFlying()) {
+            return movement;
+        }
+        // the glide's own move each tick, in the air or in lava: elytraFlyBySteps moves the player by elytra flight's
+        // step instead. a client mod's own hook on Entity.move comes after this one
+        final Vec3 step = elytra.getGlideStep();
+        return step != null ? step : movement;
+    }
+
+    @Accessor("positionReminder")
+    @Override
+    public abstract void setPositionReminder(int ticks);
 
     @Accessor("xLast")
     @Override
