@@ -201,6 +201,61 @@ public final class NetherPathfinder implements AutoCloseable {
      * @param fakeChunkCost           the cost of a step through a chunk that was not given by the game, against 1 for one that was
      */
     public PathSegment pathFind(int x1, int y1, int z1, int x2, int y2, int z2, boolean atLeastX4, boolean refine, int failTimeoutInMillis, boolean defaultAirElseGenerate, double fakeChunkCost) {
+        return pathFind(x1, y1, z1, x2, y2, z2, atLeastX4, refine, failTimeoutInMillis, defaultAirElseGenerate, fakeChunkCost, null);
+    }
+
+    /** Why a search found nothing. */
+    public enum Failure {
+        /** It searched all the air it could reach from the start and none of it led anywhere: that air is closed off. */
+        SEALED_START,
+        /** Nothing got closer to the goal, and the air at the goal is closed off, so nothing can. */
+        SEALED_GOAL,
+        /**
+         * It searched all the air it could reach from the start, and some of that air ends at chunks the game hasn't
+         * sent, where the seed's terrain is solid: a tunnel dug since the world was made goes on in the game, not in the
+         * seed. More chunks from the game can open it.
+         */
+        ENDS_AT_GUESS,
+        /** Nothing got closer to the goal before the search gave up on the unloaded chunks it had got into. */
+        NO_CLOSER,
+        /** Nothing got closer to the goal in the time it had. */
+        TIMEOUT,
+        CANCELLED
+    }
+
+    /** What a search that found nothing knows about why; {@link #pathFind} fills it in. */
+    public static final class Outcome {
+        public Failure failure;
+        /** The cubes of air it took from its open set. */
+        public int nodes;
+
+        /** The failure as a chat line puts it, {@code null} when the search found a path. */
+        public String describe() {
+            if (this.failure == null) {
+                return null;
+            }
+            switch (this.failure) {
+                case SEALED_START:
+                    return "sealed start: the " + (this.nodes == 1 ? "cube of air it is in leads" : this.nodes + " cubes of air it is in lead") + " nowhere";
+                case SEALED_GOAL:
+                    return "sealed goal: the air at the goal is closed off";
+                case ENDS_AT_GUESS:
+                    return "the air it is in ends at the edge of the chunks the game has sent, and the seed's terrain past them is solid";
+                case NO_CLOSER:
+                    return "nothing on from here gets closer to the goal";
+                case TIMEOUT:
+                    return "timed out after " + this.nodes + " cubes of air";
+                default:
+                    return "cancelled";
+            }
+        }
+    }
+
+    /**
+     * {@link #pathFind(int, int, int, int, int, int, boolean, boolean, int, boolean, double)}, saying in
+     * {@code outcome} (when not null) why it found nothing
+     */
+    public PathSegment pathFind(int x1, int y1, int z1, int x2, int y2, int z2, boolean atLeastX4, boolean refine, int failTimeoutInMillis, boolean defaultAirElseGenerate, double fakeChunkCost, Outcome outcome) {
         if (!inBounds(y1) || !inBounds(y2)) {
             throw new IllegalArgumentException("Invalid y1 or y2");
         }
@@ -213,7 +268,7 @@ public final class NetherPathfinder implements AutoCloseable {
             final Size size = atLeastX4 ? Size.X4 : Size.X2;
             final NodePos start = PathFinder.findAir(this, size, x1, y1, z1, defaultAirElseGenerate);
             final NodePos goal = PathFinder.findAir(this, size, x2, y2, z2, defaultAirElseGenerate);
-            final PathFinder.Path path = PathFinder.findPathSegment(this, start, goal, atLeastX4, failTimeoutInMillis, defaultAirElseGenerate, fakeChunkCost);
+            final PathFinder.Path path = PathFinder.findPathSegment(this, start, goal, atLeastX4, failTimeoutInMillis, defaultAirElseGenerate, fakeChunkCost, outcome);
             if (path == null) {
                 return null;
             }
