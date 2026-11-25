@@ -579,8 +579,9 @@ public class EnderChestFarm extends ContextComponent {
         BlockPos startPos = layout().sliceAlongLine(layout().originVector(), new Vec3(feetClosest.getX(), feetClosest.getY(), feetClosest.getZ()), -layout().highwayCheckBackDistance(), LocationType.HighwayBuild);
         int distanceToCheck = layout().stepsAlongHighway(startPos, layout().endPos()) + 1;
         int scanT0 = layout().pattern().isCustom() ? layout().sliceIndexOf(startPos, layout().originVector()) : 0;
+        int firstSlice = ctx.scanner().firstScannedSlice(startPos, layout().originVector(), LocationType.HighwayBuild);
         int need = 0;
-        for (int i = distanceToCheck - 1; i >= 1; i--) {
+        for (int i = distanceToCheck - 1; i >= firstSlice; i--) {
             BlockPos curPos = layout().pattern().isCustom()
                     ? startPos.offset(layout().sliceDelta(scanT0, i))
                     : startPos.offset(i * layout().highwayDirection().getX(), 0, i * layout().highwayDirection().getZ());

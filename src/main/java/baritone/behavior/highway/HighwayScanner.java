@@ -465,9 +465,15 @@ public class HighwayScanner extends ContextComponent {
         return steps <= 0 || isStretchLoaded(from, layout().originVector(), layout().schematic().widthX(), layout().schematic().lengthZ(), 0, steps + 1);
     }
 
-    private boolean isStretchLoaded(BlockPos startPos, Vec3 lineOrigin, int widthX, int lengthZ, int distanceToCheck) {
-        // the correctness scans start one slice past their start, and so does what they need loaded
-        return isStretchLoaded(startPos, lineOrigin, widthX, lengthZ, 1, distanceToCheck);
+    /**
+     * The first slice {@link #isHighwayCorrect} and {@link #findFirstLiquidGround} look at from
+     * {@code start}. They begin one past it, which only shortens a scan that starts a check-back
+     * distance behind us. Near a leg's start that check-back clamps onto the leg's first slice, and
+     * beginning past it leaves that slice out of every scan: once a fight or an eat cancels the
+     * builder, the end check sees nothing left in a short leg and ends it with its first slice unbuilt.
+     */
+    int firstScannedSlice(BlockPos start, Vec3 lineOrigin, LocationType locType) {
+        return layout().isFirstSlice(start, lineOrigin, locType) ? 0 : 1;
     }
 
     private boolean isStretchLoaded(BlockPos startPos, Vec3 lineOrigin, int widthX, int lengthZ, int firstSlice, int distanceToCheck) {
@@ -584,7 +590,8 @@ public class HighwayScanner extends ContextComponent {
         lastMismatches.clear();
         boolean foundBlocks = false;
         int scanT0 = layout().pattern().isCustom() ? layout().sliceIndexOf(startPos, layout().originVector()) : 0;
-        for (int i = 1; i < distanceToCheck; i++) {
+        int firstSlice = firstScannedSlice(startPos, layout().originVector(), LocationType.HighwayBuild);
+        for (int i = firstSlice; i < distanceToCheck; i++) {
             BlockPos curPos = layout().pattern().isCustom()
                     ? startPos.offset(layout().sliceDelta(scanT0, i))
                     : startPos.offset(i * layout().highwayDirection().getX(), 0, i * layout().highwayDirection().getZ());
@@ -607,7 +614,7 @@ public class HighwayScanner extends ContextComponent {
                             continue;
                         }
                         BlockState desiredState = sliceSchem.desiredState(x, y, z, current, this.approxPlaceable);
-                        if (i == 1) {
+                        if (i == firstSlice) {
                             if (desiredState.getBlock() instanceof AirBlock) {
                                 renderBlocksBuilding.put(new BlockPos(blockX, blockY, blockZ), Color.CYAN);
                             } else if (desiredState.getBlock().equals(Blocks.NETHERRACK)) {
@@ -699,10 +706,11 @@ public class HighwayScanner extends ContextComponent {
             distanceToCheck = Math.min(distanceToCheck, layout().stepsAlongHighway(startPos, layout().endPos()) + 1);
         }
         int scanT0 = layout().pattern().isCustom() ? layout().sliceIndexOf(startPos, layout().liqOriginVector()) : 0;
+        int firstSlice = firstScannedSlice(startPos, layout().liqOriginVector(), LocationType.ShulkerEchestInteraction);
         if (renderCheckedBlocks) {
             BlockPos slice = layout().pattern().isCustom()
-                    ? startPos.offset(layout().sliceDelta(scanT0, 1))
-                    : startPos.offset(layout().highwayDirection().getX(), 0, layout().highwayDirection().getZ());
+                    ? startPos.offset(layout().sliceDelta(scanT0, firstSlice))
+                    : startPos.offset(firstSlice * layout().highwayDirection().getX(), 0, firstSlice * layout().highwayDirection().getZ());
             AABB area = new AABB(slice.getX(), slice.getY(), slice.getZ(),
                     slice.getX() + layout().liqCheckSchem().widthX(), slice.getY() + layout().liqCheckSchem().heightY(), slice.getZ() + layout().liqCheckSchem().lengthZ());
             renderLockLiquid.lock();
@@ -710,7 +718,7 @@ public class HighwayScanner extends ContextComponent {
             renderLockLiquid.unlock();
         }
         //Liquid Checking all around
-        for (int i = 1; i < distanceToCheck; i++) {
+        for (int i = firstSlice; i < distanceToCheck; i++) {
             BlockPos curPos = layout().pattern().isCustom()
                     ? startPos.offset(layout().sliceDelta(scanT0, i))
                     : startPos.offset(i * layout().highwayDirection().getX(), 0, i * layout().highwayDirection().getZ());

@@ -295,8 +295,11 @@ public class EndTracker extends ContextComponent {
      * @return a cell of the end check's stretch in a chunk we haven't got, or null if it's all loaded
      */
     private BlockPos endCheckUnloadedCell(EndCheck check) {
-        BlockPos unloaded = ctx.scanner().firstUnloadedCell(check.start(), layout().originVector(), layout().schematic().widthX(), layout().schematic().lengthZ(), 1, check.slices());
+        // from the slice the scan starts on: it reads a cell in a chunk we haven't got as correct
+        int first = ctx.scanner().firstScannedSlice(check.start(), layout().originVector(), LocationType.HighwayBuild);
+        int firstLiq = ctx.scanner().firstScannedSlice(check.startLiq(), layout().liqOriginVector(), LocationType.ShulkerEchestInteraction);
+        BlockPos unloaded = ctx.scanner().firstUnloadedCell(check.start(), layout().originVector(), layout().schematic().widthX(), layout().schematic().lengthZ(), first, check.slices());
         return unloaded != null ? unloaded
-                : ctx.scanner().firstUnloadedCell(check.startLiq(), layout().liqOriginVector(), layout().liqCheckSchem().widthX(), layout().liqCheckSchem().lengthZ(), 1, check.slices());
+                : ctx.scanner().firstUnloadedCell(check.startLiq(), layout().liqOriginVector(), layout().liqCheckSchem().widthX(), layout().liqCheckSchem().lengthZ(), firstLiq, check.slices());
     }
 }

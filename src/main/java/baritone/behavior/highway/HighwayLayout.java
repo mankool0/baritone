@@ -499,6 +499,19 @@ public class HighwayLayout {
                 new Vec3(on.getX() + step.getX(), on.getY(), on.getZ() + step.getZ()), locType);
     }
 
+    /**
+     * Whether {@code anchor}, on the parallel line at {@code lineOrigin}, is the first slice of a
+     * build with a start: a slice back from it is clamped straight back onto it. That is per line,
+     * since on a diagonal the start clamp can land the liquid line a slice off the build line.
+     */
+    public boolean isFirstSlice(BlockPos anchor, Vec3 lineOrigin, LocationType locType) {
+        if (firstStartingPos == null) {
+            return false;
+        }
+        BetterBlockPos back = sliceAlongLine(lineOrigin, new Vec3(anchor.getX(), anchor.getY(), anchor.getZ()), -1, locType);
+        return back.getX() == anchor.getX() && back.getZ() == anchor.getZ();
+    }
+
     /** Collects a layout piece by piece while nhwbuild works it out, then builds it unclamped. */
     static final class Builder {
         private final Baritone baritone;
