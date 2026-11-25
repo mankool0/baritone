@@ -114,7 +114,7 @@ public final class ChunkPacker {
             }
         }
         // @formatter:on
-        return new CachedChunk(chunk.getPos().x, chunk.getPos().z, height, bitSet, blocks, specialBlocks, System.currentTimeMillis());
+        return new CachedChunk(chunk.getPos().x, chunk.getPos().z, height, minY, bitSet, blocks, specialBlocks, System.currentTimeMillis());
     }
 
     private static PathingBlockType getPathingBlockType(BlockState state, LevelChunk chunk, int x, int y, int z) {

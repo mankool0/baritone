@@ -153,11 +153,19 @@ public final class CachedChunk {
 
     private final int[] heightMap;
 
+    /**
+     * The tracked blocks in this chunk, x and z within the chunk and y in world coordinates
+     */
     private final Map<String, List<BlockPos>> specialBlockLocations;
+
+    /**
+     * The lowest y of the dimension, which every y in the packed data and {@link #getBlock} is counted up from
+     */
+    private final int minY;
 
     public final long cacheTimestamp;
 
-    CachedChunk(int x, int z, int height, BitSet data, BlockState[] overview, Map<String, List<BlockPos>> specialBlockLocations, long cacheTimestamp) {
+    CachedChunk(int x, int z, int height, int minY, BitSet data, BlockState[] overview, Map<String, List<BlockPos>> specialBlockLocations, long cacheTimestamp) {
         this.size = size(height);
         this.sizeInBytes = sizeInBytes(size);
         validateSize(data);
@@ -165,6 +173,7 @@ public final class CachedChunk {
         this.x = x;
         this.z = z;
         this.height = height;
+        this.minY = minY;
         this.data = data;
         this.overview = overview;
         this.heightMap = new int[256];
@@ -190,7 +199,9 @@ public final class CachedChunk {
     private final void setSpecial() {
         for (Map.Entry<String, List<BlockPos>> entry : specialBlockLocations.entrySet()) {
             for (BlockPos pos : entry.getValue()) {
-                special.put(getPositionIndex(pos.getX(), pos.getY(), pos.getZ()), entry.getKey());
+                // the locations are in world y, and getBlock counts y up from the bottom of the world. keyed by world y,
+                // the overworld's would be 64 blocks off: a portal reads as stone where it is, and as a portal 64 below it
+                special.put(getPositionIndex(pos.getX(), pos.getY() - minY, pos.getZ()), entry.getKey());
             }
         }
     }
